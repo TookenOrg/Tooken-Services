@@ -48,8 +48,10 @@ func main() {
 func startServer() {
 
 	router := gin.Default()
+
+	apiV1 := router.Group("/api/v1")
 	handler := handlers.NewHandler()
-	server.RegisterHandlers(router, handler)
+	server.RegisterHandlers(apiV1, handler)
 
 	// --- Swagger UI ---
 	router.StaticFile("/openapi.yaml", "./api/openapi.yaml")

@@ -23,6 +23,10 @@ func NewHandler() server.ServerInterface {
 	}
 }
 
+func (h *Handler) GetHealth(gCtx *gin.Context) {
+	gCtx.JSON(200, gin.H{"status": "ok", "version": "v1.0.0"})
+}
+
 func (h *Handler) PaymentAdd(gCtx *gin.Context) {
 	gCtx.JSON(http.StatusAccepted, server.APIResponse{
 		Message: "The deployment of all implementations has been started asynchronously.",

@@ -7,15 +7,23 @@ info:
 servers:
   - url: http://localhost:8080
     description: Development server
+  - url: https://api.tooken.fr/api/v1 # Production
+    description: Production
 
 tags:
-  - name: Blockchain
   - name: Auth
   - name: Blockchain
   - name: Trading
   - name: Payments
 
 paths:
+  /health:
+    get:
+      summary: Health check
+      responses:
+        "200":
+          description: OK
+
   /trex/init/implementations:
     post:
       tags:
