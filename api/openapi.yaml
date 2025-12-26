@@ -1,0 +1,599 @@
+openapi: 3.0.3
+info:
+  title: Blockchain Microservice API
+  version: 1.0.0
+  description: Minimal API with health check
+
+servers:
+  - url: http://localhost:8080
+    description: Development server
+
+tags:
+  - name: Blockchain
+  - name: Auth
+  - name: Blockchain
+  - name: Trading
+  - name: Payments
+
+paths:
+  /trex/init/implementations:
+    post:
+      tags:
+        - Blockchain
+        - initialize
+      summary: Deploy all contracts implementations
+      operationId: deployAllImplementationsAsync
+      responses:
+        "202":
+          description: Request sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+
+  /trex/init/contract/factory/identity:
+    post:
+      tags:
+        - Blockchain
+        - initialize
+      summary: Deploy identity factory
+      operationId: deployIdentityFactory
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InitializeIdentityFactoryRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InitializeIdentityFactoryResponse"
+        "500":
+          description: "Internal Server Error"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+
+  /trex/init/authority/configure:
+    post:
+      tags:
+        - Blockchain
+        - initialize
+      summary: Configure the Authority contract with the implementations addresses
+      operationId: configureAuthority
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConfigureAuthorityResponse"
+        "500":
+          description: "Internal Server Error"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+
+  /trex/init/contract/factory/trexFactory:
+    post:
+      tags:
+        - Blockchain
+        - initialize
+      summary: Deploy TREX factory
+      operationId: DeployAndInitTrexFactoryAsync
+      responses:
+        "202":
+          description: Request sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+
+  /trex/init/suite/deploy:
+    post:
+      tags:
+        - Blockchain
+        - initialize
+        - trex-suite
+      summary: Deploy the TREX Suite contracts
+      operationId: deployTrexSuiteAsync
+      responses:
+        "202":
+          description: Request sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+
+  /trex/suite:
+    get:
+      tags:
+        - Blockchain
+          - trex-suite
+      summary: Get deployed TREX Suite information
+      operationId: getTrexSuiteInfos
+      parameters:
+        - name: salt
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Salt used for the TREX Suite deployment (optional, uses default if not provided)
+      responses:
+        "200":
+          description: TREX Suite information retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrexSuiteInfos"
+        "404":
+          description: TREX Suite not found for the given salt
+        "500":
+          description: Internal server error
+
+  /contract/identity:
+    post:
+      tags:
+        - Blockchain
+        - contract
+        - identity
+      summary: Create new Identity contract and add it to the registry
+      operationId: createIdentity
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateIdentityRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateIdentityResponse"
+
+  /contract/identity/claims/add:
+    post:
+      tags:
+        - Blockchain
+        - contract
+        - identity
+      summary: Add a claim to an identity
+      operationId: addClaimToIdentity
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddClaimRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AddClaimResponse"
+
+  /contract/token:
+    post:
+      tags:
+        - Blockchain
+        - contract
+        - token
+      summary: Create a new Token
+      operationId: createTokenContract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTokenRequest"
+      responses:
+        "201":
+          description: Token deployed
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CreateTokenResponse"
+        "500":
+          description: Internal server error
+
+  /contract/token/{tokenAddress}/infos:
+    get:
+      tags:
+        - Blockchain
+        - contract
+        - token
+      summary: Get informations from contract Token
+      operationId: getTokenInfos
+      parameters:
+        - name: tokenAddress
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenInfos"
+
+  /contract/token/mint:
+    post:
+      tags:
+        - Blockchain
+          - contract
+          - token
+      summary: Register the given amount for the userId in the sharetoken
+      operationId: mintToken
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MintTokenRequest"
+      responses:
+        "201":
+          description: Shares created
+        "500":
+          description: Internal server error
+
+  /contract/token/burn:
+    post:
+      tags:
+        - Blockchain
+        - contract
+        - token
+      summary: Withdraw the given amount for the userId in the sharetoken
+      operationId: burnToken
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BurnTokenRequest"
+      responses:
+        "200":
+          description: Shares withdrawed
+        "500":
+          description: Internal server error
+
+  /payments/add:
+    post:
+      tags:
+        - Payments
+      summary: Add a payment
+      operationId: paymentAdd
+      responses:
+        "200":
+          description: Payment added
+        "500":
+          description: Internal server error
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    APIResponse:
+      type: object
+      required:
+        - message
+      properties:
+        message:
+          type: string
+        data:
+          nullable: true
+          x-oapi-codegen-extra-tags:
+            json: ",omitempty"
+
+    InitializeIdentityFactoryRequest:
+      type: object
+      required:
+        - implementationAuthorityAddr
+      properties:
+        implementationAuthorityAddr:
+          type: string
+          description: The address of implementationAuthority contract
+          example: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd"
+
+    InitializeIdentityFactoryResponse:
+      allOf:
+        - $ref: "#/components/schemas/APIResponse"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/ContractDetails"
+
+    ConfigureAuthorityResponse:
+      allOf:
+        - $ref: "#/components/schemas/APIResponse"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/TxHashName"
+
+    CreateIdentityRequest:
+      type: object
+      required:
+        - countryCode
+        - userId
+      properties:
+        countryCode:
+          type: integer
+          description: The country code of the investor
+          example: 442
+        userId:
+          type: integer
+          description: The user ID of the investor
+          example: 123456
+
+    CreateIdentityResponse:
+      allOf:
+        - $ref: "#/components/schemas/APIResponse"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/IdentityInfos"
+
+    IdentityInfos:
+      type: object
+      required:
+        - identityAddress
+        - walletAddress
+        - countryCode
+        - transactionHash
+        - userId
+      properties:
+        identityAddress:
+          type: string
+          description: The address of the created identity
+          example: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd"
+        walletAddress:
+          type: string
+          description: The wallet address of the investor
+          example: "0x1234567890abcdef1234567890abcdef12345678"
+        countryCode:
+          type: integer
+          description: The country code of the investor
+          example: 442
+        transactionHash:
+          type: string
+          description: The hash of the transaction
+          example: "0x15e854a3e0e21492e9381e90f4a34c6596966d3ffedcc62c17e1e70721019119"
+        userId:
+          type: integer
+          description: The user ID of the investor
+          example: 123456
+
+    MintTokenRequest:
+      type: object
+      required:
+        - tokenContractAddress
+        - to
+        - amount
+      properties:
+        tokenContractAddress:
+          type: string
+          description: The address of the token contract
+          example: "0x1234567890abcdef1234567890abcdef12345678"
+        amount:
+          type: number
+          format: double
+          description: The amount of tokens to mint, in human format (not wei)
+          example: 1000.87
+        to:
+          type: string
+          description: The address to mint the tokens to
+          example: "0x1234567890abcdef1234567890abcdef12345678"
+
+    BurnTokenRequest:
+      type: object
+      required:
+        - tokenContractAddress
+        - to
+        - amount
+      properties:
+        tokenContractAddress:
+          type: string
+          description: The address of the token contract
+          example: "0x1234567890abcdef1234567890abcdef12345678"
+        amount:
+          type: number
+          format: double
+          description: The amount of tokens to burn, in human format (not wei)
+          example: 1000.87
+        to:
+          type: string
+          description: The address to burn the tokens to
+          example: "0x1234567890abcdef1234567890abcdef12345678"
+
+    AddClaimRequest:
+      type: object
+      required:
+        - userId
+        - claimTopic
+      properties:
+        userId:
+          type: integer
+          example: 100000
+        claimTopic:
+          type: integer
+          description: The topic of the claim (e.g., 7 for KYC)
+          example: 7
+
+    AddClaimResponse:
+      allOf:
+        - $ref: "#/components/schemas/APIResponse"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/TxHashName"
+
+    TxHashName:
+      type: object
+      required:
+        - transactionHash
+        - operationName
+      properties:
+        transactionHash:
+          type: string
+          description: The hash of the transaction that performed the operation
+          example: "0x1234567890abcdef1234567890abcdef123456789"
+        operationName:
+          type: string
+          description: The name of the operation performed
+          example: "CreateShareToken, initToken"
+
+    TrexSuiteInfos:
+      type: object
+      required:
+        - salt
+        - token
+        - identityRegistry
+        - identityRegistryStorage
+        - trustedIssuersRegistry
+        - claimTopicsRegistry
+        - modularCompliance
+        - trexFactory
+      properties:
+        salt:
+          type: string
+          description: The salt used for the TREX Suite deployment
+          example: "myTokenSalt123"
+        token:
+          $ref: "#/components/schemas/TokenDetails"
+        identityRegistry:
+          $ref: "#/components/schemas/ContractDetails"
+        identityRegistryStorage:
+          $ref: "#/components/schemas/ContractDetails"
+        trustedIssuersRegistry:
+          $ref: "#/components/schemas/ContractDetails"
+        claimTopicsRegistry:
+          $ref: "#/components/schemas/ContractDetails"
+        modularCompliance:
+          $ref: "#/components/schemas/ContractDetails"
+        trexFactory:
+          $ref: "#/components/schemas/ContractDetails"
+
+    TokenDetails:
+      type: object
+      required:
+        - address
+        - name
+        - symbol
+        - decimals
+        - totalSupply
+        - explorerUrl
+      properties:
+        address:
+          type: string
+          description: The address of the token contract
+          example: "0x1234567890abcdef1234567890abcdef12345678"
+        name:
+          type: string
+          description: The name of the token
+          example: "My Security Token"
+        symbol:
+          type: string
+          description: The symbol of the token
+          example: "MST"
+        decimals:
+          type: integer
+          description: The number of decimals for the token
+          example: 18
+        totalSupply:
+          type: string
+          description: The total supply of tokens (in wei format)
+          example: "1000000000000000000000000"
+        explorerUrl:
+          type: string
+          description: Direct link to the token on Etherscan
+          example: "https://sepolia.etherscan.io/token/0x1234567890abcdef1234567890abcdef12345678"
+
+    ContractDetails:
+      type: object
+      required:
+        - address
+        - name
+      properties:
+        address:
+          type: string
+          description: The address of the contract
+          example: "0x1234567890abcdef1234567890abcdef12345678"
+        explorerUrl:
+          type: string
+          description: Direct link to the contract on Etherscan
+          example: "https://sepolia.etherscan.io/address/0x1234567890abcdef1234567890abcdef12345678"
+        name:
+          type: string
+          description: The name/type of the contract
+          example: "Identity"
+
+    CreateTokenRequest:
+      type: object
+      required:
+        - tokenName
+        - nbDecimal
+      properties:
+        tokenName:
+          type: string
+          description: Name of the token
+          example: "US0378331005"
+        nbDecimal:
+          type: integer
+          description: Number of decimals
+          example: 18
+
+    CreateTokenResponse:
+      allOf:
+        - $ref: "#/components/schemas/APIResponse"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/TokenInfos"
+
+    TokenInfos:
+      type: object
+      required:
+        - tokenAddr
+        - modularCompliance
+        - symbol
+        - nbDecimal
+        - createdAt
+      properties:
+        modularComplianceAddr:
+          type: string
+          description: Address of the modularCompliance contract
+          example: "0x1234567890abcdef1234567890abcdef12345678"
+        tokenAddr:
+          type: string
+          description: Address of the token contract
+          example: "0x1234567890abcdef1234567890abcdef12345678"
+        symbol:
+          type: string
+          description: Symbol of token
+        nbDecimal:
+          type: integer
+          format: int64
+        createdAt:
+          type: string
+          format: date-time
+        OnbehalfTransactions:
+          type: array
+          items:
+            $ref: "#/components/schemas/TxHashName"
+          description: A list of transactions performed on behalf of the identity

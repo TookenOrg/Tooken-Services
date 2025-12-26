@@ -1,0 +1,18 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "buildFlags": [
+                "-tags='dev'"
+            ],
+            "name": "Launch dev",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "${workspaceFolder}/main.go",
+            "envFile": "${workspaceFolder}/.env",
+            "env": {},
+            "args": []
+        }
+    ]
+}
