@@ -2,12 +2,19 @@ package main
 
 import (
 	"database/sql"
-	"errors"
-	"log"
 	"os"
+
+	"fmt"
+	"log"
+	"net/url"
+
+	_ "github.com/lib/pq"
 
 	"github.com/TookenOrg/tooken-services/internal/api/handlers"
 	"github.com/TookenOrg/tooken-services/internal/api/server"
+	blkGlobals "github.com/TookenOrg/tooken-services/internal/blockchain/globals"
+	"github.com/TookenOrg/tooken-services/internal/blockchain/services"
+	"github.com/TookenOrg/tooken-services/internal/globals"
 	"github.com/TookenOrg/tooken-services/pkg/logger"
 	"github.com/gin-gonic/gin"
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -18,26 +25,27 @@ import (
 
 func main() {
 
-	// var err error
+	var err error
 
 	// init logs
 	logger.Init(true)
 
 	// init db
-	// globals.DB, err = setupDatabase()
-	// if err != nil {
-	// 	log.Fatalf("Error on SetupDatabase: %s", err.Error())
-	// }
+	globals.DB, err = setupDatabase()
+	if err != nil {
+		log.Fatalf("Error on SetupDatabase: %s", err.Error())
+	}
+	defer globals.DB.Close()
 
 	// init redis
 
 	// init rabbitMQ
 
 	// Initialize blockchain
-	// globals.EthClient, err = services.SetupEthClient()
-	// if err != nil {
-	// 	log.Fatalf("Error on Setup blockchain: %s", err.Error())
-	// }
+	blkGlobals.EthClient, err = services.SetupEthClient()
+	if err != nil {
+		log.Fatalf("Error on Setup blockchain: %s", err.Error())
+	}
 
 	// services.SetGlobals()
 
@@ -65,19 +73,29 @@ func startServer() {
 }
 
 func setupDatabase() (dbClient *sql.DB, err error) {
-	databaseUrl := os.Getenv("DATABASE_URL")
-	if databaseUrl == "" {
-		return nil, errors.New("DATABASE_URL is not set")
-	}
 
-	db, err := sql.Open("pgx", databaseUrl)
+	serviceURI := os.Getenv("DATABASE_URL")
+
+	conn, _ := url.Parse(serviceURI)
+
+	db, err := sql.Open("postgres", conn.String())
+
 	if err != nil {
-		return
+		log.Fatal(err)
 	}
-	defer db.Close()
 
-	if err = db.Ping(); err != nil {
-		return
+	rows, err := db.Query("SELECT version()")
+	if err != nil {
+		panic(err)
+	}
+
+	for rows.Next() {
+		var result string
+		err = rows.Scan(&result)
+		if err != nil {
+			panic(err)
+		}
+		fmt.Printf("Version: %s\n", result)
 	}
 
 	logger.LogInfo("✅ Connected to PostgreSQL!")
