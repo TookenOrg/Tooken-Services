@@ -1,14 +1,11 @@
 package globals
 
 import (
-	"database/sql"
-
 	contracts "github.com/TookenOrg/tooken-services/internal/blockchain/contracts/bindings"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 )
 
-var DB *sql.DB
 var EthClient *ethclient.Client
 
 // Implementation contract names
