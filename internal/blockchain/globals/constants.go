@@ -10,18 +10,22 @@ var EthClient *ethclient.Client
 
 // Implementation contract names
 const (
-	ImplClaimTopicRegistryName     = "ClaimTopicsRegistryImplementation"
-	ImplTrustedIssuersRegistryName = "TrustedIssuersRegistryImplementation"
-	ImplIdentityRegistryStorage    = "IdentityRegistryStorageImplementation"
-	ImplIdentityRegistryName       = "IdentityRegistryImplementation"
-	ImplModularComplianceName      = "ModularComplianceImplementation"
-	ImplTokenName                  = "TokenImplementation"
-	ImplIdentityName               = "IdentityImplementation"
-	ImplIdentityAuthorityName      = "IdentityAuthorityImplementation"
-	ImplTrexAuthorityName          = "TREXImplementationAuthority"
-	ImplClaimIssuerName            = "ClaimIssuerImplementation"
-	ImplIdentityFactoryName        = "IdentityFactoryImplementation"
-	ImplTrexSuiteName              = "TREXSuite"
+	ImplClaimTopicRegistryName    = "ClaimTopicsRegistry"
+	ImplTrustedIssuerRegistryName = "TrustedIssuerRegistry"
+	ImplIdentityRegistryStorage   = "IdentityRegistryStorage"
+	ImplIdentityRegistryName      = "IdentityRegistry"
+	ImplModularComplianceName     = "ModularCompliance"
+	ImplTokenName                 = "Token"
+	ImplIdentityName              = "Identity"
+	ImplIdentityAuthorityName     = "IdentityAuthority"
+	ImplTrexAuthorityName         = "TREXImplementationAuthority"
+)
+
+const (
+	IdentityFactoryName = "IdentityFactory"
+	ClaimIssuerName     = "ClaimIssuer"
+	TrexFactoryName     = "TrexFactory"
+	TrexSuiteName       = "TREXSuite"
 )
 
 const (

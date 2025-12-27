@@ -4,15 +4,24 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"time"
 
 	"github.com/TookenOrg/tooken-services/internal/api/server"
 	"github.com/TookenOrg/tooken-services/internal/globals"
 )
 
-func GetAllContractImplementations(ctx context.Context) (contractsDetails []server.ContractDetails, err error) {
+type ContractDTO struct {
+	ID           int64     `json:"id"`
+	TxHash       string    `json:"tx_hash"`
+	Address      string    `json:"address"`
+	ContractName string    `json:"contract_name"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+func GetAllDeployedContracts(ctx context.Context) (contractsDetails []server.ContractDetails, err error) {
 	query := `
         SELECT id, tx_hash, address, contract_name, created_at 
-		FROM blk.contract_implementation;`
+		FROM blk.contract;`
 
 	rows, err := globals.DB.QueryContext(ctx, query)
 	if err != nil {
@@ -51,11 +60,11 @@ func GetAllContractImplementations(ctx context.Context) (contractsDetails []serv
 	return
 }
 
-func GetImplementationContractByName(ctx context.Context, contractName string) (contract server.ContractDetails, err error) {
+func GetDeployedContractByName(ctx context.Context, contractName string) (contract server.ContractDetails, err error) {
 
 	query := `
         SELECT id, tx_hash, address, contract_name, created_at 
-        FROM blk.contract_implementation 
+        FROM blk.contract 
         WHERE contract_name = $1`
 
 	var contractDB ContractDTO

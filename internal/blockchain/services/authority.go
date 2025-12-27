@@ -69,20 +69,8 @@ func createTrexAuthorityInstance(ctx context.Context) (*contracts.TREXImplementa
 }
 
 func retreiveTrexAuthorityAddress(ctx context.Context) (trexAuthorityAddr common.Address, err error) {
-
-	allContractsImplementations, err := database.GetAllContractImplementations(ctx)
-	if err != nil {
-		return common.Address{}, fmt.Errorf("failed to get all contract implementations: %w", err)
-	}
-
-	authorityImplAddressPtr := utils.FindContractByName(allContractsImplementations, globals.ImplTrexAuthorityName)
-	if authorityImplAddressPtr == nil {
-		return common.Address{}, fmt.Errorf("authority implementation address not found")
-	}
-
-	trexAuthorityAddr = *authorityImplAddressPtr
-
-	return
+	contractDetails, err := database.GetImplementationContractByName(ctx, globals.ImplTrexAuthorityName)
+	return common.HexToAddress(contractDetails.Address), err
 }
 
 func defineAuthorityVersion() contracts.ITREXImplementationAuthorityVersion {
@@ -124,7 +112,7 @@ func configureITREXAuthority(ctx context.Context) (contracts.ITREXImplementation
 	}
 	identityRegistryStorageAddr := *identityRegistryStoragePtr
 
-	trustedIssuersRegistryPtr := utils.FindContractByName(allContractsImplementations, globals.ImplTrustedIssuersRegistryName)
+	trustedIssuersRegistryPtr := utils.FindContractByName(allContractsImplementations, globals.ImplTrustedIssuerRegistryName)
 	if trustedIssuersRegistryPtr == nil {
 		return contracts.ITREXImplementationAuthorityTREXContracts{}, fmt.Errorf("trusted issuers registry implementation address not found")
 	}
