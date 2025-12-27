@@ -75,11 +75,8 @@ func startServer() {
 func setupDatabase() (dbClient *sql.DB, err error) {
 
 	serviceURI := os.Getenv("DATABASE_URL")
-
 	conn, _ := url.Parse(serviceURI)
-
 	db, err := sql.Open("postgres", conn.String())
-
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -88,7 +85,6 @@ func setupDatabase() (dbClient *sql.DB, err error) {
 	if err != nil {
 		panic(err)
 	}
-
 	for rows.Next() {
 		var result string
 		err = rows.Scan(&result)
@@ -99,5 +95,15 @@ func setupDatabase() (dbClient *sql.DB, err error) {
 	}
 
 	logger.LogInfo("✅ Connected to PostgreSQL!")
+
+	var (
+		dbName string
+		user   string
+		addr   string
+	)
+	db.QueryRow(`SELECT current_database(), current_user, inet_server_addr()`).Scan(&dbName, &user, &addr)
+
+	logger.LogInfo("🗄️ DB=%s | USER=%s | HOST=%s", dbName, user, addr)
+
 	return db, nil
 }

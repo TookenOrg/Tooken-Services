@@ -46,12 +46,6 @@ paths:
         - initialize
       summary: Deploy identity factory
       operationId: deployIdentityFactory
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/InitializeIdentityFactoryRequest"
       responses:
         "200":
           description: OK
@@ -313,16 +307,6 @@ components:
           nullable: true
           x-oapi-codegen-extra-tags:
             json: ",omitempty"
-
-    InitializeIdentityFactoryRequest:
-      type: object
-      required:
-        - implementationAuthorityAddr
-      properties:
-        implementationAuthorityAddr:
-          type: string
-          description: The address of implementationAuthority contract
-          example: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd"
 
     InitializeIdentityFactoryResponse:
       allOf:

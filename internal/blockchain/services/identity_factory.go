@@ -2,34 +2,34 @@ package services
 
 import (
 	"context"
-	"errors"
 
 	"github.com/TookenOrg/tooken-services/internal/api/server"
 	contracts "github.com/TookenOrg/tooken-services/internal/blockchain/contracts/bindings"
+	"github.com/TookenOrg/tooken-services/internal/blockchain/database"
 	"github.com/TookenOrg/tooken-services/internal/blockchain/globals"
 	"github.com/TookenOrg/tooken-services/internal/blockchain/utils"
 	"github.com/TookenOrg/tooken-services/pkg/logger"
 	"github.com/ethereum/go-ethereum/common"
 )
 
-func (s *Service) DeployIdentityFactory(ctx context.Context, implementationAuthorityAddr string) (details server.ContractDetails, err error) {
+func (s *Service) DeployIdentityFactory(ctx context.Context) (details server.ContractDetails, err error) {
 
-	// check if implementationAuthorityAddr is a valid address
-	if !common.IsHexAddress(implementationAuthorityAddr) {
-		err = errors.New("invalid implementation authority address")
+	// Get Identity Authority Implementation
+	implementationIdentityAuthorityDetails, err := database.GetImplementationContractByName(ctx, globals.ImplIdentityAuthorityName)
+	if err != nil {
 		return
 	}
 
-	implementationAuthorityAddrCommon := common.HexToAddress(implementationAuthorityAddr)
+	implIdentityAuthorityAddr := common.HexToAddress(implementationIdentityAuthorityDetails.Address)
 
-	identityFactory, err := deployIdentityFactory(ctx, implementationAuthorityAddrCommon)
+	identityFactory, err := deployIdentityFactory(ctx, implIdentityAuthorityAddr)
 	if err != nil {
 		return server.ContractDetails{}, err
 	}
 
 	details = server.ContractDetails{
 		Address: identityFactory.Hex(),
-		Name:    globals.ImplIdentityFactoryName,
+		Name:    globals.IdentityFactoryName,
 	}
 
 	// TODO: Store deployed contract details in the database

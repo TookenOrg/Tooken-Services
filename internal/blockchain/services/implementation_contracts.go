@@ -30,7 +30,7 @@ func (s *Service) DeployAllImplementations(ctx context.Context) (deployedContrac
 	}
 	deployedContracts = append(deployedContracts, server.ContractDetails{
 		Address: tirAddr.Hex(),
-		Name:    globals.ImplTrustedIssuersRegistryName,
+		Name:    globals.ImplTrustedIssuerRegistryName,
 	})
 
 	// 3. Deploy IdentityRegistryStorage Implementation

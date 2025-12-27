@@ -28,11 +28,11 @@ func (s *Service) DeployAndInitTrexFactory(ctx context.Context) (err error) {
 	}
 	authorityAddr := *authorityAddrPtr
 
-	identityFactoryAddrPtr := utils.FindContractByName(allContractsImplementations, globals.ImplIdentityFactoryName)
-	if identityFactoryAddrPtr == nil {
-		return errors.New("identity Factory implementation address not found")
+	identityFactoryAddrPtr, err := database.GetContractByName(ctx, globals.IdentityFactoryName)
+	if err != nil {
+		return
 	}
-	identityFactoryAddr := *identityFactoryAddrPtr
+	identityFactoryAddr := common.HexToAddress(identityFactoryAddrPtr.Address)
 
 	// 1 - Deploy TREX Factory
 	factoryAddr, err := deployTrexFactory(ctx, authorityAddr, identityFactoryAddr)
@@ -60,7 +60,7 @@ func deployTrexFactory(ctx context.Context, authorityAddr, identityFactoryAddr c
 	}
 
 	logger.LogInfo("💌 Deploying Trex Factory...")
-	factoryAddress, tx, _, err := contracts.DeployTREXFactory(auth, globals.EthClient, authorityAddr, identityFactoryAddr)
+	factoryAddr, tx, _, err := contracts.DeployTREXFactory(auth, globals.EthClient, authorityAddr, identityFactoryAddr)
 	if err != nil {
 		return
 	}
@@ -68,7 +68,7 @@ func deployTrexFactory(ctx context.Context, authorityAddr, identityFactoryAddr c
 		return
 	}
 
-	logger.LogInfo("📬 Trex Factory deployed at address: %s", factoryAddress.Hex())
+	logger.LogInfo("📬 Trex Factory deployed at address: %s", factoryAddr.Hex())
 	return
 }
 
@@ -168,7 +168,7 @@ func (s *Service) DeployTrexSuite(ctx context.Context) (deployedContracts []serv
 	}
 	deployedContracts = append(deployedContracts, server.ContractDetails{
 		Address: claimIssuerAddr.Hex(),
-		Name:    globals.ImplClaimIssuerName,
+		Name:    globals.ClaimIssuerName,
 	})
 
 	// 3 - Add management key to claim issuer
@@ -190,7 +190,7 @@ func (s *Service) DeployTrexSuite(ctx context.Context) (deployedContracts []serv
 	}
 	deployedContracts = append(deployedContracts, server.ContractDetails{
 		Address: trexSuiteAddr.Hex(),
-		Name:    globals.ImplTrexSuiteName,
+		Name:    globals.TrexSuiteName,
 	})
 
 	return
@@ -229,10 +229,12 @@ func deployTrexSuite(ctx context.Context, tokenDetails contracts.ITREXFactoryTok
 		return
 	}
 
-	trexFactoryAddr, err := database.GetTREXFactoryAddress()
+	trexFactoryDetails, err := database.GetContractByName(ctx, globals.TrexFactoryName)
 	if err != nil {
 		return
 	}
+
+	trexFactoryAddr := common.HexToAddress(trexFactoryDetails.Address)
 
 	trexFactoryInstance, err := contracts.NewTREXFactory(trexFactoryAddr, globals.EthClient)
 	if err != nil {
@@ -258,6 +260,13 @@ func deployTrexSuite(ctx context.Context, tokenDetails contracts.ITREXFactoryTok
 
 	deploySuiteAddr = deploymentDetails.Raw.Address
 	logger.LogInfo("📬 TREX Suite deployment transaction mined: %s", txDeploySuite.Hash().Hex())
+
+	logger.LogInfo("Token: %s", deploymentDetails.Token.Hex())
+	logger.LogInfo("IdentityRegistry: %s", deploymentDetails.Ir.Hex())
+	logger.LogInfo("IdentityRegistryStorage: %s", deploymentDetails.Irs.Hex())
+	logger.LogInfo("TrustedIssuerRegistry: %s", deploymentDetails.Tir.Hex())
+	logger.LogInfo("ModularCompliance: %s", deploymentDetails.Mc.Hex())
+	logger.LogInfo("ClaimsTopicRegistry: %s", deploymentDetails.Ctr.Hex())
 
 	// TODO: save deploymentDetails in DB
 

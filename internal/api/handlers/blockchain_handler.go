@@ -31,14 +31,7 @@ func (h *Handler) DeployIdentityFactory(gCtx *gin.Context) {
 
 	logger.LogInfo("🚀 Starting deployment of Identity Factory")
 
-	var req server.InitializeIdentityFactoryRequest
-	if err := gCtx.ShouldBindJSON(&req); err != nil {
-		gCtx.JSON(http.StatusInternalServerError, server.InitializeIdentityFactoryResponse{
-			Message: "Failed to parse request body: " + err.Error(),
-		})
-	}
-
-	deploymentContractDetails, err := h.blockchainSvc.DeployIdentityFactory(gCtx.Request.Context(), req.ImplementationAuthorityAddr)
+	deploymentContractDetails, err := h.blockchainSvc.DeployIdentityFactory(gCtx.Request.Context())
 	if err != nil {
 		logger.LogError("Failed to deploy Identity Factory: %v", err)
 		gCtx.JSON(http.StatusInternalServerError, server.InitializeIdentityFactoryResponse{
@@ -63,6 +56,7 @@ func (h *Handler) ConfigureAuthority(gCtx *gin.Context) {
 		gCtx.JSON(http.StatusInternalServerError, server.ConfigureAuthorityResponse{
 			Message: "Failed to configure Authority: " + err.Error(),
 		})
+		return
 	}
 
 	logger.LogInfo("🆗 Authority configured successfully")
@@ -120,6 +114,7 @@ func (h *Handler) CreateIdentity(gCtx *gin.Context) {
 		gCtx.JSON(http.StatusInternalServerError, server.APIResponse{
 			Message: "Failed to parse request body: " + err.Error(),
 		})
+		return
 	}
 
 	newIdentity, err := h.blockchainSvc.CreateIdentity(gCtx.Request.Context(), req)
@@ -144,6 +139,7 @@ func (h *Handler) AddClaimToIdentity(gCtx *gin.Context) {
 		gCtx.JSON(http.StatusInternalServerError, server.AddClaimResponse{
 			Message: "Failed to parse request body: " + err.Error(),
 		})
+		return
 	}
 
 	tx, err := h.blockchainSvc.AddClaimToIdentity(gCtx.Request.Context(), req)
@@ -169,6 +165,7 @@ func (h *Handler) CreateTokenContract(gCtx *gin.Context) {
 			Message: "Failed to parse request body: " + err.Error(),
 			Data:    &server.TokenInfos{},
 		})
+		return
 	}
 
 	tokenInfos, err := h.blockchainSvc.CreateToken(gCtx.Request.Context(), req)
@@ -202,6 +199,7 @@ func (h *Handler) MintToken(gCtx *gin.Context) {
 		gCtx.JSON(http.StatusInternalServerError, server.MintTokenResponse{
 			Message: "Failed to parse request body: " + err.Error(),
 		})
+		return
 	}
 
 	txDetails, err := h.blockchainSvc.Mint(gCtx.Request.Context(), req.TokenContractAddress, req.To, req.Amount)
@@ -209,6 +207,7 @@ func (h *Handler) MintToken(gCtx *gin.Context) {
 		gCtx.JSON(http.StatusInternalServerError, server.MintTokenResponse{
 			Message: err.Error(),
 		})
+		return
 	}
 
 	gCtx.JSON(http.StatusOK, server.MintTokenResponse{
@@ -225,6 +224,7 @@ func (h *Handler) BurnToken(gCtx *gin.Context) {
 		gCtx.JSON(http.StatusInternalServerError, server.BurnTokenResponse{
 			Message: "Failed to parse request body: " + err.Error(),
 		})
+		return
 	}
 
 	txDetails, err := h.blockchainSvc.Burn(gCtx.Request.Context(), req.TokenContractAddress, req.To, req.Amount)
@@ -232,6 +232,7 @@ func (h *Handler) BurnToken(gCtx *gin.Context) {
 		gCtx.JSON(http.StatusInternalServerError, server.BurnTokenResponse{
 			Message: err.Error(),
 		})
+		return
 	}
 
 	gCtx.JSON(http.StatusOK, server.BurnTokenResponse{
