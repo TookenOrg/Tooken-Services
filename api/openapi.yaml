@@ -208,9 +208,7 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/CreateTokenResponse"
+                $ref: "#/components/schemas/CreateTokenResponse"
         "500":
           description: Internal server error
 
@@ -240,8 +238,8 @@ paths:
     post:
       tags:
         - Blockchain
-          - contract
-          - token
+        - contract
+        - token
       summary: Register the given amount for the userId in the sharetoken
       operationId: mintToken
       requestBody:
@@ -251,8 +249,12 @@ paths:
             schema:
               $ref: "#/components/schemas/MintTokenRequest"
       responses:
-        "201":
-          description: Shares created
+        "200":
+          description: Token minted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MintTokenResponse"
         "500":
           description: Internal server error
 
@@ -272,7 +274,11 @@ paths:
               $ref: "#/components/schemas/BurnTokenRequest"
       responses:
         "200":
-          description: Shares withdrawed
+          description: Token minted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BurnTokenResponse"
         "500":
           description: Internal server error
 
@@ -408,6 +414,14 @@ components:
           description: The address to mint the tokens to
           example: "0x1234567890abcdef1234567890abcdef12345678"
 
+    MintTokenResponse:
+      allOf:
+        - $ref: "#/components/schemas/APIResponse"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/TxHashName"
+
     BurnTokenRequest:
       type: object
       required:
@@ -428,6 +442,14 @@ components:
           type: string
           description: The address to burn the tokens to
           example: "0x1234567890abcdef1234567890abcdef12345678"
+
+    BurnTokenResponse:
+      allOf:
+        - $ref: "#/components/schemas/APIResponse"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/TxHashName"
 
     AddClaimRequest:
       type: object
