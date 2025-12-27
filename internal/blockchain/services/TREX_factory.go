@@ -261,6 +261,13 @@ func deployTrexSuite(ctx context.Context, tokenDetails contracts.ITREXFactoryTok
 	deploySuiteAddr = deploymentDetails.Raw.Address
 	logger.LogInfo("📬 TREX Suite deployment transaction mined: %s", txDeploySuite.Hash().Hex())
 
+	logger.LogInfo("Token: %s", deploymentDetails.Token.Hex())
+	logger.LogInfo("IdentityRegistry: %s", deploymentDetails.Ir.Hex())
+	logger.LogInfo("IdentityRegistryStorage: %s", deploymentDetails.Irs.Hex())
+	logger.LogInfo("TrustedIssuerRegistry: %s", deploymentDetails.Tir.Hex())
+	logger.LogInfo("ModularCompliance: %s", deploymentDetails.Mc.Hex())
+	logger.LogInfo("ClaimsTopicRegistry: %s", deploymentDetails.Ctr.Hex())
+
 	// TODO: save deploymentDetails in DB
 
 	return
