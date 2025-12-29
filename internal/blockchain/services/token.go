@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -20,7 +21,8 @@ func (s *Service) CreateToken(ctx context.Context, req server.CreateTokenRequest
 
 	// 1 - Idempotency
 	if !isIdempotentToken(ctx, req) {
-		logger.LogWarn("Token already exists")
+		err = errors.New("Token already exists")
+		return
 	}
 
 	var onbehalfTransactions []server.TxHashName
@@ -80,7 +82,7 @@ func (s *Service) CreateToken(ctx context.Context, req server.CreateTokenRequest
 	// 10 - Build TokenInfo for return
 	newToken = server.TokenInfos{
 		Symbol:                req.TokenName,
-		TokenAddr:             tokenAddr.Hex(),
+		Address:               tokenAddr.Hex(),
 		NbDecimal:             int64(req.NbDecimal),
 		OnbehalfTransactions:  &onbehalfTransactions,
 		CreatedAt:             time.Now(),
@@ -93,11 +95,12 @@ func (s *Service) CreateToken(ctx context.Context, req server.CreateTokenRequest
 }
 
 func isIdempotentToken(ctx context.Context, tokenReq server.CreateTokenRequest) bool {
-	existingTokenPtr, err := database.GetTokenByName(ctx, tokenReq.TokenName)
+	existingTokenPtr, err := database.GetTokenByName(ctx, tokenReq.TokenName, true)
 	if err != nil {
+		logger.LogError("%s", err.Error())
 		return false
 	}
-	return existingTokenPtr != nil
+	return existingTokenPtr == nil
 }
 
 func createTokenInstance(tokenAddr common.Address) (instance contracts.Token, err error) {

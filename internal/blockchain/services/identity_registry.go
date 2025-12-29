@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 
+	contracts "github.com/TookenOrg/tooken-services/internal/blockchain/contracts/bindings"
 	"github.com/TookenOrg/tooken-services/internal/blockchain/database"
 	"github.com/TookenOrg/tooken-services/internal/blockchain/globals"
 	"github.com/TookenOrg/tooken-services/internal/blockchain/utils"
@@ -13,7 +14,7 @@ import (
 
 func registerIdentity(ctx context.Context, userWallet, identityAddress common.Address, countryCode int) (tx *types.Transaction, err error) {
 
-	irInstance, err := database.GetIdentityRegistryInstance()
+	irInstance, err := getIdentityRegistryInstance(ctx)
 
 	auth, err := utils.GenerateTransactOpts(ctx)
 	if err != nil {
@@ -37,13 +38,19 @@ func registerIdentity(ctx context.Context, userWallet, identityAddress common.Ad
 }
 
 func addAgentOnIdentityRegistry(ctx context.Context, tokenAddr common.Address) (tx *types.Transaction, err error) {
+
+	irInstance, err := getIdentityRegistryInstance(ctx)
+	if err != nil {
+		return
+	}
+
 	auth, err := utils.GenerateTransactOpts(ctx)
 	if err != nil {
 		return
 	}
 
 	logger.LogInfo("💌 Add agent on identity registry...")
-	tx, err = globals.IdentityRegistryInstance.AddAgent(auth, tokenAddr)
+	tx, err = irInstance.AddAgent(auth, tokenAddr)
 	if err != nil {
 		return
 	}
@@ -52,5 +59,21 @@ func addAgentOnIdentityRegistry(ctx context.Context, tokenAddr common.Address) (
 	}
 
 	logger.LogInfo("📬 Agent added on identity registry: %s", tx.Hash().Hex())
+	return
+}
+
+func getIdentityRegistryInstance(ctx context.Context) (irInstance *contracts.IdentityRegistry, err error) {
+
+	identityRegistryDetails, err := database.GetContractInstanceByName(ctx, globals.IdentityRegistry)
+	if err != nil {
+		return
+	}
+	irAddress := common.HexToAddress(identityRegistryDetails.Address)
+
+	irInstance, err = contracts.NewIdentityRegistry(irAddress, globals.EthClient)
+	if err != nil {
+		return
+	}
+
 	return
 }

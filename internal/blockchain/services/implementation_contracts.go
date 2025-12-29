@@ -20,7 +20,7 @@ func (s *Service) DeployAllImplementations(ctx context.Context) (deployedContrac
 	}
 	deployedContracts = append(deployedContracts, server.ContractDetails{
 		Address: ctrAddr.Hex(),
-		Name:    globals.ImplClaimTopicRegistryName,
+		Name:    globals.ImplClaimsTopicRegistryName,
 	})
 
 	// 2. Deploy TrustedIssuerRegistry Implementation

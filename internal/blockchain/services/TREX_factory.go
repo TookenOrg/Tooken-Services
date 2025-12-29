@@ -28,7 +28,7 @@ func (s *Service) DeployAndInitTrexFactory(ctx context.Context) (err error) {
 	}
 	authorityAddr := *authorityAddrPtr
 
-	identityFactoryAddrPtr, err := database.GetContractByName(ctx, globals.IdentityFactoryName)
+	identityFactoryAddrPtr, err := database.GetContractRoleByName(ctx, globals.IdentityFactoryName)
 	if err != nil {
 		return
 	}
@@ -229,7 +229,7 @@ func deployTrexSuite(ctx context.Context, tokenDetails contracts.ITREXFactoryTok
 		return
 	}
 
-	trexFactoryDetails, err := database.GetContractByName(ctx, globals.TrexFactoryName)
+	trexFactoryDetails, err := database.GetContractRoleByName(ctx, globals.TrexFactoryName)
 	if err != nil {
 		return
 	}

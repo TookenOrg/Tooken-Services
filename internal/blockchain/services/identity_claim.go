@@ -185,7 +185,7 @@ func generateSignatureAddClaim(identityToClaim common.Address, claimTopic int64)
 func addClaim(ctx context.Context, identityInstance *contracts.Identity, addClaimRequest server.AddClaimRequest, signature models.SignatureResult) (tx *types.Transaction, err error) {
 
 	// 1 - Get issuer address
-	issuerAddressDetails, err := database.GetContractByName(ctx, globals.ClaimIssuerName)
+	issuerAddressDetails, err := database.GetContractRoleByName(ctx, globals.ClaimIssuerName)
 	if err != nil {
 		return
 	}

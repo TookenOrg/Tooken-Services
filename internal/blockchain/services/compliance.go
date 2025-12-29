@@ -73,7 +73,7 @@ func deployModularCompliance(ctx context.Context) (modularComplianceAddr common.
 
 func addTransferRestrictModuleInCompliance(ctx context.Context, complianceInstance *contracts.ModularCompliance) (module models.ComplianceModule, err error) {
 	// 1 - Retreive Transfer Restrict module
-	moduleAddr, found, err := database.FindModuleByName(globals.TransferRestrictionModuleName)
+	moduleAddr, found, err := database.FindModuleByName(ctx, globals.TransferRestrictionModuleName)
 	if err != nil {
 		return
 	}

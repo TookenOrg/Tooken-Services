@@ -94,7 +94,7 @@ func configureITREXAuthority(ctx context.Context) (contracts.ITREXImplementation
 	}
 	tokenImplAddr := *tokenImplAddrPtr
 
-	claimTopicsRegistryAdrrPtr := utils.FindContractByName(allContractsImplementations, globals.ImplClaimTopicRegistryName)
+	claimTopicsRegistryAdrrPtr := utils.FindContractByName(allContractsImplementations, globals.ImplClaimsTopicRegistryName)
 	if claimTopicsRegistryAdrrPtr == nil {
 		return contracts.ITREXImplementationAuthorityTREXContracts{}, fmt.Errorf("claim topics registry implementation address not found")
 	}

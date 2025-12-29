@@ -4,6 +4,7 @@ import (
 	"context"
 
 	contracts "github.com/TookenOrg/tooken-services/internal/blockchain/contracts/bindings"
+	"github.com/TookenOrg/tooken-services/internal/blockchain/database"
 	"github.com/TookenOrg/tooken-services/internal/blockchain/globals"
 	"github.com/TookenOrg/tooken-services/internal/blockchain/models"
 	"github.com/TookenOrg/tooken-services/internal/blockchain/utils"
@@ -13,6 +14,12 @@ import (
 )
 
 func deployTokenProxy(ctx context.Context, trexAuthorityImplementationAddr common.Address, complianceSuite models.ComplianceSuite, tokenName string, symbol string, nbDecimal int) (tokenAddr common.Address, tx *types.Transaction, tokenProxyInstance *contracts.TokenProxy, err error) {
+
+	identityRegistryDetails, err := database.GetContractInstanceByName(ctx, globals.IdentityRegistry)
+	if err != nil {
+		return
+	}
+	irAddress := common.HexToAddress(identityRegistryDetails.Address)
 
 	auth, err := utils.GenerateTransactOpts(ctx)
 	if err != nil {
@@ -24,7 +31,7 @@ func deployTokenProxy(ctx context.Context, trexAuthorityImplementationAddr commo
 		auth,
 		globals.EthClient,
 		trexAuthorityImplementationAddr,
-		globals.IdentityRegistryAddress,
+		irAddress,
 		complianceSuite.Address,
 		tokenName,
 		symbol,
