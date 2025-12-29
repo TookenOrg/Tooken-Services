@@ -66,7 +66,8 @@ func WaitDeployedTransaction(ctx context.Context, tx *types.Transaction, shouldW
 	}
 
 	if receipt.Status != types.ReceiptStatusSuccessful {
-		return fmt.Errorf("transaction %s failed with status %d", txHex, receipt.Status)
+		err = fmt.Errorf("transaction %s failed with status %d", txHex, receipt.Status)
+		return
 	}
 
 	logger.LogInfo("✅ Transaction %s mined successfully in block %d", txHex, receipt.BlockNumber.Uint64())

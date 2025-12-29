@@ -21,7 +21,7 @@ type ContractDTO struct {
 func GetAllContracts(ctx context.Context) (contractsDetails []server.ContractDetails, err error) {
 	query := `
         SELECT id, tx_hash, address, contract_name, created_at 
-		FROM blk.contract;`
+		FROM blk.contract_role;`
 
 	rows, err := globals.DB.QueryContext(ctx, query)
 	if err != nil {
@@ -64,7 +64,7 @@ func GetContractByName(ctx context.Context, contractName string) (contract serve
 
 	query := `
         SELECT id, tx_hash, address, contract_name, created_at 
-        FROM blk.contract 
+        FROM blk.contract_role
         WHERE contract_name = $1`
 
 	var contractDB ContractDTO

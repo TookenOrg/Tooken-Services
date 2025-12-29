@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 )
 
 var Log *slog.Logger
@@ -33,6 +34,15 @@ func Init(isDevelopment bool) {
 
 	Log = slog.New(handler)
 	slog.SetDefault(Log)
+}
+
+func LogTrace(msg string, args ...any) {
+	logTraceEnabled := os.Getenv("LOG_TRACE")
+
+	logTrace, _ := strconv.ParseBool(logTraceEnabled)
+	if logTrace {
+		Log.Debug(fmt.Sprintf(msg, args...))
+	}
 }
 
 func LogDebug(msg string, args ...any) {

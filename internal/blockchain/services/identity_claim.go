@@ -168,21 +168,29 @@ func generateSignatureAddClaim(identityToClaim common.Address, claimTopic int64)
 		Key:             key,
 	}
 
-	logger.LogDebug("🔒 Wallet: %s", result.Wallet)
-	logger.LogDebug("👤 Identity to claim: %s", result.IdentityToClaim)
-	logger.LogDebug("📛 Topic: %s", result.Topic.String())
-	logger.LogDebug("📦 Data (bytes): %s", common.Bytes2Hex(result.DataBytes))
-	logger.LogDebug("🧩 DataHash: %s", result.DataHash.Hex())
-	logger.LogDebug("🔁 EthSignedHash: %s", result.EthSignedHash.Hex())
-	logger.LogDebug("✍️ Signature: %s", result.Signature)
-	logger.LogDebug("↪️ v: %d | r: %s | s: %s", result.V, result.R.Hex(), result.S.Hex())
-	logger.LogDebug("✅ Signer address (recovered): %s", result.RecoveredAddr.Hex())
-	logger.LogDebug("🗝️ getKey(...) value: %s", result.Key.Hex())
+	logger.LogTrace("🔒 Wallet: %s", result.Wallet)
+	logger.LogTrace("👤 Identity to claim: %s", result.IdentityToClaim)
+	logger.LogTrace("📛 Topic: %s", result.Topic.String())
+	logger.LogTrace("📦 Data (bytes): %s", common.Bytes2Hex(result.DataBytes))
+	logger.LogTrace("🧩 DataHash: %s", result.DataHash.Hex())
+	logger.LogTrace("🔁 EthSignedHash: %s", result.EthSignedHash.Hex())
+	logger.LogTrace("✍️ Signature: %s", result.Signature)
+	logger.LogTrace("↪️ v: %d | r: %s | s: %s", result.V, result.R.Hex(), result.S.Hex())
+	logger.LogTrace("✅ Signer address (recovered): %s", result.RecoveredAddr.Hex())
+	logger.LogTrace("🗝️ getKey(...) value: %s", result.Key.Hex())
 
 	return result, nil
 }
 
 func addClaim(ctx context.Context, identityInstance *contracts.Identity, addClaimRequest server.AddClaimRequest, signature models.SignatureResult) (tx *types.Transaction, err error) {
+
+	// 1 - Get issuer address
+	issuerAddressDetails, err := database.GetContractByName(ctx, globals.ClaimIssuerName)
+	if err != nil {
+		return
+	}
+
+	issuer := common.HexToAddress(issuerAddressDetails.Address)
 
 	auth, err := utils.GenerateTransactOpts(ctx)
 	if err != nil {
@@ -193,7 +201,6 @@ func addClaim(ctx context.Context, identityInstance *contracts.Identity, addClai
 
 	claimTopic := big.NewInt(int64(addClaimRequest.ClaimTopic))
 	scheme := big.NewInt(1)
-	issuer := globals.ClaimIssuerAddress
 	signatureBytes := signature.SignatureBytes
 	dataBytes := []byte(claimData)
 

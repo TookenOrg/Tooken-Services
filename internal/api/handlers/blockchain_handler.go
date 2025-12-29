@@ -145,6 +145,7 @@ func (h *Handler) AddClaimToIdentity(gCtx *gin.Context) {
 	tx, err := h.blockchainSvc.AddClaimToIdentity(gCtx.Request.Context(), req)
 	if err != nil {
 		gCtx.JSON(http.StatusBadRequest, nil)
+		return
 	}
 
 	logger.LogInfo("🆗 Add claim completed successfully.")
@@ -173,6 +174,7 @@ func (h *Handler) CreateTokenContract(gCtx *gin.Context) {
 		gCtx.JSON(http.StatusBadRequest, server.CreateTokenResponse{
 			Message: "The token creation failed.",
 		})
+		return
 	}
 
 	logger.LogInfo("🆗 Token Contract created successfully.")
