@@ -209,17 +209,15 @@ func (h *Handler) MintToken(gCtx *gin.Context) {
 		return
 	}
 
-	txDetails, err := h.blockchainSvc.Mint(gCtx.Request.Context(), req.TokenContractAddress, req.To, req.Amount)
+	_, err := h.blockchainSvc.Mint(gCtx.Request.Context(), req.TokenContractAddress, req.To, req.Amount)
 	if err != nil {
-		gCtx.JSON(http.StatusInternalServerError, server.MintTokenResponse{
-			Message: err.Error(),
-		})
+		logger.LogError("Failed to Mint: %s", err.Error())
 		return
 	}
 
 	gCtx.JSON(http.StatusOK, server.MintTokenResponse{
-		Data:    &txDetails,
-		Message: "The Token has been minted successfully.",
+		// Data:    &txDetails,
+		Message: "Mint has been started asynchronously.",
 	})
 }
 

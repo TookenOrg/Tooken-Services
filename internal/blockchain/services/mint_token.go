@@ -6,6 +6,7 @@ import (
 
 	"github.com/TookenOrg/tooken-services/internal/api/server"
 	contracts "github.com/TookenOrg/tooken-services/internal/blockchain/contracts/bindings"
+	"github.com/TookenOrg/tooken-services/internal/blockchain/database"
 	"github.com/TookenOrg/tooken-services/internal/blockchain/globals"
 	"github.com/TookenOrg/tooken-services/internal/blockchain/utils"
 	"github.com/TookenOrg/tooken-services/pkg/logger"
@@ -14,13 +15,18 @@ import (
 
 func (s *Service) Mint(ctx context.Context, tokenAddr, to string, humanAmount float64) (txHashName server.TxHashName, err error) {
 
-	ok := controlInputMint(tokenAddr, to, humanAmount)
+	tokenInfos, err := database.GetTokenByAddress(ctx, tokenAddr)
+	if err != nil {
+		return
+	}
+
+	ok := controlInputMint(tokenAddr, to, humanAmount, tokenInfos.NbDecimal)
 	if !ok {
 		err = errors.New("Input data for mint are incorrect")
 		return
 	}
 
-	amtWei, err := utils.ConvertFloatToWei(humanAmount, 0)
+	amtWei, err := utils.ConvertFloatToWei(humanAmount, tokenInfos.NbDecimal)
 	if err != nil {
 		return
 	}
@@ -53,7 +59,8 @@ func (s *Service) Mint(ctx context.Context, tokenAddr, to string, humanAmount fl
 	return
 }
 
-func controlInputMint(tokenAddr, to string, humanAmount float64) (ok bool) {
-	_, err := utils.ConvertFloatToWei(humanAmount, 0)
-	return common.IsHexAddress(tokenAddr) && common.IsHexAddress(to) && err != nil
+func controlInputMint(tokenAddr, to string, humanAmount float64, nbDecimal int64) (ok bool) {
+	_, err := utils.ConvertFloatToWei(humanAmount, nbDecimal)
+	ok = err == nil && common.IsHexAddress(tokenAddr) && common.IsHexAddress(to)
+	return
 }

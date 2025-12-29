@@ -6,6 +6,7 @@ import (
 
 	"github.com/TookenOrg/tooken-services/internal/api/server"
 	contracts "github.com/TookenOrg/tooken-services/internal/blockchain/contracts/bindings"
+	"github.com/TookenOrg/tooken-services/internal/blockchain/database"
 	"github.com/TookenOrg/tooken-services/internal/blockchain/globals"
 	"github.com/TookenOrg/tooken-services/internal/blockchain/utils"
 	"github.com/TookenOrg/tooken-services/pkg/logger"
@@ -14,9 +15,14 @@ import (
 
 func (s *Service) Burn(ctx context.Context, tokenAddr, to string, humanAmount float64) (txHashName server.TxHashName, err error) {
 
-	ok := controlInputBurn(tokenAddr, to, humanAmount)
+	tokenInfos, err := database.GetTokenByAddress(ctx, tokenAddr)
+	if err != nil {
+		return
+	}
+
+	ok := controlInputMint(tokenAddr, to, humanAmount, tokenInfos.NbDecimal)
 	if !ok {
-		err = errors.New("Input data for burn are incorrect")
+		err = errors.New("Input data for mint are incorrect")
 		return
 	}
 
