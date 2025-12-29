@@ -584,23 +584,33 @@ components:
     TokenInfos:
       type: object
       required:
-        - tokenAddr
+        - id
+        - address
+        - token_name
         - modularCompliance
         - symbol
         - nbDecimal
         - createdAt
       properties:
+        id:
+          type: integer
         modularComplianceAddr:
           type: string
           description: Address of the modularCompliance contract
           example: "0x1234567890abcdef1234567890abcdef12345678"
-        tokenAddr:
+        address:
           type: string
           description: Address of the token contract
           example: "0x1234567890abcdef1234567890abcdef12345678"
+        token_name:
+          type: string
+          description: Name of token
+          example: "Big House"
+          maxLength: 12
         symbol:
           type: string
           description: Symbol of token
+          maxLength: 12
         nbDecimal:
           type: integer
           format: int64

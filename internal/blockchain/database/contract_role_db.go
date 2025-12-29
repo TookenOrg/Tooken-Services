@@ -60,7 +60,7 @@ func GetAllContracts(ctx context.Context) (contractsDetails []server.ContractDet
 	return
 }
 
-func GetContractByName(ctx context.Context, contractName string) (contract server.ContractDetails, err error) {
+func GetContractRoleByName(ctx context.Context, contractName string) (contract server.ContractDetails, err error) {
 
 	query := `
         SELECT id, tx_hash, address, contract_name, created_at 

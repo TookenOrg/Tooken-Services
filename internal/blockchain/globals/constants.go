@@ -10,26 +10,27 @@ var EthClient *ethclient.Client
 
 // Implementation contract names
 const (
-	ImplClaimTopicRegistryName    = "ClaimTopicsRegistry"
-	ImplTrustedIssuerRegistryName = "TrustedIssuerRegistry"
-	ImplIdentityRegistryStorage   = "IdentityRegistryStorage"
-	ImplIdentityRegistryName      = "IdentityRegistry"
-	ImplModularComplianceName     = "ModularCompliance"
-	ImplTokenName                 = "Token"
-	ImplIdentityName              = "Identity"
-	ImplIdentityAuthorityName     = "IdentityAuthority"
-	ImplTrexAuthorityName         = "TREXImplementationAuthority"
+	ImplClaimsTopicRegistryName   = "CLAIMS_TOPIC_REGISTRY"
+	ImplTrustedIssuerRegistryName = "TRUSTED_ISSUER_REGISTRY"
+	ImplIdentityRegistryStorage   = "IDENTITY_REGISTRY_STORAGE"
+	ImplIdentityRegistryName      = "IDENTITY_REGISTRY"
+	ImplModularComplianceName     = "MODULAR_COMPLIANCE"
+	ImplTokenName                 = "TOKEN"
+	ImplIdentityName              = "IDENTITY"
+	ImplIdentityAuthorityName     = "IDENTITY_AUTHORITY"
+	ImplTrexAuthorityName         = "TREX_AUTHORITY"
 )
 
 const (
-	IdentityFactoryName = "IdentityFactory"
-	ClaimIssuerName     = "ClaimIssuer"
-	TrexFactoryName     = "TrexFactory"
-	TrexSuiteName       = "TREXSuite"
+	IdentityFactoryName = "IDENTITY_FACTORY"
+	IdentityRegistry    = "IDENTITY_REGISTRY"
+	ClaimIssuerName     = "CLAIM_ISSUER"
+	TrexFactoryName     = "TREX_FACTORY"
+	TrexSuiteName       = "TREX_SUITE"
 )
 
 const (
-	TransferRestrictionModuleName = "TransferRestrictionModule"
+	TransferRestrictionModuleName = "TRANSFER_RESTRICTION_MODULE"
 )
 
 var TrexFactoryAddress common.Address

@@ -120,6 +120,9 @@ func (h *Handler) CreateIdentity(gCtx *gin.Context) {
 	newIdentity, err := h.blockchainSvc.CreateIdentity(gCtx.Request.Context(), req)
 	if err != nil {
 		logger.LogError("Failed to deploy Identity: %v", err.Error())
+		gCtx.JSON(http.StatusInternalServerError, server.APIResponse{
+			Message: "Failed to deploy Identity: " + err.Error(),
+		})
 		return
 	}
 	logger.LogInfo("🆗 Deployment of Identity completed successfully.")
@@ -144,7 +147,9 @@ func (h *Handler) AddClaimToIdentity(gCtx *gin.Context) {
 
 	tx, err := h.blockchainSvc.AddClaimToIdentity(gCtx.Request.Context(), req)
 	if err != nil {
-		gCtx.JSON(http.StatusBadRequest, nil)
+		gCtx.JSON(http.StatusBadRequest, server.AddClaimResponse{
+			Message: err.Error(),
+		})
 		return
 	}
 
@@ -172,7 +177,7 @@ func (h *Handler) CreateTokenContract(gCtx *gin.Context) {
 	tokenInfos, err := h.blockchainSvc.CreateToken(gCtx.Request.Context(), req)
 	if err != nil {
 		gCtx.JSON(http.StatusBadRequest, server.CreateTokenResponse{
-			Message: "The token creation failed.",
+			Message: "The token creation failed." + err.Error(),
 		})
 		return
 	}
