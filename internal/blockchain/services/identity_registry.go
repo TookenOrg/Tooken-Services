@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 
+	"github.com/TookenOrg/tooken-services/internal/blockchain/database"
 	"github.com/TookenOrg/tooken-services/internal/blockchain/globals"
 	"github.com/TookenOrg/tooken-services/internal/blockchain/utils"
 	"github.com/TookenOrg/tooken-services/pkg/logger"
@@ -12,13 +13,15 @@ import (
 
 func registerIdentity(ctx context.Context, userWallet, identityAddress common.Address, countryCode int) (tx *types.Transaction, err error) {
 
+	irInstance, err := database.GetIdentityRegistryInstance()
+
 	auth, err := utils.GenerateTransactOpts(ctx)
 	if err != nil {
 		return
 	}
 
 	logger.LogInfo("💌 Registration of new identity in identity registry...")
-	tx, err = globals.IdentityRegistryInstance.RegisterIdentity(auth, userWallet, identityAddress, uint16(countryCode))
+	tx, err = irInstance.RegisterIdentity(auth, userWallet, identityAddress, uint16(countryCode))
 	if err != nil {
 		return
 	}
@@ -27,6 +30,9 @@ func registerIdentity(ctx context.Context, userWallet, identityAddress common.Ad
 	}
 
 	logger.LogInfo("📬 Identity registred on transaction: %s", tx.Hash().Hex())
+
+	// TODO Save DB
+
 	return
 }
 

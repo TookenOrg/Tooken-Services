@@ -2,6 +2,8 @@ package services
 
 import (
 	"context"
+	"errors"
+	"fmt"
 
 	"github.com/TookenOrg/tooken-services/internal/api/server"
 	contracts "github.com/TookenOrg/tooken-services/internal/blockchain/contracts/bindings"
@@ -18,11 +20,11 @@ func (s *Service) CreateIdentity(ctx context.Context, identityReq server.CreateI
 
 	// 1 - Idempotency
 	if !isIdempotentIdentity(ctx, identityReq) {
-		logger.LogWarn("User already has an identity")
+		return server.IdentityInfos{}, errors.New("User already has an identity")
 	}
 
 	// 2 - Generate wallet
-	wallet, err := generateNewWallet(identityReq.UserId)
+	wallet, walletId, err := generateNewWallet(identityReq.UserId)
 	if err != nil {
 		return
 	}
@@ -39,8 +41,8 @@ func (s *Service) CreateIdentity(ctx context.Context, identityReq server.CreateI
 		return
 	}
 
-	// 5 - TODO Save DB
 	logger.LogInfo("New Identity Created for userId [%d]", identityReq.UserId)
+	err = database.InsertIdentity(ctx, identityReq.UserId, walletId, proxyAddr.Hex(), txProxy.Hash().Hex())
 
 	// log to remove after insert db
 	logger.LogDebug("%s, %s", txProxy.Hash().Hex(), registerIdentityTxHashPtr.Hash().Hex())
@@ -62,25 +64,32 @@ func isIdempotentIdentity(ctx context.Context, identityReq server.CreateIdentity
 	return existingWalletPtr != nil
 }
 
-func generateNewWallet(userId int) (publicKey common.Address, err error) {
+func generateNewWallet(userId int) (publicKey common.Address, walletId int64, err error) {
 	logger.LogDebug("Generating new wallet address for user [%d]", userId)
 
 	privateKeyecdsa, err := crypto.GenerateKey()
 	if err != nil {
 		return
 	}
-	// privateKey = fmt.Sprintf("%x", crypto.FromECDSA(privateKeyecdsa))
+	privateKeyClear := fmt.Sprintf("%x", crypto.FromECDSA(privateKeyecdsa))
 	publicKey = crypto.PubkeyToAddress(privateKeyecdsa.PublicKey)
 
 	logger.LogDebug("New wallet created: public key [%s]", publicKey)
 
-	// TODO
-	// Save pubKey + private Key in DB
+	walletId, err = database.InsertWallet(userId, publicKey.Hex(), "Main Wallet", privateKeyClear)
 
 	return
 }
 
 func deployIdentityProxy(ctx context.Context) (proxyAddr common.Address, tx *types.Transaction, err error) {
+
+	// Get Impl Identity Authority Address
+	implIdentityAuthorityDetails, err := database.GetImplementationContractByName(ctx, "IdentityAuthority")
+	if err != nil {
+		return
+	}
+
+	identityAuthorityAddress := common.HexToAddress(implIdentityAuthorityDetails.Address)
 
 	auth, err := utils.GenerateTransactOpts(ctx)
 	if err != nil {
@@ -88,7 +97,7 @@ func deployIdentityProxy(ctx context.Context) (proxyAddr common.Address, tx *typ
 	}
 
 	logger.LogInfo("💌 Deploying identity Proxy...")
-	proxyAddr, tx, _, err = contracts.DeployIdentityProxy(auth, globals.EthClient, globals.ImplIdentityAuthorityAddress, (auth.From))
+	proxyAddr, tx, _, err = contracts.DeployIdentityProxy(auth, globals.EthClient, identityAuthorityAddress, (auth.From))
 	if err != nil {
 		return
 	}

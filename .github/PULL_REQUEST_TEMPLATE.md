@@ -23,15 +23,13 @@ Please explain how you tested your changes and what test coverage looks like.
 - [ ] Tested locally
 - [ ] Unit tests added / updated
 - [ ] CI actions pass successfully
-- [ ] Manual verification done (screenshots if relevant)
+- [ ] Manual verification done
 
 ---
 
 ## 🔗 Related Issues
-If this PR addresses one or more issues, please link them here.
 
-Example:  
-Fixes #123 or Closes #456
+Link
 
 ---
 

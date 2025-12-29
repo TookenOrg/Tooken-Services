@@ -34,7 +34,5 @@ const (
 
 var TrexFactoryAddress common.Address
 var ImplIdentityAuthorityAddress common.Address
-var ClaimIssuerAddress common.Address
 var IdentityRegistryAddress common.Address
-
 var IdentityRegistryInstance *contracts.IdentityRegistry
