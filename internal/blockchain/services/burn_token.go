@@ -20,9 +20,9 @@ func (s *Service) Burn(ctx context.Context, tokenAddr, to string, humanAmount fl
 		return
 	}
 
-	ok := controlInputMint(tokenAddr, to, humanAmount, tokenInfos.NbDecimal)
+	ok := controlInputMintBurn(tokenAddr, to, humanAmount, tokenInfos.NbDecimal)
 	if !ok {
-		err = errors.New("Input data for mint are incorrect")
+		err = errors.New("Input data for burn are incorrect")
 		return
 	}
 

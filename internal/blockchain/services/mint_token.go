@@ -20,7 +20,7 @@ func (s *Service) Mint(ctx context.Context, tokenAddr, to string, humanAmount fl
 		return
 	}
 
-	ok := controlInputMint(tokenAddr, to, humanAmount, tokenInfos.NbDecimal)
+	ok := controlInputMintBurn(tokenAddr, to, humanAmount, tokenInfos.NbDecimal)
 	if !ok {
 		err = errors.New("Input data for mint are incorrect")
 		return
@@ -59,7 +59,7 @@ func (s *Service) Mint(ctx context.Context, tokenAddr, to string, humanAmount fl
 	return
 }
 
-func controlInputMint(tokenAddr, to string, humanAmount float64, nbDecimal int64) (ok bool) {
+func controlInputMintBurn(tokenAddr, to string, humanAmount float64, nbDecimal int64) (ok bool) {
 	_, err := utils.ConvertFloatToWei(humanAmount, nbDecimal)
 	ok = err == nil && common.IsHexAddress(tokenAddr) && common.IsHexAddress(to)
 	return
