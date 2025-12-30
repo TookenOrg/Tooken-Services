@@ -63,7 +63,7 @@ func GetTokenByAddress(ctx context.Context, address string) (token *server.Token
 		return nil, fmt.Errorf("failed to select token for address %s: %w", address, err)
 	}
 
-	logger.LogDebug("Token found for address %s: %s", address, tokenRow.Address)
+	logger.LogDebug("Token found for address %s", address)
 
 	token = tokenRow
 	return

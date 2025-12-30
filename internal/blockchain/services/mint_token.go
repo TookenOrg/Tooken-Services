@@ -41,7 +41,7 @@ func (s *Service) Mint(ctx context.Context, tokenAddr, to string, humanAmount fl
 		return
 	}
 
-	logger.LogInfo("💌 Minting [%f] tokens (converted to [%s] wei) in Token [%s]...", humanAmount, amtWei.String(), tokenAddr)
+	logger.LogInfo("💌 Minting [%f] tokens (converted to [%s] wei) in Token [%s] for wallet [%s]...", humanAmount, amtWei.String(), tokenAddr, to)
 	tx, err := tokenInstance.Mint(auth, common.HexToAddress(to), amtWei)
 	if err != nil {
 		return

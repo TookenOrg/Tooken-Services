@@ -26,7 +26,7 @@ func (s *Service) Burn(ctx context.Context, tokenAddr, to string, humanAmount fl
 		return
 	}
 
-	amtWei, err := utils.ConvertFloatToWei(humanAmount, 0)
+	amtWei, err := utils.ConvertFloatToWei(humanAmount, tokenInfos.NbDecimal)
 	if err != nil {
 		return
 	}
@@ -41,7 +41,7 @@ func (s *Service) Burn(ctx context.Context, tokenAddr, to string, humanAmount fl
 		return
 	}
 
-	logger.LogInfo("💌 Burning [%f] tokens (converted to [%s] wei) in Token [%s]...", humanAmount, amtWei.String(), tokenAddr)
+	logger.LogInfo("💌 Burning [%f] tokens (converted to [%s] wei) in Token [%s] for wallet [%s]...", humanAmount, amtWei.String(), tokenAddr, to)
 	tx, err := tokenInstance.Burn(auth, common.HexToAddress(to), amtWei)
 	if err != nil {
 		return
@@ -57,9 +57,4 @@ func (s *Service) Burn(ctx context.Context, tokenAddr, to string, humanAmount fl
 	txHashName.TransactionHash = tx.Hash().Hex()
 
 	return
-}
-
-func controlInputBurn(tokenAddr, to string, humanAmount float64) (ok bool) {
-	_, err := utils.ConvertFloatToWei(humanAmount, 0)
-	return common.IsHexAddress(tokenAddr) && common.IsHexAddress(to) && err != nil
 }
