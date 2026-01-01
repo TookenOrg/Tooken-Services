@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"math/big"
 
 	"github.com/TookenOrg/tooken-services/internal/api/server"
 	contracts "github.com/TookenOrg/tooken-services/internal/blockchain/contracts/bindings"
@@ -49,9 +50,15 @@ func deployIdentityFactory(ctx context.Context, implementationAuthorityAddrCommo
 	if err != nil {
 		return
 	}
-	if err = utils.WaitDeployedTransaction(ctx, tx, true); err != nil {
+	deployedTxDetails, err := utils.WaitDeployedTransaction(ctx, tx, true)
+	if err != nil {
 		return
 	}
 	logger.LogInfo("📬 Identity Factory deployed at address: %s", idAddr.Hex())
+
+	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "IDENTITY_FACTORY", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	if err != nil {
+		return
+	}
 	return
 }

@@ -236,7 +236,7 @@ paths:
         - contract
         - token
       summary: Register the given amount for the userId in the sharetoken
-      operationId: mintToken
+      operationId: mintTokenAsync
       requestBody:
         required: true
         content:
@@ -244,14 +244,18 @@ paths:
             schema:
               $ref: "#/components/schemas/MintTokenRequest"
       responses:
-        "200":
+        "202":
           description: Token minted
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/MintTokenResponse"
+                $ref: "#/components/schemas/APIResponse"
         "500":
           description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MintTokenResponse"
 
   /contract/token/burn:
     post:
@@ -260,7 +264,7 @@ paths:
         - contract
         - token
       summary: Withdraw the given amount for the userId in the sharetoken
-      operationId: burnToken
+      operationId: burnTokenAsync
       requestBody:
         required: true
         content:
@@ -268,14 +272,18 @@ paths:
             schema:
               $ref: "#/components/schemas/BurnTokenRequest"
       responses:
-        "200":
+        "202":
           description: Token minted
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/BurnTokenResponse"
+                $ref: "#/components/schemas/APIResponse"
         "500":
           description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BurnTokenResponse"
 
   /payments/add:
     post:

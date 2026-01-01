@@ -209,13 +209,17 @@ func addClaim(ctx context.Context, identityInstance *contracts.Identity, addClai
 		return
 	}
 
-	if err = utils.WaitDeployedTransaction(ctx, tx, false); err != nil {
+	deployedTxDetails, err := utils.WaitDeployedTransaction(ctx, tx, false)
+	if err != nil {
 		return
 	}
 
 	logger.LogInfo("📬 Claim added on Identity with transaction: %s", tx.Hash().Hex())
 
-	// TODO DB
+	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "ADD_CLAIMS_INDENTITY", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	if err != nil {
+		return
+	}
 
 	return
 }

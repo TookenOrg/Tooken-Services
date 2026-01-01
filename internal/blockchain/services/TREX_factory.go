@@ -64,11 +64,18 @@ func deployTrexFactory(ctx context.Context, authorityAddr, identityFactoryAddr c
 	if err != nil {
 		return
 	}
-	if err = utils.WaitDeployedTransaction(ctx, tx, true); err != nil {
+	deployedTxDetails, err := utils.WaitDeployedTransaction(ctx, tx, true)
+	if err != nil {
 		return
 	}
 
 	logger.LogInfo("📬 Trex Factory deployed at address: %s", factoryAddr.Hex())
+
+	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "TREX_FACTORY", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	if err != nil {
+		return
+	}
+
 	return
 }
 
@@ -106,10 +113,16 @@ func addTokenFactory(ctx context.Context, identityFactoryAddr, factoryAddr commo
 	if err != nil {
 		return
 	}
-	if err = utils.WaitDeployedTransaction(ctx, tx, false); err != nil {
+	deployedTxDetails, err := utils.WaitDeployedTransaction(ctx, tx, false)
+	if err != nil {
 		return
 	}
 	logger.LogInfo("📬 Token factory added to identity factory")
+
+	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "ADD_TOKEN_FACTORY", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	if err != nil {
+		return
+	}
 
 	txDetails = server.TxHashName{
 		TransactionHash: tx.Hash().Hex(),
@@ -135,10 +148,17 @@ func setTREXFactory(ctx context.Context, authorityAddr, factoryAddr common.Addre
 	if err != nil {
 		return
 	}
-	if err = utils.WaitDeployedTransaction(ctx, tx, false); err != nil {
+	deployedTxDetails, err := utils.WaitDeployedTransaction(ctx, tx, false)
+	if err != nil {
 		return
 	}
+
 	logger.LogInfo("📬 TREX factory set")
+
+	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "SET_TREX_FACTORY", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	if err != nil {
+		return
+	}
 
 	txDetails = server.TxHashName{
 		TransactionHash: tx.Hash().Hex(),

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/big"
 	"time"
 
 	"github.com/TookenOrg/tooken-services/internal/api/server"
@@ -123,12 +124,17 @@ func addAgentOnToken(ctx context.Context, tokenInstance contracts.Token) (tx *ty
 		return
 	}
 
-	if err = utils.WaitDeployedTransaction(ctx, tx, false); err != nil {
+	deployedTxDetails, err := utils.WaitDeployedTransaction(ctx, tx, false)
+	if err != nil {
 		return
 	}
 	logger.LogInfo("📬 Agent added on transaction: %s", tx.Hash().Hex())
 
-	// TODO wait mined transac
+	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "ADD_AGENT_TOKEN", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	if err != nil {
+		return
+	}
+
 	return
 }
 
@@ -144,11 +150,15 @@ func unpauseToken(ctx context.Context, tokenInstance contracts.Token) (tx *types
 		return
 	}
 
-	if err = utils.WaitDeployedTransaction(ctx, tx, false); err != nil {
+	deployedTxDetails, err := utils.WaitDeployedTransaction(ctx, tx, false)
+	if err != nil {
 		return
 	}
 	logger.LogInfo("📬 Token unpaused on transaction: %s", tx.Hash().Hex())
 
-	// TODO wait mined transac
+	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "UNPAUSE_TOKEN", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	if err != nil {
+		return
+	}
 	return
 }

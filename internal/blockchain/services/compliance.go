@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/big"
 
 	contracts "github.com/TookenOrg/tooken-services/internal/blockchain/contracts/bindings"
 	"github.com/TookenOrg/tooken-services/internal/blockchain/database"
@@ -57,11 +58,16 @@ func deployModularCompliance(ctx context.Context) (modularComplianceAddr common.
 
 	// modularComplianceAddr, not modularComplianceProxyAddr
 	modularComplianceAddr, tx, _, err = contracts.DeployModularComplianceProxy(auth, globals.EthClient, trexAuthAddr)
-	err = utils.WaitDeployedTransaction(ctx, tx, true)
+	deployedTxDetails, err := utils.WaitDeployedTransaction(ctx, tx, true)
 	if err != nil {
 		return
 	}
 	logger.LogInfo("📬 Modular compliance deployed with transaction : %s", tx.Hash().Hex())
+
+	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "MODULAR_COMPLIANCE", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	if err != nil {
+		return
+	}
 
 	modularComplianceInstance, err = contracts.NewModularCompliance(modularComplianceAddr, globals.EthClient)
 	if err != nil {
@@ -91,11 +97,16 @@ func addTransferRestrictModuleInCompliance(ctx context.Context, complianceInstan
 	if err != nil {
 		return
 	}
-	err = utils.WaitDeployedTransaction(ctx, tx, false)
+	deployedTxDetails, err := utils.WaitDeployedTransaction(ctx, tx, false)
 	if err != nil {
 		return
 	}
 	logger.LogInfo("📬 Module added in compliance with transaction: %s", moduleAddr.Hex())
+
+	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "ADD_TRANSFER_RESTRICT_MODULE", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	if err != nil {
+		return
+	}
 
 	return models.ComplianceModule{
 		Address:     moduleAddr,
@@ -130,11 +141,16 @@ func DeployTransferRestrictModule(ctx context.Context, auth *bind.TransactOpts) 
 	if err != nil {
 		return
 	}
-	err = utils.WaitDeployedTransaction(ctx, tx, false)
+	deployedTxDetails, err := utils.WaitDeployedTransaction(ctx, tx, false)
 	if err != nil {
 		return
 	}
 	logger.LogInfo("📬 Transfer Restriction Module deployed at address: %s", moduleAddr.Hex())
+
+	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "DEPLOY_TRANSFER_RESTRICT_MODULE", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	if err != nil {
+		return
+	}
 	return
 }
 
@@ -147,10 +163,17 @@ func bindTokenToCompliance(ctx context.Context, modularComplianceInstance *contr
 
 	logger.LogInfo("💌 Binding token %s to modular compliance", tokenAddress)
 	tx, err = modularComplianceInstance.BindToken(auth, tokenAddress)
-	if err = utils.WaitDeployedTransaction(ctx, tx, false); err != nil {
+
+	deployedTxDetails, err := utils.WaitDeployedTransaction(ctx, tx, false)
+	if err != nil {
 		return
 	}
 	logger.LogInfo("📬 Binding Token completed at address [%s]", tx.Hash().Hex())
+
+	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "BIND_TOKEN_TO_COMPLIANCE", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	if err != nil {
+		return
+	}
 
 	return
 }

@@ -2,9 +2,11 @@ package services
 
 import (
 	"context"
+	"math/big"
 
 	"github.com/TookenOrg/tooken-services/internal/api/server"
 	contracts "github.com/TookenOrg/tooken-services/internal/blockchain/contracts/bindings"
+	"github.com/TookenOrg/tooken-services/internal/blockchain/database"
 	"github.com/TookenOrg/tooken-services/internal/blockchain/globals"
 	"github.com/TookenOrg/tooken-services/internal/blockchain/utils"
 	"github.com/TookenOrg/tooken-services/pkg/logger"
@@ -125,10 +127,18 @@ func deployClaimTopicsRegistryImplementation(ctx context.Context) (ctrAddr commo
 		return
 	}
 
-	if err = utils.WaitDeployedTransaction(ctx, tx, true); err != nil {
+	deployedTxDetails, err := utils.WaitDeployedTransaction(ctx, tx, true)
+	if err != nil {
 		return
 	}
+
 	logger.LogInfo("📬 ClaimTopicsRegistry Implementation deployed at address: %s", ctrAddr.Hex())
+
+	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "IMPLEMENTATION_CLAIM_TOPIC_REGISTRY", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	if err != nil {
+		return
+	}
+
 	return
 }
 
@@ -142,10 +152,17 @@ func deployTrustedIssuersRegistryImplementation(ctx context.Context) (tirAddr co
 	if err != nil {
 		return
 	}
-	if err = utils.WaitDeployedTransaction(ctx, tx, true); err != nil {
+	deployedTxDetails, err := utils.WaitDeployedTransaction(ctx, tx, true)
+	if err != nil {
 		return
 	}
+
 	logger.LogInfo("📬 TrustedIssuerRegistry Implementation deployed at address: %s", tirAddr.Hex())
+
+	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "IMPLEMENTATION_TRUSTED_ISSUERS_REGISTRY", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	if err != nil {
+		return
+	}
 	return
 }
 
@@ -159,10 +176,17 @@ func deployIdentityRegistryStorageImplementation(ctx context.Context) (irsAddr c
 	if err != nil {
 		return
 	}
-	if err = utils.WaitDeployedTransaction(ctx, tx, true); err != nil {
+	deployedTxDetails, err := utils.WaitDeployedTransaction(ctx, tx, true)
+	if err != nil {
 		return
 	}
+
 	logger.LogInfo("📬 IdentityRegistryStorage Implementation deployed at address: %s", irsAddr.Hex())
+
+	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "IMPLEMENTATION_IDENTITY_REGISTRY_STORAGE", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	if err != nil {
+		return
+	}
 	return
 }
 
@@ -176,10 +200,17 @@ func deployIdentityRegistryImplementation(ctx context.Context) (irAddr common.Ad
 	if err != nil {
 		return
 	}
-	if err = utils.WaitDeployedTransaction(ctx, tx, true); err != nil {
+	deployedTxDetails, err := utils.WaitDeployedTransaction(ctx, tx, true)
+	if err != nil {
 		return
 	}
+
 	logger.LogInfo("📬 IdentityRegistry Implementation deployed at address: %s", irAddr.Hex())
+
+	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "IMPLEMENTATION_IDENTITY_REGISTRY", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	if err != nil {
+		return
+	}
 	return
 }
 
@@ -193,10 +224,17 @@ func deployModularComplianceImplementation(ctx context.Context) (mcAddr common.A
 	if err != nil {
 		return
 	}
-	if err = utils.WaitDeployedTransaction(ctx, tx, true); err != nil {
+	deployedTxDetails, err := utils.WaitDeployedTransaction(ctx, tx, true)
+	if err != nil {
 		return
 	}
+
 	logger.LogInfo("📬 ModularCompliance Implementation deployed at address: %s", mcAddr.Hex())
+
+	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "IMPLEMENTATION_MODULAR_COMPLIANCE", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	if err != nil {
+		return
+	}
 	return
 }
 
@@ -210,10 +248,17 @@ func deployTokenImplementation(ctx context.Context) (tokenAddr common.Address, e
 	if err != nil {
 		return
 	}
-	if err = utils.WaitDeployedTransaction(ctx, tx, true); err != nil {
+	deployedTxDetails, err := utils.WaitDeployedTransaction(ctx, tx, true)
+	if err != nil {
 		return
 	}
+
 	logger.LogInfo("📬 Token Implementation deployed at address: %s", tokenAddr.Hex())
+
+	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "IMPLEMENTATION_TOKEN", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	if err != nil {
+		return
+	}
 	return
 }
 
@@ -227,10 +272,17 @@ func deployIdentityImplementation(ctx context.Context) (identityAddr common.Addr
 	if err != nil {
 		return
 	}
-	if err = utils.WaitDeployedTransaction(ctx, tx, true); err != nil {
+	deployedTxDetails, err := utils.WaitDeployedTransaction(ctx, tx, true)
+	if err != nil {
 		return
 	}
+
 	logger.LogInfo("📬 Identity Implementation deployed at address: %s", identityAddr.Hex())
+
+	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "IMPLEMENTATION_IDENTITY", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	if err != nil {
+		return
+	}
 	return
 }
 
@@ -244,10 +296,17 @@ func deployIdentityAuthorityImplementation(ctx context.Context, identity common.
 	if err != nil {
 		return
 	}
-	if err = utils.WaitDeployedTransaction(ctx, tx, true); err != nil {
+	deployedTxDetails, err := utils.WaitDeployedTransaction(ctx, tx, true)
+	if err != nil {
 		return
 	}
+
 	logger.LogInfo("📬 IdentityAuthority Implementation deployed at address: %s", identityAuthAddr.Hex())
+
+	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "IMPLEMENTATION_IDENTITY_AUTHORITY", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	if err != nil {
+		return
+	}
 	return
 }
 
@@ -267,9 +326,16 @@ func deployTREXImplementationAuthority(ctx context.Context) (authorityAddr commo
 	if err != nil {
 		return
 	}
-	if err = utils.WaitDeployedTransaction(ctx, tx, true); err != nil {
+	deployedTxDetails, err := utils.WaitDeployedTransaction(ctx, tx, true)
+	if err != nil {
 		return
 	}
+
 	logger.LogInfo("📬 TREXImplementationAuthority Implementation deployed at address: %s", authorityAddr.Hex())
+
+	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "IMPLEMENTATION_TREX_AUTHORITY", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	if err != nil {
+		return
+	}
 	return
 }

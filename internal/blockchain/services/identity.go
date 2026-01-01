@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/big"
 
 	"github.com/TookenOrg/tooken-services/internal/api/server"
 	contracts "github.com/TookenOrg/tooken-services/internal/blockchain/contracts/bindings"
@@ -102,11 +103,18 @@ func deployIdentityProxy(ctx context.Context) (proxyAddr common.Address, tx *typ
 		return
 	}
 
-	if err = utils.WaitDeployedTransaction(ctx, tx, true); err != nil {
+	deployedTxDetails, err := utils.WaitDeployedTransaction(ctx, tx, true)
+	if err != nil {
 		return
 	}
 
 	logger.LogInfo("📬 Identity Proxy deployed at address: %s", proxyAddr.Hex())
+
+	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "IDENTITY_PROXY", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	if err != nil {
+		return
+	}
+
 	return
 }
 

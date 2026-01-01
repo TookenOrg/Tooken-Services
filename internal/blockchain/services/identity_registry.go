@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"math/big"
 
 	contracts "github.com/TookenOrg/tooken-services/internal/blockchain/contracts/bindings"
 	"github.com/TookenOrg/tooken-services/internal/blockchain/database"
@@ -26,13 +27,17 @@ func registerIdentity(ctx context.Context, userWallet, identityAddress common.Ad
 	if err != nil {
 		return
 	}
-	if err = utils.WaitDeployedTransaction(ctx, tx, false); err != nil {
+	deployedTxDetails, err := utils.WaitDeployedTransaction(ctx, tx, false)
+	if err != nil {
 		return
 	}
 
 	logger.LogInfo("📬 Identity registred on transaction: %s", tx.Hash().Hex())
 
-	// TODO Save DB
+	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "REGISTER_IDENTITY", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	if err != nil {
+		return
+	}
 
 	return
 }
@@ -54,11 +59,18 @@ func addAgentOnIdentityRegistry(ctx context.Context, tokenAddr common.Address) (
 	if err != nil {
 		return
 	}
-	if err = utils.WaitDeployedTransaction(ctx, tx, false); err != nil {
+	deployedTxDetails, err := utils.WaitDeployedTransaction(ctx, tx, false)
+	if err != nil {
 		return
 	}
 
 	logger.LogInfo("📬 Agent added on identity registry: %s", tx.Hash().Hex())
+
+	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "ADD_AGENT_IDENTITY_REGISTRY", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	if err != nil {
+		return
+	}
+
 	return
 }
 
