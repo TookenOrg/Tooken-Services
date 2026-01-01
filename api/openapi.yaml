@@ -25,6 +25,78 @@ paths:
         "200":
           description: OK
 
+  /auth/sign-up:
+    post:
+      operationId: PostAuthSignUp
+      summary: Create a new user and return a JWT
+      tags:
+        - auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SignUpRequest"
+      responses:
+        "201":
+          description: User created successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SignUpResponse"
+        "400":
+          description: Invalid request
+        "409":
+          description: Email already exists
+
+  /auth/sign-in:
+    post:
+      operationId: PostAuthSignIn
+      summary: Auth existing user and return a JWT
+      tags:
+        - auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SignInRequest"
+      responses:
+        "201":
+          description: User created successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SignInResponse"
+        "400":
+          description: Invalid request
+        "409":
+          description: Email already exists
+
+  /user/{userId}:
+    get:
+      operationId: GetUserById
+      parameters:
+        - name: userId
+          in: path
+          description: User ID
+          required: true
+          schema:
+            type: integer
+            format: int64
+      summary: GetUserById
+      tags:
+        - user
+      responses:
+        "200":
+          description: User found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          description: Invalid request
+
   /trex/init/implementations:
     post:
       tags:
@@ -316,6 +388,101 @@ components:
           nullable: true
           x-oapi-codegen-extra-tags:
             json: ",omitempty"
+
+    JwtToken:
+      type: string
+
+    SignUpRequest:
+      type: object
+      required:
+        - fullName
+        - email
+        - password
+      properties:
+        fullName:
+          type: string
+          example: "Antony Lefèvre"
+        email:
+          type: string
+          format: email
+          example: "anto@example.com"
+        password:
+          type: string
+          format: password
+          example: "supersecret"
+
+    SignUpResponse:
+      allOf:
+        - $ref: "#/components/schemas/APIResponse"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/JwtToken"
+
+    SignInRequest:
+      type: object
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+          format: email
+          example: "anto@example.com"
+        password:
+          type: string
+          format: password
+          example: "supersecret"
+
+    SignInResponse:
+      allOf:
+        - $ref: "#/components/schemas/APIResponse"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/JwtToken"
+
+    User:
+      type: object
+      properties:
+        id:
+          type: integer
+          description: ID unique de l'utilisateur
+          example: 1
+        full_name:
+          type: string
+          description: Nom complet de l'utilisateur
+          example: "Antony Lefèvre"
+        email:
+          type: string
+          format: email
+          description: Email de l'utilisateur
+          example: "anto@example.com"
+        hashed_password:
+          type: string
+          description: Mot de passe hashé
+        created_at:
+          type: string
+          format: date-time
+          description: Date de création du compte
+          example: "2026-01-01T12:00:00Z"
+        updated_at:
+          type: string
+          format: date-time
+          description: Date de dernière mise à jour
+          example: "2026-01-01T12:00:00Z"
+        last_connexion:
+          type: string
+          format: date-time
+          nullable: true
+          description: Date de la dernière connexion
+          example: "2026-01-10T15:30:00Z"
+      required:
+        - id
+        - full_name
+        - email
+        - created_at
+        - updated_at
 
     InitializeIdentityFactoryResponse:
       allOf:
