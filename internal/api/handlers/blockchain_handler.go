@@ -197,7 +197,7 @@ func (h *Handler) GetTokenInfos(gCtx *gin.Context, tokenAddress string) {
 	})
 }
 
-func (h *Handler) MintToken(gCtx *gin.Context) {
+func (h *Handler) MintTokenAsync(gCtx *gin.Context) {
 
 	logger.LogInfo("🚀 Starting mint on token")
 
@@ -209,24 +209,23 @@ func (h *Handler) MintToken(gCtx *gin.Context) {
 		return
 	}
 
-	go func(ctxCopy *gin.Context) {
-		bgCtx := context.Background()
-		_, err := h.blockchainSvc.Mint(bgCtx, req.TokenContractAddress, req.To, req.Amount)
+	reqCtx := gCtx.Request.Context()
+	ctx := context.WithoutCancel(reqCtx)
+
+	go func(ctx context.Context) {
+		_, err := h.blockchainSvc.Mint(ctx, req.TokenContractAddress, req.To, req.Amount)
 		if err != nil {
 			logger.LogError("Failed to Mint: %s", err.Error())
-			gCtx.JSON(http.StatusInternalServerError, server.MintTokenResponse{
-				Message: err.Error(),
-			})
 			return
 		}
-	}(gCtx.Copy())
+	}(ctx)
 
-	gCtx.JSON(http.StatusOK, server.MintTokenResponse{
+	gCtx.JSON(http.StatusAccepted, server.MintTokenResponse{
 		Message: "Mint started successfully.",
 	})
 }
 
-func (h *Handler) BurnToken(gCtx *gin.Context) {
+func (h *Handler) BurnTokenAsync(gCtx *gin.Context) {
 	logger.LogInfo("🚀 Starting burn on token")
 
 	var req server.BurnTokenRequest
@@ -237,19 +236,18 @@ func (h *Handler) BurnToken(gCtx *gin.Context) {
 		return
 	}
 
-	go func(ctxCopy *gin.Context) {
-		bgCtx := context.Background()
-		_, err := h.blockchainSvc.Burn(bgCtx, req.TokenContractAddress, req.To, req.Amount)
+	reqCtx := gCtx.Request.Context()
+	ctx := context.WithoutCancel(reqCtx)
+
+	go func(ctx context.Context) {
+		_, err := h.blockchainSvc.Burn(ctx, req.TokenContractAddress, req.To, req.Amount)
 		if err != nil {
 			logger.LogError("Failed to Burn: %s", err.Error())
-			gCtx.JSON(http.StatusInternalServerError, server.BurnTokenResponse{
-				Message: err.Error(),
-			})
 			return
 		}
-	}(gCtx.Copy())
+	}(ctx)
 
-	gCtx.JSON(http.StatusOK, server.BurnTokenResponse{
+	gCtx.JSON(http.StatusAccepted, server.BurnTokenResponse{
 		Message: "Burn started successfully.",
 	})
 }
