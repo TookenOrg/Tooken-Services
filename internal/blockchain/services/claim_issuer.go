@@ -5,6 +5,7 @@ import (
 	"math/big"
 
 	contracts "github.com/TookenOrg/tooken-services/internal/blockchain/contracts/bindings"
+	"github.com/TookenOrg/tooken-services/internal/blockchain/database"
 	"github.com/TookenOrg/tooken-services/internal/blockchain/globals"
 	"github.com/TookenOrg/tooken-services/internal/blockchain/utils"
 	"github.com/TookenOrg/tooken-services/pkg/logger"
@@ -25,13 +26,16 @@ func DeployClaimIssuer(ctx context.Context) (claimIssuerAddr common.Address, cla
 		return
 	}
 
-	err = utils.WaitDeployedTransaction(ctx, tx, true)
+	deployedTxDetails, err := utils.WaitDeployedTransaction(ctx, tx, true)
 	if err != nil {
 		return
 	}
 	logger.LogInfo("📬 Claim Issuer deployed at address: %s", claimIssuerAddr.Hex())
 
-	// TODO : save in dB
+	_, err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "CLAIM_ISSUER", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	if err != nil {
+		return
+	}
 
 	return
 }
@@ -55,13 +59,16 @@ func AddManagementKeyToClaimIssuer(ctx context.Context, claimIssuerInstance *con
 		return
 	}
 
-	err = utils.WaitDeployedTransaction(ctx, tx, false)
+	deployedTxDetails, err := utils.WaitDeployedTransaction(ctx, tx, false)
 	if err != nil {
 		return
 	}
 	logger.LogInfo("📬 Management key added to Claim Issuer")
 
-	// TODO : save in dB
+	_, err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "ADD_MANAGEMENT_KEY", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	if err != nil {
+		return
+	}
 
 	return
 }

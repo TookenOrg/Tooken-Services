@@ -47,10 +47,16 @@ func GenerateTransactOpts(ctx context.Context) (opts *bind.TransactOpts, err err
 	return
 }
 
-func WaitDeployedTransaction(ctx context.Context, tx *types.Transaction, shouldWaitContractReturn bool) (err error) {
+type txDetails struct {
+	Tx            *types.Transaction
+	BlockNumber   big.Int
+	ReceiptStatus uint64
+}
+
+func WaitDeployedTransaction(ctx context.Context, tx *types.Transaction, shouldWaitContractReturn bool) (txDetails txDetails, err error) {
 
 	if tx == nil {
-		return fmt.Errorf("transaction is nil")
+		return txDetails, fmt.Errorf("transaction is nil")
 	}
 
 	txHex := tx.Hash().Hex()
@@ -71,6 +77,9 @@ func WaitDeployedTransaction(ctx context.Context, tx *types.Transaction, shouldW
 	}
 
 	logger.LogInfo("✅ Transaction %s mined successfully in block %d", txHex, receipt.BlockNumber.Uint64())
+	txDetails.Tx = tx
+	txDetails.BlockNumber = *receipt.BlockNumber
+	txDetails.ReceiptStatus = receipt.Status
 
 	if !shouldWaitContractReturn {
 		return
@@ -88,7 +97,7 @@ func WaitDeployedTransaction(ctx context.Context, tx *types.Transaction, shouldW
 			logger.LogWarn("Attemp %d/%d: Failed to get contract code at address %s: %v", attempt, maxRetries, contractAddress.Hex(), err)
 		} else if len(code) > 0 {
 			logger.LogInfo("✅ Contract at address %s is successfully deployed and active.", contractAddress.Hex())
-			return nil
+			return txDetails, nil
 		} else {
 			logger.LogWarn("Attemp %d/%d: Contract code at address %s is empty. Retrying in %s...", attempt, maxRetries, contractAddress.Hex(), retryDelay)
 		}
@@ -98,11 +107,11 @@ func WaitDeployedTransaction(ctx context.Context, tx *types.Transaction, shouldW
 			case <-time.After(retryDelay):
 				// continue to next attempt
 			case <-ctx.Done():
-				return ctx.Err()
+				return txDetails, ctx.Err()
 			}
 		}
 	}
-	return fmt.Errorf("contract at address %s not active after %d attempts", contractAddress.Hex(), maxRetries)
+	return txDetails, fmt.Errorf("contract at address %s not active after %d attempts", contractAddress.Hex(), maxRetries)
 }
 
 func WaitTREXSuiteDeployment(ctx context.Context, trexFactoryInstance *contracts.TREXFactory, salt string) (*contracts.TREXFactoryTREXSuiteDeployed, error) {

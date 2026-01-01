@@ -209,20 +209,20 @@ func (h *Handler) MintToken(gCtx *gin.Context) {
 		return
 	}
 
-	// TODO: use goroutine
-	// https://github.com/TookenOrg/tooken-services/issues/20
-	txDetails, err := h.blockchainSvc.Mint(gCtx.Request.Context(), req.TokenContractAddress, req.To, req.Amount)
-	if err != nil {
-		logger.LogError("Failed to Mint: %s", err.Error())
-		gCtx.JSON(http.StatusInternalServerError, server.MintTokenResponse{
-			Message: err.Error(),
-		})
-		return
-	}
+	go func(ctxCopy *gin.Context) {
+		bgCtx := context.Background()
+		_, err := h.blockchainSvc.Mint(bgCtx, req.TokenContractAddress, req.To, req.Amount)
+		if err != nil {
+			logger.LogError("Failed to Mint: %s", err.Error())
+			gCtx.JSON(http.StatusInternalServerError, server.MintTokenResponse{
+				Message: err.Error(),
+			})
+			return
+		}
+	}(gCtx.Copy())
 
 	gCtx.JSON(http.StatusOK, server.MintTokenResponse{
-		Data:    &txDetails,
-		Message: "The token has been minted successfully.",
+		Message: "Mint started successfully.",
 	})
 }
 
@@ -237,19 +237,19 @@ func (h *Handler) BurnToken(gCtx *gin.Context) {
 		return
 	}
 
-	// TODO: use goroutine
-	// https://github.com/TookenOrg/tooken-services/issues/20
-	txDetails, err := h.blockchainSvc.Burn(gCtx.Request.Context(), req.TokenContractAddress, req.To, req.Amount)
-	if err != nil {
-		logger.LogError("Failed to Burn: %s", err.Error())
-		gCtx.JSON(http.StatusInternalServerError, server.BurnTokenResponse{
-			Message: err.Error(),
-		})
-		return
-	}
+	go func(ctxCopy *gin.Context) {
+		bgCtx := context.Background()
+		_, err := h.blockchainSvc.Burn(bgCtx, req.TokenContractAddress, req.To, req.Amount)
+		if err != nil {
+			logger.LogError("Failed to Burn: %s", err.Error())
+			gCtx.JSON(http.StatusInternalServerError, server.BurnTokenResponse{
+				Message: err.Error(),
+			})
+			return
+		}
+	}(gCtx.Copy())
 
 	gCtx.JSON(http.StatusOK, server.BurnTokenResponse{
-		Data:    &txDetails,
-		Message: "The Token has been burned successfully.",
+		Message: "Burn started successfully.",
 	})
 }

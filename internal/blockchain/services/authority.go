@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"math/big"
 
 	"github.com/TookenOrg/tooken-services/internal/api/server"
 	contracts "github.com/TookenOrg/tooken-services/internal/blockchain/contracts/bindings"
@@ -43,13 +44,17 @@ func (s *Service) ConfigureAuthority(ctx context.Context) (server.TxHashName, er
 		return server.TxHashName{}, fmt.Errorf("failed to add and use TREX version: %w", err)
 	}
 
-	if err = utils.WaitDeployedTransaction(ctx, tx, false); err != nil {
+	deployedTxDetails, err := utils.WaitDeployedTransaction(ctx, tx, false)
+	if err != nil {
 		return server.TxHashName{}, fmt.Errorf("failed to wait for transaction confirmation: %w", err)
 	}
 	logger.LogInfo("📬 Authority configured with TREX version %d.%d.%d successfully", version.Major, version.Minor, version.Patch)
 
 	// DB
-	// Insert in DB
+	_, err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "ADD_USE_TREX_VERSION", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	if err != nil {
+		return server.TxHashName{}, err
+	}
 
 	return server.TxHashName{
 		TransactionHash: tx.Hash().Hex(),

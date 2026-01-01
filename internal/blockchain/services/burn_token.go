@@ -47,7 +47,11 @@ func (s *Service) Burn(ctx context.Context, tokenAddr, to string, humanAmount fl
 		return
 	}
 
-	err = utils.WaitDeployedTransaction(ctx, tx, false)
+	deployedTxDetails, err := utils.WaitDeployedTransaction(ctx, tx, false)
+	if err != nil {
+		return
+	}
+	_, err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "BURN_TOKEN", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), *amtWei)
 	if err != nil {
 		return
 	}
