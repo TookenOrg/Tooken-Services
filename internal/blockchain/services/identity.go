@@ -110,7 +110,7 @@ func deployIdentityProxy(ctx context.Context) (proxyAddr common.Address, tx *typ
 
 	logger.LogInfo("📬 Identity Proxy deployed at address: %s", proxyAddr.Hex())
 
-	_, err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "IDENTITY_PROXY", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "IDENTITY_PROXY", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
 	if err != nil {
 		return
 	}

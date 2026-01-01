@@ -77,6 +77,7 @@ func WaitDeployedTransaction(ctx context.Context, tx *types.Transaction, shouldW
 	}
 
 	logger.LogInfo("✅ Transaction %s mined successfully in block %d", txHex, receipt.BlockNumber.Uint64())
+
 	txDetails.Tx = tx
 	txDetails.BlockNumber = *receipt.BlockNumber
 	txDetails.ReceiptStatus = receipt.Status

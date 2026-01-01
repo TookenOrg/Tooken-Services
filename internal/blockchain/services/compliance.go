@@ -64,7 +64,7 @@ func deployModularCompliance(ctx context.Context) (modularComplianceAddr common.
 	}
 	logger.LogInfo("📬 Modular compliance deployed with transaction : %s", tx.Hash().Hex())
 
-	_, err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "MODULAR_COMPLIANCE", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "MODULAR_COMPLIANCE", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
 	if err != nil {
 		return
 	}
@@ -103,7 +103,7 @@ func addTransferRestrictModuleInCompliance(ctx context.Context, complianceInstan
 	}
 	logger.LogInfo("📬 Module added in compliance with transaction: %s", moduleAddr.Hex())
 
-	_, err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "ADD_TRANSFER_RESTRICT_MODULE", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "ADD_TRANSFER_RESTRICT_MODULE", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
 	if err != nil {
 		return
 	}
@@ -147,7 +147,7 @@ func DeployTransferRestrictModule(ctx context.Context, auth *bind.TransactOpts) 
 	}
 	logger.LogInfo("📬 Transfer Restriction Module deployed at address: %s", moduleAddr.Hex())
 
-	_, err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "DEPLOY_TRANSFER_RESTRICT_MODULE", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "DEPLOY_TRANSFER_RESTRICT_MODULE", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
 	if err != nil {
 		return
 	}
@@ -170,7 +170,7 @@ func bindTokenToCompliance(ctx context.Context, modularComplianceInstance *contr
 	}
 	logger.LogInfo("📬 Binding Token completed at address [%s]", tx.Hash().Hex())
 
-	_, err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "BIND_TOKEN_TO_COMPLIANCE", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "BIND_TOKEN_TO_COMPLIANCE", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
 	if err != nil {
 		return
 	}

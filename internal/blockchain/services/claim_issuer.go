@@ -32,7 +32,7 @@ func DeployClaimIssuer(ctx context.Context) (claimIssuerAddr common.Address, cla
 	}
 	logger.LogInfo("📬 Claim Issuer deployed at address: %s", claimIssuerAddr.Hex())
 
-	_, err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "CLAIM_ISSUER", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "CLAIM_ISSUER", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
 	if err != nil {
 		return
 	}
@@ -65,7 +65,7 @@ func AddManagementKeyToClaimIssuer(ctx context.Context, claimIssuerInstance *con
 	}
 	logger.LogInfo("📬 Management key added to Claim Issuer")
 
-	_, err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "ADD_MANAGEMENT_KEY", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "ADD_MANAGEMENT_KEY", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
 	if err != nil {
 		return
 	}

@@ -216,7 +216,7 @@ func addClaim(ctx context.Context, identityInstance *contracts.Identity, addClai
 
 	logger.LogInfo("📬 Claim added on Identity with transaction: %s", tx.Hash().Hex())
 
-	_, err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "ADD_CLAIMS_INDENTITY", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "ADD_CLAIMS_INDENTITY", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
 	if err != nil {
 		return
 	}

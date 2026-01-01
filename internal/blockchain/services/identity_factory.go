@@ -56,7 +56,7 @@ func deployIdentityFactory(ctx context.Context, implementationAuthorityAddrCommo
 	}
 	logger.LogInfo("📬 Identity Factory deployed at address: %s", idAddr.Hex())
 
-	_, err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "IDENTITY_FACTORY", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "IDENTITY_FACTORY", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
 	if err != nil {
 		return
 	}

@@ -130,7 +130,7 @@ func addAgentOnToken(ctx context.Context, tokenInstance contracts.Token) (tx *ty
 	}
 	logger.LogInfo("📬 Agent added on transaction: %s", tx.Hash().Hex())
 
-	_, err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "ADD_AGENT_TOKEN", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "ADD_AGENT_TOKEN", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
 	if err != nil {
 		return
 	}
@@ -156,7 +156,7 @@ func unpauseToken(ctx context.Context, tokenInstance contracts.Token) (tx *types
 	}
 	logger.LogInfo("📬 Token unpaused on transaction: %s", tx.Hash().Hex())
 
-	_, err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "UNPAUSE_TOKEN", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "UNPAUSE_TOKEN", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
 	if err != nil {
 		return
 	}

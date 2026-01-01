@@ -53,7 +53,7 @@ func (s *Service) Mint(ctx context.Context, tokenAddr, to string, humanAmount fl
 	}
 	logger.LogInfo("📬 [%s] tokens minted on Token contract [%s]", amtWei.String(), tokenAddr)
 
-	_, err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "MINT_TOKEN", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), *amtWei)
+	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "MINT_TOKEN", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), *amtWei)
 	if err != nil {
 		return
 	}

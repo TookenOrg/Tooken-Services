@@ -47,7 +47,7 @@ func deployTokenProxy(ctx context.Context, trexAuthorityImplementationAddr commo
 	logger.LogInfo("📬 Token Proxy deployed at address [%s]", tx.Hash().Hex())
 	logger.LogInfo("Token Proxy generate new token at address %s", tokenAddr)
 
-	_, err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "TOKEN_PROXY", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "TOKEN_PROXY", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
 	if err != nil {
 		return
 	}

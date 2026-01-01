@@ -34,7 +34,7 @@ func registerIdentity(ctx context.Context, userWallet, identityAddress common.Ad
 
 	logger.LogInfo("📬 Identity registred on transaction: %s", tx.Hash().Hex())
 
-	_, err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "REGISTER_IDENTITY", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "REGISTER_IDENTITY", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
 	if err != nil {
 		return
 	}
@@ -66,7 +66,7 @@ func addAgentOnIdentityRegistry(ctx context.Context, tokenAddr common.Address) (
 
 	logger.LogInfo("📬 Agent added on identity registry: %s", tx.Hash().Hex())
 
-	_, err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "ADD_AGENT_IDENTITY_REGISTRY", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "ADD_AGENT_IDENTITY_REGISTRY", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
 	if err != nil {
 		return
 	}

@@ -71,7 +71,7 @@ func deployTrexFactory(ctx context.Context, authorityAddr, identityFactoryAddr c
 
 	logger.LogInfo("📬 Trex Factory deployed at address: %s", factoryAddr.Hex())
 
-	_, err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "TREX_FACTORY", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "TREX_FACTORY", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
 	if err != nil {
 		return
 	}
@@ -119,7 +119,7 @@ func addTokenFactory(ctx context.Context, identityFactoryAddr, factoryAddr commo
 	}
 	logger.LogInfo("📬 Token factory added to identity factory")
 
-	_, err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "ADD_TOKEN_FACTORY", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "ADD_TOKEN_FACTORY", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
 	if err != nil {
 		return
 	}
@@ -155,7 +155,7 @@ func setTREXFactory(ctx context.Context, authorityAddr, factoryAddr common.Addre
 
 	logger.LogInfo("📬 TREX factory set")
 
-	_, err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "SET_TREX_FACTORY", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "SET_TREX_FACTORY", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
 	if err != nil {
 		return
 	}
