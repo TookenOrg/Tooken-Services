@@ -3,6 +3,8 @@ package main
 import (
 	"database/sql"
 	"os"
+	"strings"
+	"time"
 
 	"fmt"
 	"log"
@@ -16,6 +18,7 @@ import (
 	"github.com/TookenOrg/tooken-services/internal/blockchain/services"
 	"github.com/TookenOrg/tooken-services/internal/globals"
 	"github.com/TookenOrg/tooken-services/pkg/logger"
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	swgui "github.com/swaggest/swgui/v5"
@@ -57,6 +60,26 @@ func startServer() {
 
 	router := gin.Default()
 
+	// --- CORS --- //
+	router.Use(cors.New(cors.Config{
+
+		AllowOrigins: getCorsOrigins(),
+
+		AllowMethods: []string{
+			"GET", "POST", "PUT", "DELETE", "OPTIONS",
+		},
+		AllowHeaders: []string{
+			"Origin",
+			"Content-Type",
+			"Authorization",
+		},
+		ExposeHeaders: []string{
+			"Content-Length",
+		},
+		AllowCredentials: true,
+		MaxAge:           12 * time.Hour,
+	}))
+
 	apiV1 := router.Group("/api/v1")
 	handler := handlers.NewHandler()
 	server.RegisterHandlers(apiV1, handler)
@@ -70,6 +93,14 @@ func startServer() {
 	if err := router.Run(":8080"); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
 	}
+}
+
+func getCorsOrigins() []string {
+	origins := os.Getenv("CORS_ALLOWED_ORIGINS")
+	if origins == "" {
+		return []string{}
+	}
+	return strings.Split(origins, ",")
 }
 
 func setupDatabase() (dbClient *sql.DB, err error) {

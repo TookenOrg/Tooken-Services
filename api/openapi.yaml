@@ -390,7 +390,22 @@ components:
             json: ",omitempty"
 
     JwtToken:
-      type: string
+      type: object
+      required:
+        - token
+        - refreshToken
+        - user
+        - expiresAt
+      properties:
+        token:
+          type: string
+        refreshToken:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+        user:
+          $ref: "#/components/schemas/User"
 
     SignUpRequest:
       type: object
@@ -444,6 +459,12 @@ components:
 
     User:
       type: object
+      required:
+        - id
+        - full_name
+        - email
+        - created_at
+        - updated_at
       properties:
         id:
           type: integer
@@ -458,9 +479,6 @@ components:
           format: email
           description: Email de l'utilisateur
           example: "anto@example.com"
-        hashed_password:
-          type: string
-          description: Mot de passe hashé
         created_at:
           type: string
           format: date-time
@@ -477,12 +495,6 @@ components:
           nullable: true
           description: Date de la dernière connexion
           example: "2026-01-10T15:30:00Z"
-      required:
-        - id
-        - full_name
-        - email
-        - created_at
-        - updated_at
 
     InitializeIdentityFactoryResponse:
       allOf:

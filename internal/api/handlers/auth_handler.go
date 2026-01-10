@@ -45,7 +45,7 @@ func (h *Handler) PostAuthSignIn(gCtx *gin.Context) {
 		return
 	}
 
-	jwtToken, err := h.authSvc.SignIn(gCtx.Request.Context(), string(req.Email), req.Password)
+	user, jwtToken, refreshToken, tokenExpireAt, err := h.authSvc.SignIn(gCtx.Request.Context(), string(req.Email), req.Password)
 	if err != nil {
 		gCtx.JSON(http.StatusBadRequest, server.APIResponse{
 			Message: "Invalid email or password.",
@@ -53,9 +53,14 @@ func (h *Handler) PostAuthSignIn(gCtx *gin.Context) {
 		return
 	}
 
-	gCtx.JSON(http.StatusOK, server.APIResponse{
+	gCtx.JSON(http.StatusOK, server.SignInResponse{
 		Message: "User connected successfully.",
-		Data:    jwtToken,
+		Data: &server.JwtToken{
+			Token:        jwtToken,
+			User:         user,
+			RefreshToken: refreshToken,
+			ExpiresAt:    tokenExpireAt,
+		},
 	})
 }
 
