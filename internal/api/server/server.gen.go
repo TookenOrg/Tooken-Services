@@ -17,6 +17,7 @@ import (
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/gin-gonic/gin"
 	"github.com/oapi-codegen/runtime"
+	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
 // APIResponse defines model for APIResponse.
@@ -128,6 +129,14 @@ type InitializeIdentityFactoryResponse struct {
 	Message string           `json:"message"`
 }
 
+// JwtToken defines model for JwtToken.
+type JwtToken struct {
+	ExpiresAt    time.Time `json:"expiresAt"`
+	RefreshToken string    `json:"refreshToken"`
+	Token        string    `json:"token"`
+	User         User      `json:"user"`
+}
+
 // MintTokenRequest defines model for MintTokenRequest.
 type MintTokenRequest struct {
 	// Amount The amount of tokens to mint, in human format (not wei)
@@ -144,6 +153,31 @@ type MintTokenRequest struct {
 type MintTokenResponse struct {
 	Data    *TxHashName `json:"data,omitempty"`
 	Message string      `json:"message"`
+}
+
+// SignInRequest defines model for SignInRequest.
+type SignInRequest struct {
+	Email    openapi_types.Email `json:"email"`
+	Password string              `json:"password"`
+}
+
+// SignInResponse defines model for SignInResponse.
+type SignInResponse struct {
+	Data    *JwtToken `json:"data,omitempty"`
+	Message string    `json:"message"`
+}
+
+// SignUpRequest defines model for SignUpRequest.
+type SignUpRequest struct {
+	Email    openapi_types.Email `json:"email"`
+	FullName string              `json:"fullName"`
+	Password string              `json:"password"`
+}
+
+// SignUpResponse defines model for SignUpResponse.
+type SignUpResponse struct {
+	Data    *JwtToken `json:"data,omitempty"`
+	Message string    `json:"message"`
 }
 
 // TokenDetails defines model for TokenDetails.
@@ -211,11 +245,38 @@ type TxHashName struct {
 	TransactionHash string `json:"transactionHash"`
 }
 
+// User defines model for User.
+type User struct {
+	// CreatedAt Date de création du compte
+	CreatedAt time.Time `json:"created_at"`
+
+	// Email Email de l'utilisateur
+	Email openapi_types.Email `json:"email"`
+
+	// FullName Nom complet de l'utilisateur
+	FullName string `json:"full_name"`
+
+	// Id ID unique de l'utilisateur
+	Id int `json:"id"`
+
+	// LastConnexion Date de la dernière connexion
+	LastConnexion *time.Time `json:"last_connexion"`
+
+	// UpdatedAt Date de dernière mise à jour
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 // GetTrexSuiteInfosParams defines parameters for GetTrexSuiteInfos.
 type GetTrexSuiteInfosParams struct {
 	// Salt Salt used for the TREX Suite deployment (optional, uses default if not provided)
 	Salt *string `form:"salt,omitempty" json:"salt,omitempty"`
 }
+
+// PostAuthSignInJSONRequestBody defines body for PostAuthSignIn for application/json ContentType.
+type PostAuthSignInJSONRequestBody = SignInRequest
+
+// PostAuthSignUpJSONRequestBody defines body for PostAuthSignUp for application/json ContentType.
+type PostAuthSignUpJSONRequestBody = SignUpRequest
 
 // CreateIdentityJSONRequestBody defines body for CreateIdentity for application/json ContentType.
 type CreateIdentityJSONRequestBody = CreateIdentityRequest
@@ -234,6 +295,12 @@ type MintTokenAsyncJSONRequestBody = MintTokenRequest
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// Auth existing user and return a JWT
+	// (POST /auth/sign-in)
+	PostAuthSignIn(c *gin.Context)
+	// Create a new user and return a JWT
+	// (POST /auth/sign-up)
+	PostAuthSignUp(c *gin.Context)
 	// Create new Identity contract and add it to the registry
 	// (POST /contract/identity)
 	CreateIdentity(c *gin.Context)
@@ -276,6 +343,9 @@ type ServerInterface interface {
 	// Get deployed TREX Suite information
 	// (GET /trex/suite)
 	GetTrexSuiteInfos(c *gin.Context, params GetTrexSuiteInfosParams)
+	// GetUserById
+	// (GET /user/{userId})
+	GetUserById(c *gin.Context, userId int64)
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
@@ -286,6 +356,32 @@ type ServerInterfaceWrapper struct {
 }
 
 type MiddlewareFunc func(c *gin.Context)
+
+// PostAuthSignIn operation middleware
+func (siw *ServerInterfaceWrapper) PostAuthSignIn(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAuthSignIn(c)
+}
+
+// PostAuthSignUp operation middleware
+func (siw *ServerInterfaceWrapper) PostAuthSignUp(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAuthSignUp(c)
+}
 
 // CreateIdentity operation middleware
 func (siw *ServerInterfaceWrapper) CreateIdentity(c *gin.Context) {
@@ -493,6 +589,30 @@ func (siw *ServerInterfaceWrapper) GetTrexSuiteInfos(c *gin.Context) {
 	siw.Handler.GetTrexSuiteInfos(c, params)
 }
 
+// GetUserById operation middleware
+func (siw *ServerInterfaceWrapper) GetUserById(c *gin.Context) {
+
+	var err error
+
+	// ------------- Path parameter "userId" -------------
+	var userId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "userId", c.Param("userId"), &userId, runtime.BindStyledParameterOptions{Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter userId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetUserById(c, userId)
+}
+
 // GinServerOptions provides options for the Gin server.
 type GinServerOptions struct {
 	BaseURL      string
@@ -520,6 +640,8 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 		ErrorHandler:       errorHandler,
 	}
 
+	router.POST(options.BaseURL+"/auth/sign-in", wrapper.PostAuthSignIn)
+	router.POST(options.BaseURL+"/auth/sign-up", wrapper.PostAuthSignUp)
 	router.POST(options.BaseURL+"/contract/identity", wrapper.CreateIdentity)
 	router.POST(options.BaseURL+"/contract/identity/claims/add", wrapper.AddClaimToIdentity)
 	router.POST(options.BaseURL+"/contract/token", wrapper.CreateTokenContract)
@@ -534,51 +656,61 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/trex/init/implementations", wrapper.DeployAllImplementationsAsync)
 	router.POST(options.BaseURL+"/trex/init/suite/deploy", wrapper.DeployTrexSuiteAsync)
 	router.GET(options.BaseURL+"/trex/suite", wrapper.GetTrexSuiteInfos)
+	router.GET(options.BaseURL+"/user/:userId", wrapper.GetUserById)
 }
 
 // Base64 encoded, gzipped, json marshaled Swagger object
 var swaggerSpec = []string{
 
-	"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",
+	"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",
 }
 
 // GetSwagger returns the content of the embedded swagger specification file

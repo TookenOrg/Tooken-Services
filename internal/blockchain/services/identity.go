@@ -25,7 +25,7 @@ func (s *Service) CreateIdentity(ctx context.Context, identityReq server.CreateI
 	}
 
 	// 2 - Generate wallet
-	wallet, walletId, err := generateNewWallet(identityReq.UserId)
+	wallet, walletId, err := GenerateNewWallet(identityReq.UserId)
 	if err != nil {
 		return
 	}
@@ -65,7 +65,7 @@ func isIdempotentIdentity(ctx context.Context, identityReq server.CreateIdentity
 	return existingWalletPtr != nil
 }
 
-func generateNewWallet(userId int) (publicKey common.Address, walletId int64, err error) {
+func GenerateNewWallet(userId int) (publicKey common.Address, walletId int64, err error) {
 	logger.LogDebug("Generating new wallet address for user [%d]", userId)
 
 	privateKeyecdsa, err := crypto.GenerateKey()
