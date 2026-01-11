@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/TookenOrg/tooken-services/internal/api/server"
+	assetsService "github.com/TookenOrg/tooken-services/internal/assets_managements/services"
 	authService "github.com/TookenOrg/tooken-services/internal/auth/services"
 	blockchainService "github.com/TookenOrg/tooken-services/internal/blockchain/services"
 	paymentsService "github.com/TookenOrg/tooken-services/internal/payments/services"
@@ -14,6 +15,7 @@ type Handler struct {
 	blockchainSvc *blockchainService.Service
 	paymentsSvc   *paymentsService.Service
 	authSvc       *authService.Service
+	realEstateSvc *assetsService.Service
 }
 
 func NewHandler() server.ServerInterface {
@@ -21,6 +23,7 @@ func NewHandler() server.ServerInterface {
 		blockchainSvc: blockchainService.NewService(),
 		paymentsSvc:   paymentsService.NewService(),
 		authSvc:       authService.NewService(),
+		realEstateSvc: assetsService.NewService(),
 	}
 }
 

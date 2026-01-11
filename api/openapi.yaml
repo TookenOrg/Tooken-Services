@@ -11,9 +11,10 @@ servers:
     description: Production
 
 tags:
-  - name: User
   - name: Auth
   - name: Blockchain
+  - name: Assets
+  - name: User
   - name: Trading
   - name: Payments
 
@@ -25,6 +26,7 @@ paths:
         "200":
           description: OK
 
+  # Auth
   /auth/sign-up:
     post:
       operationId: PostAuthSignUp
@@ -97,6 +99,30 @@ paths:
         "400":
           description: Invalid request
 
+  # Asset
+  /assets/real_estates:
+    get:
+      tags:
+        - Assets
+      summary: Get all real estates
+      operationId: getRealEstates
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RealEstate"
+        "500":
+          description: "Internal Server Error"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+
+  # Blockchain
   /trex/init/implementations:
     post:
       tags:
@@ -809,3 +835,74 @@ components:
           items:
             $ref: "#/components/schemas/TxHashName"
           description: A list of transactions performed on behalf of the identity
+
+    RealEstate:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        description:
+          type: string
+        imageurl:
+          type: string
+        estate_type:
+          type: string
+        estate_type_id:
+          type: integer
+        active:
+          type: boolean
+          description: is estate active
+        created_at:
+          type: string
+          format: date-time
+        contract_address:
+          type: string
+          description: Address of estate on blockchain (token)
+        specificiation:
+          $ref: "#/components/schemas/RealEstateSpecification"
+        configuration:
+          $ref: "#/components/schemas/RealEstateConfiguration"
+
+    RealEstateSpecification:
+      type: object
+      properties:
+        lot_size:
+          type: number
+          format: float
+        surface_area:
+          type: number
+          format: float
+        bedroom_number:
+          type: integer
+        bathroom_number:
+          type: integer
+        pool_size:
+          type: number
+          format: float
+        terrace_size:
+          type: number
+          format: float
+        build_year:
+          type: integer
+
+    RealEstateConfiguration:
+      type: object
+      properties:
+        total_shares:
+          type: integer
+        price_per_share:
+          type: number
+          format: float
+        yield:
+          type: number
+          format: float
+        payment_frequency:
+          type: integer
+        payment_frequency_type_id:
+          type: integer
+        payment_frequency_type:
+          type: string
