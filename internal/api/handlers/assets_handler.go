@@ -8,10 +8,10 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func (h *Handler) GetRealEstates(gCtx *gin.Context) {
+func (h *Handler) GetActiveRealEstates(gCtx *gin.Context) {
 	logger.LogInfo("🚀 Starting get real estates")
 
-	realEstates, err := h.realEstateSvc.GetRealEstates(gCtx.Request.Context())
+	realEstates, err := h.realEstateSvc.GetActiveRealEstates(gCtx.Request.Context())
 
 	if err != nil {
 		gCtx.JSON(http.StatusBadRequest, server.APIResponse{

@@ -9,7 +9,7 @@ import (
 	"github.com/TookenOrg/tooken-services/internal/globals"
 )
 
-func GetRealEstates(ctx context.Context) (realEstates []server.RealEstate, err error) {
+func GetActiveRealEstates(ctx context.Context) (realEstates []server.RealEstate, err error) {
 	query := `
 		SELECT re.id, 
 			re.title, 
@@ -32,12 +32,14 @@ func GetRealEstates(ctx context.Context) (realEstates []server.RealEstate, err e
 			conf.yield, 
 			conf.payment_frequency, 
 			conf.payment_frequency_type as payment_frequency_type_id,
-			payt.name as payment_frequency_type
+			payt.name as payment_frequency_type,
+			0 as token_sold
 		FROM ass.real_estate re
 		LEFT JOIN ass.real_estate_type ret ON re.estate_type = ret.id
 		LEFT JOIN ass.real_estate_specification res ON re.id = res.real_estate_id
 		LEFT JOIN ass.real_estate_shares_config conf ON re.id = conf.real_estate_id
-		LEFT JOIN ass.payment_frequency_type payt ON conf.payment_frequency_type = payt.id;
+		LEFT JOIN ass.payment_frequency_type payt ON conf.payment_frequency_type = payt.id
+		WHERE re.active = true;
 	`
 
 	rows, err := globals.DB.Query(query)
@@ -50,6 +52,7 @@ func GetRealEstates(ctx context.Context) (realEstates []server.RealEstate, err e
 		var e server.RealEstate
 		e.Configuration = &server.RealEstateConfiguration{}
 		e.Specificiation = &server.RealEstateSpecification{}
+		e.Progression = &server.RealEstateProgression{}
 
 		var active sql.NullBool
 		var createdAt sql.NullTime
@@ -57,7 +60,7 @@ func GetRealEstates(ctx context.Context) (realEstates []server.RealEstate, err e
 		var estateTypeId sql.NullInt64
 		var estateType sql.NullString
 		var lotSize, surfaceArea, poolSize, terraceSize, pricePerShare, yield sql.NullFloat64
-		var bedroomNumber, bathroomNumber, builtYear, totalShares, paymentFrequency, paymentFrequencyTypeId sql.NullInt64
+		var bedroomNumber, bathroomNumber, builtYear, totalShares, paymentFrequency, paymentFrequencyTypeId, tokensSold sql.NullInt64
 		var paymentFrequencyName sql.NullString
 
 		err := rows.Scan(
@@ -83,6 +86,7 @@ func GetRealEstates(ctx context.Context) (realEstates []server.RealEstate, err e
 			&paymentFrequency,
 			&paymentFrequencyTypeId,
 			&paymentFrequencyName,
+			&tokensSold,
 		)
 		if err != nil {
 			log.Fatal(err)
@@ -158,6 +162,12 @@ func GetRealEstates(ctx context.Context) (realEstates []server.RealEstate, err e
 		}
 		if paymentFrequencyName.Valid {
 			e.Configuration.PaymentFrequencyType = &paymentFrequencyName.String
+		}
+
+		// Progression
+		if tokensSold.Valid {
+			val := int(tokensSold.Int64)
+			e.Progression.SharesSold = &val
 		}
 
 		realEstates = append(realEstates, e)

@@ -100,12 +100,12 @@ paths:
           description: Invalid request
 
   # Asset
-  /assets/real_estates:
+  /assets/real_estates/active:
     get:
       tags:
         - Assets
       summary: Get all real estates
-      operationId: getRealEstates
+      operationId: getActiveRealEstates
       responses:
         "200":
           description: OK
@@ -866,6 +866,8 @@ components:
           $ref: "#/components/schemas/RealEstateSpecification"
         configuration:
           $ref: "#/components/schemas/RealEstateConfiguration"
+        progression:
+          $ref: "#/components/schemas/RealEstateProgression"
 
     RealEstateSpecification:
       type: object
@@ -906,3 +908,9 @@ components:
           type: integer
         payment_frequency_type:
           type: string
+
+    RealEstateProgression:
+      type: object
+      properties:
+        shares_sold:
+          type: integer
