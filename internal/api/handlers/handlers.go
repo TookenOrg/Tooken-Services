@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/TookenOrg/tooken-services/internal/api/server"
+	assetsService "github.com/TookenOrg/tooken-services/internal/assets_managements/services"
 	authService "github.com/TookenOrg/tooken-services/internal/auth/services"
 	blockchainService "github.com/TookenOrg/tooken-services/internal/blockchain/services"
 	paymentsService "github.com/TookenOrg/tooken-services/internal/payments/services"
