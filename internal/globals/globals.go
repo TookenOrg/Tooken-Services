@@ -5,3 +5,7 @@ import (
 )
 
 var DB *sql.DB
+
+const (
+	BaseURL = "/api/v1"
+)

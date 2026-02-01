@@ -57,6 +57,7 @@ func LogWarn(msg string, args ...any) {
 	Log.Warn(fmt.Sprintf(msg, args...))
 }
 
-func LogError(msg string, args ...any) {
+func LogError(msg string, args ...any) error {
 	Log.Error(fmt.Sprintf(msg, args...))
+	return fmt.Errorf(msg, args...)
 }

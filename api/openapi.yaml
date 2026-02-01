@@ -15,6 +15,7 @@ tags:
   - name: Blockchain
   - name: Assets
   - name: User
+  - name: Issuance
   - name: Trading
   - name: Payments
 
@@ -121,6 +122,31 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/APIResponse"
+
+  /assets/real-estate/issuance/orders:
+    post:
+      security:
+        - bearerAuth: []
+      operationId: createIssuanceOrder
+      summary: Create a new order in primary market
+      tags:
+        - Assets
+        - Issuance
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateIssuanceOrderRequest"
+      responses:
+        "201":
+          description: Subscription created successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateIssuanceOrderResponse"
+        "400":
+          description: Invalid request
 
   /assets/real-estates/{id}:
     get:
@@ -1006,3 +1032,37 @@ components:
         tokens_sold_pctg:
           type: number
           format: float
+
+    CreateIssuanceOrderRequest:
+      type: object
+      required:
+        - real_estate_id
+        - quantity
+      properties:
+        real_estate_id:
+          type: integer
+        quantity:
+          type: integer
+
+    CreateIssuanceOrderResponse:
+      allOf:
+        - $ref: "#/components/schemas/APIResponse"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/IssuanceOrder"
+
+    IssuanceOrder:
+      type: object
+      properties:
+        order_ref:
+          type: string
+        token_quantity:
+          type: integer
+        real_estate_id:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        created_by:
+          type: integer
