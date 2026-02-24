@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"time"
 
 	"github.com/TookenOrg/tooken-services/internal/api/server"
 	"github.com/TookenOrg/tooken-services/internal/globals"
@@ -245,57 +244,4 @@ func GetRealEstateById(ctx context.Context, id int) (server.RealEstate, error) {
 	logger.LogDebug("Real Estate found [%s]", utils.Dump(realEstates))
 
 	return realEstates, nil
-}
-
-func InsertIssuranceOrder(ctx context.Context, realEstateId, quantity, userId int) (id int, createdAt time.Time, err error) {
-	query := `
-		INSERT INTO iss.issuance_orders (
-			user_id,
-			asset_id,
-			quantity,
-			status_id
-		)
-		VALUES (
-			$1,  
-			$2, 
-			$3,  
-			$4   -- status_id (ex: ORDER_CREATED)
-		)
-		RETURNING id, created_at;
-    `
-
-	err = globals.DB.QueryRow(query, userId, realEstateId, quantity, 1).Scan(&id, &createdAt)
-	if err != nil {
-		return 0, time.Time{}, fmt.Errorf("failed to insert issuance order: %w", err)
-	}
-
-	logger.LogInfo("Issuance order inserted. ID=%d", id)
-
-	return
-}
-
-func UpdateReferenceIssuanceOrder(ctx context.Context, orderId int, orderReference string) (err error) {
-	query := `
-		UPDATE iss.issuance_orders
-		SET order_reference = $1
-		WHERE id = $2;
-    `
-
-	res, err := globals.DB.Exec(query, orderReference, orderId)
-	if err != nil {
-		return logger.LogError("failed to insert issuance order: %w", err)
-	}
-
-	updatedRow, err := res.RowsAffected()
-	if err != nil {
-		return
-	}
-
-	if updatedRow != 1 {
-		return logger.LogError("No row updated or more than one raw updated")
-	}
-
-	logger.LogInfo("Issuance order updated with reference %s", orderReference)
-
-	return
 }

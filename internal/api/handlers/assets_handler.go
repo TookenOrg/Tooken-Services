@@ -4,7 +4,6 @@ import (
 	"net/http"
 
 	"github.com/TookenOrg/tooken-services/internal/api/server"
-	"github.com/TookenOrg/tooken-services/internal/middleware"
 	"github.com/TookenOrg/tooken-services/pkg/logger"
 	"github.com/gin-gonic/gin"
 )
@@ -37,33 +36,4 @@ func (h *Handler) GetRealEstateById(gCtx *gin.Context, id int) {
 	}
 
 	gCtx.JSON(http.StatusOK, realEstate)
-}
-
-func (h *Handler) CreateIssuanceOrder(gCtx *gin.Context) {
-
-	var req server.CreateIssuanceOrderRequest
-	if err := gCtx.ShouldBindJSON(&req); err != nil {
-		gCtx.JSON(http.StatusBadRequest, err.Error())
-		return
-	}
-
-	claims, exists := middleware.GetUserClaims(gCtx)
-	if !exists {
-		gCtx.JSON(http.StatusBadRequest, logger.LogError("JWT not valid"))
-		return
-	}
-
-	userId := claims.UserID
-
-	logger.LogInfo("🚀 Starting creating one issuance order for userId %d and real estate id %d, quantity: %d", userId, req.RealEstateId, req.Quantity)
-
-	orderCreated, err := h.realEstateSvc.CreateIssuanceOrder(gCtx.Request.Context(), req, userId)
-	if err != nil {
-		gCtx.JSON(http.StatusBadRequest, server.APIResponse{
-			Message: err.Error(),
-		})
-		return
-	}
-
-	gCtx.JSON(http.StatusOK, orderCreated)
 }

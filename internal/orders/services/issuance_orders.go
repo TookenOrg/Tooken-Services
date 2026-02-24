@@ -8,20 +8,21 @@ import (
 	"time"
 
 	"github.com/TookenOrg/tooken-services/internal/api/server"
-	"github.com/TookenOrg/tooken-services/internal/assets_managements/database"
+	assetManagementDb "github.com/TookenOrg/tooken-services/internal/assets_managements/database"
+	"github.com/TookenOrg/tooken-services/internal/orders/database"
 	"github.com/TookenOrg/tooken-services/pkg/logger"
 )
 
 // Issuance order is for order on primary market
-
 func (s *Service) CreateIssuanceOrder(ctx context.Context, req server.CreateIssuanceOrderRequest, userId int) (order server.IssuanceOrder, err error) {
 
 	// 1 - check request
 	if req.Quantity <= 0 {
 		err = errors.New("Quantity can't be 0 or negative")
+		return
 	}
 
-	realEstate, err := database.GetRealEstateById(ctx, req.RealEstateId)
+	realEstate, err := assetManagementDb.GetRealEstateById(ctx, req.RealEstateId)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return server.IssuanceOrder{}, logger.LogError("Real Estate not found with id %d", req.RealEstateId)
@@ -38,10 +39,21 @@ func (s *Service) CreateIssuanceOrder(ctx context.Context, req server.CreateIssu
 	// 4 - Update the record with reference
 	err = database.UpdateReferenceIssuanceOrder(ctx, idGenerated, orderReference)
 
+	order.CreatedAt = createdAt
+	order.CreatedBy = userId
+	order.OrderRef = orderReference
+	order.RealEstateId = req.RealEstateId
+	order.TokenQuantity = req.Quantity
+
+	// TODO, structToString()
 	logger.LogDebug("%v", realEstate)
 
 	return
 
+}
+
+func (s *Service) FetchIssuanceOrder(ctx context.Context, orderRef string) (order server.IssuanceOrder, err error) {
+	return database.GetIssuanceOrderByRef(ctx, orderRef)
 }
 
 func generateIssuanceOrderReference(id int64, createdAt time.Time) string {

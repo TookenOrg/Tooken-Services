@@ -148,6 +148,34 @@ paths:
         "400":
           description: Invalid request
 
+  /assets/real-estate/issuance/orders/{orderRef}:
+    get:
+      security:
+        - bearerAuth: []
+      operationId: fetchIssuanceOrder
+      summary: Fetch a order in primary market
+      tags:
+        - Issuance
+      parameters:
+        - in: path
+          name: orderRef
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IssuanceOrder"
+        "500":
+          description: "Internal Server Error"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+  
   /assets/real-estates/{id}:
     get:
       tags:
@@ -1036,10 +1064,10 @@ components:
     CreateIssuanceOrderRequest:
       type: object
       required:
-        - real_estate_id
+        - realEstateId
         - quantity
       properties:
-        real_estate_id:
+        realEstateId:
           type: integer
         quantity:
           type: integer
@@ -1054,15 +1082,37 @@ components:
 
     IssuanceOrder:
       type: object
+      required:
+        - userId
+        - orderRef
+        - tokenQuantity
+        - realEstateId
+        - createdAt
+        - createdBy
       properties:
-        order_ref:
+        id:
+          type: integer
+        userId:
+          type: integer
+        orderRef:
           type: string
-        token_quantity:
+        tokenQuantity:
           type: integer
-        real_estate_id:
+        realEstateId:
           type: integer
-        created_at:
+        statusId:
+          type: integer
+        statusCode:
+          type: string
+        statusLabel:
+          type: string
+        statusIfFinal:
+          type: boolean
+        createdAt:
           type: string
           format: date-time
-        created_by:
+        updatedAt:
+          type: string
+          format: date-time
+        createdBy:
           type: integer
