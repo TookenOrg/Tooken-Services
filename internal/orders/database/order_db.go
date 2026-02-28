@@ -74,7 +74,7 @@ func InsertIssuranceOrder(ctx context.Context, realEstateId, quantity, userId in
 			$1,  
 			$2, 
 			$3,  
-			$4   -- status_id (ex: ORDER_CREATED)
+			$4   
 		)
 		RETURNING id, created_at;
     `
@@ -98,7 +98,7 @@ func UpdateReferenceIssuanceOrder(ctx context.Context, orderId int, orderReferen
 
 	res, err := globals.DB.Exec(query, orderReference, orderId)
 	if err != nil {
-		return logger.LogError("failed to insert issuance order: %w", err)
+		return logger.LogError("failed to insert issuance order: %v", err)
 	}
 
 	updatedRow, err := res.RowsAffected()
