@@ -17,6 +17,7 @@ import (
 	blkGlobals "github.com/TookenOrg/tooken-services/internal/blockchain/globals"
 	"github.com/TookenOrg/tooken-services/internal/blockchain/services"
 	"github.com/TookenOrg/tooken-services/internal/globals"
+	"github.com/TookenOrg/tooken-services/internal/middleware"
 	"github.com/TookenOrg/tooken-services/pkg/logger"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -58,13 +59,15 @@ func main() {
 
 func startServer() {
 
+	if err := middleware.InitAuth("./api/openapi.yaml"); err != nil {
+		log.Fatalf("Error during authentication initialization: %v", err)
+	}
+
 	router := gin.Default()
 
 	// --- CORS --- //
 	router.Use(cors.New(cors.Config{
-
 		AllowOrigins: getCorsOrigins(),
-
 		AllowMethods: []string{
 			"GET", "POST", "PUT", "DELETE", "OPTIONS",
 		},
@@ -80,7 +83,11 @@ func startServer() {
 		MaxAge:           12 * time.Hour,
 	}))
 
-	apiV1 := router.Group("/api/v1")
+	apiV1 := router.Group(globals.BaseURL)
+
+	// Applies automatic middleware
+	apiV1.Use(middleware.AutoAuthMiddleware())
+
 	handler := handlers.NewHandler()
 	server.RegisterHandlers(apiV1, handler)
 

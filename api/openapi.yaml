@@ -15,6 +15,7 @@ tags:
   - name: Blockchain
   - name: Assets
   - name: User
+  - name: Issuance
   - name: Trading
   - name: Payments
 
@@ -122,6 +123,59 @@ paths:
               schema:
                 $ref: "#/components/schemas/APIResponse"
 
+  /assets/real-estate/issuance/orders:
+    post:
+      security:
+        - bearerAuth: []
+      operationId: createIssuanceOrder
+      summary: Create a new order in primary market
+      tags:
+        - Assets
+        - Issuance
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateIssuanceOrderRequest"
+      responses:
+        "201":
+          description: Subscription created successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateIssuanceOrderResponse"
+        "400":
+          description: Invalid request
+
+  /assets/real-estate/issuance/orders/{orderRef}:
+    get:
+      security:
+        - bearerAuth: []
+      operationId: fetchIssuanceOrder
+      summary: Fetch a order in primary market
+      tags:
+        - Issuance
+      parameters:
+        - in: path
+          name: orderRef
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IssuanceOrder"
+        "500":
+          description: "Internal Server Error"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+  
   /assets/real-estates/{id}:
     get:
       tags:
@@ -1006,3 +1060,59 @@ components:
         tokens_sold_pctg:
           type: number
           format: float
+
+    CreateIssuanceOrderRequest:
+      type: object
+      required:
+        - realEstateId
+        - quantity
+      properties:
+        realEstateId:
+          type: integer
+        quantity:
+          type: integer
+
+    CreateIssuanceOrderResponse:
+      allOf:
+        - $ref: "#/components/schemas/APIResponse"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/IssuanceOrder"
+
+    IssuanceOrder:
+      type: object
+      required:
+        - userId
+        - orderRef
+        - tokenQuantity
+        - realEstateId
+        - createdAt
+        - createdBy
+      properties:
+        id:
+          type: integer
+        userId:
+          type: integer
+        orderRef:
+          type: string
+        tokenQuantity:
+          type: integer
+        realEstateId:
+          type: integer
+        statusId:
+          type: integer
+        statusCode:
+          type: string
+        statusLabel:
+          type: string
+        statusIfFinal:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        createdBy:
+          type: integer

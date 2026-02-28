@@ -7,6 +7,7 @@ import (
 	assetsService "github.com/TookenOrg/tooken-services/internal/assets_managements/services"
 	authService "github.com/TookenOrg/tooken-services/internal/auth/services"
 	blockchainService "github.com/TookenOrg/tooken-services/internal/blockchain/services"
+	ordersService "github.com/TookenOrg/tooken-services/internal/orders/services"
 	paymentsService "github.com/TookenOrg/tooken-services/internal/payments/services"
 	usersService "github.com/TookenOrg/tooken-services/internal/users/services"
 	"github.com/gin-gonic/gin"
@@ -18,6 +19,7 @@ type Handler struct {
 	authSvc       *authService.Service
 	userSvc       *usersService.Service
 	realEstateSvc *assetsService.Service
+	orderSvc      *ordersService.Service
 }
 
 func NewHandler() server.ServerInterface {
@@ -26,6 +28,7 @@ func NewHandler() server.ServerInterface {
 		paymentsSvc:   paymentsService.NewService(),
 		authSvc:       authService.NewService(),
 		realEstateSvc: assetsService.NewService(),
+		orderSvc:      ordersService.NewService(),
 		userSvc:       usersService.NewService(),
 	}
 }
