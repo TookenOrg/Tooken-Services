@@ -27,11 +27,14 @@ func (s *Service) CreateIssuanceOrder(ctx context.Context, req server.CreateIssu
 		if err == sql.ErrNoRows {
 			return server.IssuanceOrder{}, logger.LogError("Real Estate not found with id %d", req.RealEstateId)
 		}
-		return server.IssuanceOrder{}, err
+		return
 	}
 
 	// 2 - Insert in DB without ref
 	idGenerated, createdAt, err := database.InsertIssuranceOrder(ctx, req.RealEstateId, req.Quantity, userId)
+	if err != nil {
+		return
+	}
 
 	// 3 - Generate a unique order reference
 	orderReference := generateIssuanceOrderReference(int64(idGenerated), createdAt)
