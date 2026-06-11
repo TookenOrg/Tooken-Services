@@ -192,7 +192,7 @@ func (s *Service) DeployTrexSuite(ctx context.Context) (deployedContracts []serv
 	})
 
 	// 3 - Add management key to claim issuer
-	err = AddManagementKeyToClaimIssuer(ctx, claimIssuerInstance)
+	err = AddClaimSignerKeyToClaimIssuer(ctx, claimIssuerInstance)
 	if err != nil {
 		return
 	}
@@ -226,7 +226,7 @@ func defineTokenSuiteDetails(moduleAddrs []common.Address) contracts.ITREXFactor
 		Symbol:             "TOOK",
 		Decimals:           18,
 		Irs:                common.Address{},
-		ONCHAINID:          ethFrom,
+		ONCHAINID:          common.Address{},
 		IrAgents:           []common.Address{ethFrom},
 		TokenAgents:        []common.Address{ethFrom},
 		ComplianceModules:  moduleAddrs,

@@ -20,6 +20,12 @@ import (
 
 func (s *Service) CreateToken(ctx context.Context, req server.CreateTokenRequest) (newToken server.TokenInfos, err error) {
 
+	// 0 - Validate input (T-REX Token.init enforces decimals <= 18 on-chain)
+	if req.NbDecimal < 0 || req.NbDecimal > 18 {
+		err = errors.New("nbDecimal must be between 0 and 18")
+		return
+	}
+
 	// 1 - Idempotency
 	if !isIdempotentToken(ctx, req) {
 		err = errors.New("Token already exists")

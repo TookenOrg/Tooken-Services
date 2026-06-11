@@ -37,7 +37,7 @@ func deployTokenProxy(ctx context.Context, trexAuthorityImplementationAddr commo
 		tokenName,
 		symbol,
 		uint8(nbDecimal),
-		common.HexToAddress(auth.From.Hex()),
+		common.Address{},
 	)
 
 	deployedTxDetails, err := utils.WaitDeployedTransaction(ctx, tx, true)

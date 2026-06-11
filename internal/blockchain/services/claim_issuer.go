@@ -40,16 +40,17 @@ func DeployClaimIssuer(ctx context.Context) (claimIssuerAddr common.Address, cla
 	return
 }
 
-func AddManagementKeyToClaimIssuer(ctx context.Context, claimIssuerInstance *contracts.ClaimIssuer) (err error) {
+func AddClaimSignerKeyToClaimIssuer(ctx context.Context, claimIssuerInstance *contracts.ClaimIssuer) (err error) {
 
 	auth, err := utils.GenerateTransactOpts(ctx)
 	if err != nil {
 		return
 	}
 
-	key := crypto.Keccak256Hash(auth.From.Bytes())
+	// ONCHAINID keys are keccak256(abi.encode(address)) == keccak256(left-pad-32(address)).
+	key := crypto.Keccak256Hash(common.LeftPadBytes(auth.From.Bytes(), 32))
 
-	logger.LogInfo("💌 Send transaction to add management key to Claim Issuer...")
+	logger.LogInfo("💌 Send transaction to add claim-signer key to Claim Issuer...")
 	tx, err := claimIssuerInstance.AddKey(
 		auth,
 		key, big.NewInt(3),
@@ -63,7 +64,7 @@ func AddManagementKeyToClaimIssuer(ctx context.Context, claimIssuerInstance *con
 	if err != nil {
 		return
 	}
-	logger.LogInfo("📬 Management key added to Claim Issuer")
+	logger.LogInfo("📬 Claim-signer key added to Claim Issuer")
 
 	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "ADD_MANAGEMENT_KEY", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
 	if err != nil {
