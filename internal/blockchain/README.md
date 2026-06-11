@@ -352,3 +352,23 @@ module or extending it.
   (`GetTrexSuite`, `GetTREXFactoryAddress`) are stubs returning empty/`not implemented`.
 - `contracts/bindings/*` are abigen-generated — regenerate from the Solidity
   sources, never hand-edit.
+
+---
+
+## 9. Tests
+
+- **Unit tests** (no chain/DB; run in CI via `go test ./...`): pure helpers in
+  `utils/` (`ConvertFloatToWei`, `FindContractByName`) and `services/`
+  (`buildTokenDetails`, `defineClaimSuiteDetails`, `controlInputMintBurn`,
+  `defineAuthorityVersion`, and the ONCHAINID claim signature / key derivation).
+- **Integration tests** (gated by the `integration` build tag, **skipped by default
+  CI**) deploy a real contract on a local EVM and exercise `GenerateTransactOpts` +
+  `WaitDeployedTransaction`. A minimal Hardhat harness lives in `tools/hardhat/`:
+
+  ```bash
+  cd tools/hardhat && npm install && npx hardhat node   # terminal 1
+  go test -tags integration ./internal/blockchain/...   # terminal 2
+  ```
+
+  Override the endpoint with `ETH_TEST_RPC` and the signer with `PRIVATE_KEY`
+  (defaults to a publicly-known Hardhat dev account).
