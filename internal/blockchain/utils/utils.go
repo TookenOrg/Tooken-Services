@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"errors"
 	"math/big"
 
 	"github.com/shopspring/decimal"
@@ -9,7 +10,7 @@ import (
 func ConvertFloatToWei(f float64, decimalNumber int64) (wei *big.Int, err error) {
 	dec := decimal.NewFromFloat(f)
 	if dec.IsNegative() {
-		return
+		return nil, errors.New("amount must not be negative")
 	}
 
 	scale := decimal.NewFromInt(10).Pow(decimal.NewFromInt(decimalNumber))

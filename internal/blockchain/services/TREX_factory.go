@@ -76,6 +76,10 @@ func deployTrexFactory(ctx context.Context, authorityAddr, identityFactoryAddr c
 		return
 	}
 
+	if _, perr := database.InsertContractRole(ctx, deployedTxDetails.Tx.Hash().Hex(), factoryAddr.Hex(), globals.TrexFactoryName); perr != nil {
+		logger.LogWarn("could not persist TREX_FACTORY role: %s", perr.Error())
+	}
+
 	return
 }
 
@@ -288,7 +292,10 @@ func deployTrexSuite(ctx context.Context, tokenDetails contracts.ITREXFactoryTok
 	logger.LogInfo("ModularCompliance: %s", deploymentDetails.Mc.Hex())
 	logger.LogInfo("ClaimsTopicRegistry: %s", deploymentDetails.Ctr.Hex())
 
-	// TODO: save deploymentDetails in DB
+	// Persist the shared IRS so each token created later reuses the same investor whitelist.
+	if _, perr := database.InsertContractRole(ctx, txDeploySuite.Hash().Hex(), deploymentDetails.Irs.Hex(), globals.SharedIdentityRegistryStorageName); perr != nil {
+		logger.LogWarn("could not persist shared IRS role: %s", perr.Error())
+	}
 
 	return
 }

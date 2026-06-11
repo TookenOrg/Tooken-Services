@@ -197,31 +197,28 @@ hand against an **existing** `IdentityRegistry` instance read from
 sequenceDiagram
     participant H as Handler
     participant T as CreateToken
-    participant C as compliance.go
-    participant P as token_proxy.go
-    participant Chain as EVM
     participant DB as blk.*
+    participant F as TREXFactory
+    participant Chain as EVM
 
     H->>T: CreateToken(req)
-    T->>T: isIdempotentToken (blk.token by name)
-    T->>T: retrieveTrexAuthorityAddress (impl)
-    T->>C: deployComplianceSuite()
-    C->>Chain: deploy ModularComplianceProxy
-    C->>Chain: AddModule(TransferRestrictModule)
-    C-->>T: ComplianceSuite
-    T->>P: deployTokenProxy(authority, IR, compliance, name, decimals)
-    P->>Chain: DeployTokenProxy(...)
-    P-->>T: tokenAddr
-    T->>C: bindTokenToCompliance(token)
-    T->>Chain: Token.AddAgent(platform)
+    T->>T: validate decimals + isIdempotentToken (blk.token by name)
+    T->>DB: resolve shared TREX_FACTORY / CLAIM_ISSUER / module / SHARED_IRS
+    T->>F: DeployTREXSuite(salt, tokenDetails{irs: shared, ONCHAINID: 0}, claimDetails{topic 7})
+    F->>Chain: deploy IR/TIR/CTR/MC + Token (reusing the shared IRS)
+    F-->>T: TREXSuiteDeployed event (token, ir, irs, mc)
+    T->>DB: persist SHARED_IRS (first token only) + token (blk.token)
     T->>Chain: Token.Unpause()
-    T->>Chain: IdentityRegistry.AddAgent(token)
-    T-->>H: TokenInfos{address, onbehalfTransactions[...]}
-    Note over T,DB: each step also calls InsertEthTransaction (blk.eth_transaction)
+    T-->>H: TokenInfos{address, modularComplianceAddr, onbehalfTransactions}
 ```
 
-The token starts **paused**; `unpauseToken` enables transfers. The set of
-sub-transactions is returned to the caller as `OnbehalfTransactions`.
+`CreateToken` goes through the **shared `TREXFactory`** (canonical T-REX path), not a
+hand-wired proxy. It reuses the shared infrastructure — one factory, one
+`ClaimIssuer`, one manager (`ethFrom`), and one **IRS** (so the investor whitelist is
+shared across all tokens) — while the factory deploys a per-token IR/TIR/CTR/MC wired
+to that shared issuer/topic/IRS. The token ONCHAINID is created by the factory
+(`ONCHAINID: 0`). The token is deployed **paused**; `unpauseToken` enables transfers.
+The sub-transactions are returned as `OnbehalfTransactions`.
 
 ### 5.4 Mint / Burn — `Mint`, `Burn` (`services/mint_token.go`, `burn_token.go`)
 
@@ -296,9 +293,9 @@ Tables touched by this module:
 | `blk.eth_transaction` | every operation (`InsertEthTransaction`) | — |
 | `blk.user_wallet` | `InsertWallet` | `GetWalletByUserId` *(mocked)* |
 | `blk.identity` | `InsertIdentity` | `GetIdentityAddrByUserId` |
-| `blk.token` | *(TODO — not yet written)* | `GetTokenByName`, `GetTokenByAddress` |
+| `blk.token` | `InsertToken` | `GetTokenByName`, `GetTokenByAddress` |
 | `blk.contract_implementation` | *(TODO — commented out)* | impl lookups |
-| `blk.contract_role` | *(TODO)* | role lookups |
+| `blk.contract_role` | `InsertContractRole` (factory, claim issuer, module, shared IRS) | `GetContractRoleByName` |
 | `blk.contract_instance` | *(TODO)* | instance lookups |
 
 Endpoints → service methods (all under `globals.BaseURL` = `/api/v1`):
@@ -337,18 +334,18 @@ currently public (auth is spec-driven — see the repo `copilot-instructions.md`
 These are real, present in the code today — keep them in mind before relying on the
 module or extending it.
 
-- **Config tables not auto-populated.** `DeployIdentityFactory`,
-  `DeployAndInitTrexFactory`, `DeployAllImplementations`, `DeployTrexSuite` etc.
-  contain `TODO`/commented inserts, yet later steps read those addresses back from
-  the DB. The bootstrap chain only works if `blk.contract_role` /
-  `contract_implementation` / `contract_instance` are seeded manually.
+- **Config tables only partially auto-populated.** Singleton roles (TREX factory,
+  claim issuer, compliance module, shared IRS) are now persisted to
+  `blk.contract_role` via `InsertContractRole` at their creation sites, and created
+  tokens to `blk.token` via `InsertToken`. However `blk.contract_implementation` and
+  `blk.contract_instance` inserts are still `TODO`/commented (e.g. the
+  `IDENTITY_REGISTRY` instance read by `CreateIdentity` is not written), so those rows
+  must still be seeded manually.
 - **`GetWalletByUserId` is mocked** (`wallet_db.go`) — returns `common.MaxAddress`,
   so `CreateIdentity`'s idempotency check never sees "no wallet".
 - **Key handling.** A single `PRIVATE_KEY` signs everything; generated wallet keys
   are stored as `private_key_clear` (plaintext) and the AES helper uses a hard-coded
   key (issue #12). Treat as pre-production.
-- **Two divergent token-creation paths** (`DeployTrexSuite` via factory vs.
-  `CreateToken` by hand) — make sure you extend the intended one.
 - **`SetGlobals`** (`services/globals.go`) is a stub and its call site in `main.go`
   is commented out, so the mutable address cache in `globals` is never warmed.
 - Several handlers (`GetTrexSuiteInfos`, `GetTokenInfos`) and DB readers

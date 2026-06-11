@@ -37,6 +37,10 @@ func DeployClaimIssuer(ctx context.Context) (claimIssuerAddr common.Address, cla
 		return
 	}
 
+	if _, perr := database.InsertContractRole(ctx, deployedTxDetails.Tx.Hash().Hex(), claimIssuerAddr.Hex(), globals.ClaimIssuerName); perr != nil {
+		logger.LogWarn("could not persist CLAIM_ISSUER role: %s", perr.Error())
+	}
+
 	return
 }
 

@@ -68,3 +68,22 @@ func GetTokenByAddress(ctx context.Context, address string) (token *server.Token
 	token = tokenRow
 	return
 }
+
+// InsertToken persists a newly created token. Columns are inferred from the SELECT
+// queries above (symbol, token_name, address, nb_decimal, modular_compliance_addr);
+// id and created_at are expected to default.
+func InsertToken(ctx context.Context, symbol, tokenName, address string, nbDecimal int, modularComplianceAddr string) (id int, err error) {
+	query := `
+        INSERT INTO blk.token
+            (symbol, token_name, address, nb_decimal, modular_compliance_addr)
+        VALUES ($1, $2, $3, $4, $5)
+        RETURNING id
+    `
+
+	err = globals.DB.QueryRow(query, symbol, tokenName, address, nbDecimal, modularComplianceAddr).Scan(&id)
+	if err != nil {
+		return 0, fmt.Errorf("failed to insert token %s: %w", tokenName, err)
+	}
+
+	return
+}

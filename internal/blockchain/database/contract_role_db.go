@@ -89,3 +89,23 @@ func GetContractRoleByName(ctx context.Context, contractName string) (contract s
 	return contract, nil
 
 }
+
+// InsertContractRole persists a singleton contract address (factory, claim issuer,
+// compliance module, shared IRS, ...) keyed by contractName so it can be resolved
+// later via GetContractRoleByName. Columns are inferred from the SELECT queries
+// above (tx_hash, address, contract_name); id and created_at are expected to default.
+func InsertContractRole(ctx context.Context, txHash, address, contractName string) (id int64, err error) {
+	query := `
+        INSERT INTO blk.contract_role
+            (tx_hash, address, contract_name)
+        VALUES ($1, $2, $3)
+        RETURNING id
+    `
+
+	err = globals.DB.QueryRow(query, txHash, address, contractName).Scan(&id)
+	if err != nil {
+		return 0, fmt.Errorf("failed to insert contract role %s: %w", contractName, err)
+	}
+
+	return
+}

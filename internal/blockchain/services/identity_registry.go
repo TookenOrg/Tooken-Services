@@ -42,38 +42,6 @@ func registerIdentity(ctx context.Context, userWallet, identityAddress common.Ad
 	return
 }
 
-func addAgentOnIdentityRegistry(ctx context.Context, tokenAddr common.Address) (tx *types.Transaction, err error) {
-
-	irInstance, err := getIdentityRegistryInstance(ctx)
-	if err != nil {
-		return
-	}
-
-	auth, err := utils.GenerateTransactOpts(ctx)
-	if err != nil {
-		return
-	}
-
-	logger.LogInfo("💌 Add agent on identity registry...")
-	tx, err = irInstance.AddAgent(auth, tokenAddr)
-	if err != nil {
-		return
-	}
-	deployedTxDetails, err := utils.WaitDeployedTransaction(ctx, tx, false)
-	if err != nil {
-		return
-	}
-
-	logger.LogInfo("📬 Agent added on identity registry: %s", tx.Hash().Hex())
-
-	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "ADD_AGENT_IDENTITY_REGISTRY", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
-	if err != nil {
-		return
-	}
-
-	return
-}
-
 func getIdentityRegistryInstance(ctx context.Context) (irInstance *contracts.IdentityRegistry, err error) {
 
 	identityRegistryDetails, err := database.GetContractInstanceByName(ctx, globals.IdentityRegistry)
