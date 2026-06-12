@@ -80,7 +80,11 @@ func InsertToken(ctx context.Context, symbol, tokenName, address string, nbDecim
         RETURNING id
     `
 
-	err = globals.DB.QueryRow(query, symbol, tokenName, address, nbDecimal, modularComplianceAddr).Scan(&id)
+	// blk.token.modular_compliance_addr is nullable with a CHECK that rejects any
+	// value that is neither NULL nor a 0x-address — insert NULL instead of "".
+	mcAddr := sql.NullString{String: modularComplianceAddr, Valid: modularComplianceAddr != ""}
+
+	err = globals.DB.QueryRow(query, symbol, tokenName, address, nbDecimal, mcAddr).Scan(&id)
 	if err != nil {
 		return 0, fmt.Errorf("failed to insert token %s: %w", tokenName, err)
 	}

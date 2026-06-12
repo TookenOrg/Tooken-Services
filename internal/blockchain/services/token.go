@@ -26,6 +26,16 @@ func (s *Service) CreateToken(ctx context.Context, req server.CreateTokenRequest
 		return
 	}
 
+	// blk.token: token_name is varchar(100), symbol is varchar(50).
+	if n := len(req.TokenName); n == 0 || n > 100 {
+		err = errors.New("token name must be between 1 and 100 characters")
+		return
+	}
+	if n := len(req.Symbol); n == 0 || n > 50 {
+		err = errors.New("token symbol must be between 1 and 50 characters")
+		return
+	}
+
 	// 1 - Idempotency
 	if !isIdempotentToken(ctx, req) {
 		err = errors.New("Token already exists")
@@ -60,7 +70,7 @@ func (s *Service) CreateToken(ctx context.Context, req server.CreateTokenRequest
 
 	// 4 - Build the suite parameters (owner & agents = the single platform manager)
 	ethFrom := utils.GetEthFrom()
-	tokenDetails := buildTokenDetails(ethFrom, req.TokenName, req.TokenName, req.NbDecimal, sharedIRS, []common.Address{moduleAddr})
+	tokenDetails := buildTokenDetails(ethFrom, req.TokenName, req.Symbol, req.NbDecimal, sharedIRS, []common.Address{moduleAddr})
 	claimDetails := defineClaimSuiteDetails(claimIssuerAddr)
 
 	// 5 - Deploy the token suite through the shared TREX factory
@@ -94,13 +104,13 @@ func (s *Service) CreateToken(ctx context.Context, req server.CreateTokenRequest
 	onbehalfTransactions = append(onbehalfTransactions, server.TxHashName{OperationName: "unpauseToken", TransactionHash: txUnpause.Hash().Hex()})
 
 	// 8 - Persist the token
-	if _, perr := database.InsertToken(ctx, req.TokenName, req.TokenName, tokenAddr.Hex(), req.NbDecimal, mcAddr.Hex()); perr != nil {
+	if _, perr := database.InsertToken(ctx, req.Symbol, req.TokenName, tokenAddr.Hex(), req.NbDecimal, mcAddr.Hex()); perr != nil {
 		logger.LogWarn("could not persist token: %s", perr.Error())
 	}
 
 	// 9 - Build response
 	newToken = server.TokenInfos{
-		Symbol:                req.TokenName,
+		Symbol:                req.Symbol,
 		TokenName:             req.TokenName,
 		Address:               tokenAddr.Hex(),
 		NbDecimal:             int64(req.NbDecimal),

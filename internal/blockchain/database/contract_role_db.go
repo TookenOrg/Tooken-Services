@@ -65,7 +65,9 @@ func GetContractRoleByName(ctx context.Context, contractName string) (contract s
 	query := `
         SELECT id, tx_hash, address, contract_name, created_at 
         FROM blk.contract_role
-        WHERE contract_name = $1`
+        WHERE contract_name = $1
+        ORDER BY created_at DESC NULLS LAST
+        LIMIT 1`
 
 	var contractDB ContractDTO
 	err = globals.DB.QueryRow(query, contractName).Scan(
