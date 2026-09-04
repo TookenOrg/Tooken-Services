@@ -76,6 +76,10 @@ func deployTrexFactory(ctx context.Context, authorityAddr, identityFactoryAddr c
 		return
 	}
 
+	if _, perr := database.InsertContractRole(ctx, deployedTxDetails.Tx.Hash().Hex(), factoryAddr.Hex(), globals.TrexFactoryName); perr != nil {
+		logger.LogWarn("could not persist TREX_FACTORY role: %s", perr.Error())
+	}
+
 	return
 }
 
@@ -192,7 +196,7 @@ func (s *Service) DeployTrexSuite(ctx context.Context) (deployedContracts []serv
 	})
 
 	// 3 - Add management key to claim issuer
-	err = AddManagementKeyToClaimIssuer(ctx, claimIssuerInstance)
+	err = AddClaimSignerKeyToClaimIssuer(ctx, claimIssuerInstance)
 	if err != nil {
 		return
 	}
@@ -226,7 +230,7 @@ func defineTokenSuiteDetails(moduleAddrs []common.Address) contracts.ITREXFactor
 		Symbol:             "TOOK",
 		Decimals:           18,
 		Irs:                common.Address{},
-		ONCHAINID:          ethFrom,
+		ONCHAINID:          common.Address{},
 		IrAgents:           []common.Address{ethFrom},
 		TokenAgents:        []common.Address{ethFrom},
 		ComplianceModules:  moduleAddrs,
@@ -288,7 +292,11 @@ func deployTrexSuite(ctx context.Context, tokenDetails contracts.ITREXFactoryTok
 	logger.LogInfo("ModularCompliance: %s", deploymentDetails.Mc.Hex())
 	logger.LogInfo("ClaimsTopicRegistry: %s", deploymentDetails.Ctr.Hex())
 
-	// TODO: save deploymentDetails in DB
+	// Persist the shared IRS so each token created later reuses the same investor
+	// whitelist. This anchor must not be lost, otherwise later tokens fragment KYC.
+	if _, err = database.InsertContractRole(ctx, txDeploySuite.Hash().Hex(), deploymentDetails.Irs.Hex(), globals.SharedIdentityRegistryStorageName); err != nil {
+		return
+	}
 
 	return
 }

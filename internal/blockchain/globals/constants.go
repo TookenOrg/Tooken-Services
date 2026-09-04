@@ -27,6 +27,11 @@ const (
 	ClaimIssuerName     = "CLAIM_ISSUER"
 	TrexFactoryName     = "TREX_FACTORY"
 	TrexSuiteName       = "TREX_SUITE"
+
+	// SharedIdentityRegistryStorageName is the contract_role key under which the
+	// shared IdentityRegistryStorage (shared investor whitelist) is persisted, so
+	// every token deployed via the factory can reuse the same IRS.
+	SharedIdentityRegistryStorageName = "SHARED_IRS"
 )
 
 const (

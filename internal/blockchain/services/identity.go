@@ -85,7 +85,7 @@ func GenerateNewWallet(userId int) (publicKey common.Address, walletId int64, er
 func deployIdentityProxy(ctx context.Context) (proxyAddr common.Address, tx *types.Transaction, err error) {
 
 	// Get Impl Identity Authority Address
-	implIdentityAuthorityDetails, err := database.GetImplementationContractByName(ctx, "IdentityAuthority")
+	implIdentityAuthorityDetails, err := database.GetImplementationContractByName(ctx, globals.ImplIdentityAuthorityName)
 	if err != nil {
 		return
 	}

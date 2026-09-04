@@ -1,0 +1,9 @@
+{
+  "name": "tooken-chain-tests",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Local Hardhat node used by the Go blockchain integration tests",
+  "devDependencies": {
+    "hardhat": "^2.22.10"
+  }
+}

@@ -3,12 +3,18 @@ package database
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/TookenOrg/tooken-services/internal/api/server"
 	"github.com/TookenOrg/tooken-services/internal/globals"
 )
+
+// ErrContractRoleNotFound is returned (wrapped) by GetContractRoleByName when no row
+// matches the requested contract name. Callers can use errors.Is to distinguish a
+// genuine "not recorded yet" case from a real database failure.
+var ErrContractRoleNotFound = errors.New("contract role not found")
 
 type ContractDTO struct {
 	ID           int64     `json:"id"`
@@ -65,7 +71,9 @@ func GetContractRoleByName(ctx context.Context, contractName string) (contract s
 	query := `
         SELECT id, tx_hash, address, contract_name, created_at 
         FROM blk.contract_role
-        WHERE contract_name = $1`
+        WHERE contract_name = $1
+        ORDER BY created_at DESC NULLS LAST
+        LIMIT 1`
 
 	var contractDB ContractDTO
 	err = globals.DB.QueryRow(query, contractName).Scan(
@@ -77,7 +85,7 @@ func GetContractRoleByName(ctx context.Context, contractName string) (contract s
 	)
 
 	if err == sql.ErrNoRows {
-		return server.ContractDetails{}, fmt.Errorf("contract '%s' not found", contractName)
+		return server.ContractDetails{}, fmt.Errorf("contract '%s' not found: %w", contractName, ErrContractRoleNotFound)
 	}
 	if err != nil {
 		return server.ContractDetails{}, fmt.Errorf("query failed: %w", err)
@@ -88,4 +96,24 @@ func GetContractRoleByName(ctx context.Context, contractName string) (contract s
 
 	return contract, nil
 
+}
+
+// InsertContractRole persists a singleton contract address (factory, claim issuer,
+// compliance module, shared IRS, ...) keyed by contractName so it can be resolved
+// later via GetContractRoleByName. Columns are inferred from the SELECT queries
+// above (tx_hash, address, contract_name); id and created_at are expected to default.
+func InsertContractRole(ctx context.Context, txHash, address, contractName string) (id int64, err error) {
+	query := `
+        INSERT INTO blk.contract_role
+            (tx_hash, address, contract_name)
+        VALUES ($1, $2, $3)
+        RETURNING id
+    `
+
+	err = globals.DB.QueryRow(query, txHash, address, contractName).Scan(&id)
+	if err != nil {
+		return 0, fmt.Errorf("failed to insert contract role %s: %w", contractName, err)
+	}
+
+	return
 }

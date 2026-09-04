@@ -918,12 +918,17 @@ components:
       type: object
       required:
         - tokenName
+        - symbol
         - nbDecimal
       properties:
         tokenName:
           type: string
           description: Name of the token
           example: "US0378331005"
+        symbol:
+          type: string
+          description: On-chain token symbol (max 50 characters)
+          example: "TOOK"
         nbDecimal:
           type: integer
           description: Number of decimals

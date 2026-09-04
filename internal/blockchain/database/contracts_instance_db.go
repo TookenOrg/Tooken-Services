@@ -24,7 +24,9 @@ func GetContractInstanceByName(ctx context.Context, contractName string) (contra
 	query := `
         SELECT id, address, contract_name, contract_implementation_id, parent_contract_id, created_at 
         FROM blk.contract_instance
-        WHERE contract_name = $1`
+        WHERE contract_name = $1
+        ORDER BY created_at DESC NULLS LAST
+        LIMIT 1`
 
 	var contractDB ContractInstanceDTO
 	err = globals.DB.QueryRow(query, contractName).Scan(
