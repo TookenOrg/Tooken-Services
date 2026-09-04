@@ -1,2 +1,8 @@
 .env
 .env.*
+
+# VS Code : reglages perso (chemins machine). launch.json reste versionne.
+.vscode/settings.json
+
+# Dossier docs local (schemas / assets de presentation) - non versionne.
+/docs/
