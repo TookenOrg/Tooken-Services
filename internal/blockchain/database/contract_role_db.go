@@ -3,12 +3,18 @@ package database
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/TookenOrg/tooken-services/internal/api/server"
 	"github.com/TookenOrg/tooken-services/internal/globals"
 )
+
+// ErrContractRoleNotFound is returned (wrapped) by GetContractRoleByName when no row
+// matches the requested contract name. Callers can use errors.Is to distinguish a
+// genuine "not recorded yet" case from a real database failure.
+var ErrContractRoleNotFound = errors.New("contract role not found")
 
 type ContractDTO struct {
 	ID           int64     `json:"id"`
@@ -79,7 +85,7 @@ func GetContractRoleByName(ctx context.Context, contractName string) (contract s
 	)
 
 	if err == sql.ErrNoRows {
-		return server.ContractDetails{}, fmt.Errorf("contract '%s' not found", contractName)
+		return server.ContractDetails{}, fmt.Errorf("contract '%s' not found: %w", contractName, ErrContractRoleNotFound)
 	}
 	if err != nil {
 		return server.ContractDetails{}, fmt.Errorf("query failed: %w", err)

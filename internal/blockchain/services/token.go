@@ -66,7 +66,10 @@ func (s *Service) CreateToken(ctx context.Context, req server.CreateTokenRequest
 
 	// 3 - Resolve the shared IRS (shared investor whitelist). Zero address => first
 	//     token: the factory deploys a fresh IRS that we persist for the next tokens.
-	sharedIRS := resolveSharedIRS(ctx)
+	sharedIRS, err := resolveSharedIRS(ctx)
+	if err != nil {
+		return
+	}
 
 	// 4 - Build the suite parameters (owner & agents = the single platform manager)
 	ethFrom := utils.GetEthFrom()
@@ -85,10 +88,12 @@ func (s *Service) CreateToken(ctx context.Context, req server.CreateTokenRequest
 		{OperationName: "DeployTREXSuite", TransactionHash: suiteTxHash},
 	}
 
-	// 6 - Persist the shared IRS the first time it is created
+	// 6 - Persist the shared IRS the first time it is created. This row is the anchor of
+	//     the shared investor whitelist: if it is lost, later tokens deploy their own IRS
+	//     and fragment KYC, so a write failure must abort rather than be swallowed.
 	if sharedIRS == (common.Address{}) {
-		if _, perr := database.InsertContractRole(ctx, suiteTxHash, deployment.Irs.Hex(), globals.SharedIdentityRegistryStorageName); perr != nil {
-			logger.LogWarn("could not persist shared IRS role: %s", perr.Error())
+		if _, err = database.InsertContractRole(ctx, suiteTxHash, deployment.Irs.Hex(), globals.SharedIdentityRegistryStorageName); err != nil {
+			return
 		}
 	}
 
@@ -103,9 +108,11 @@ func (s *Service) CreateToken(ctx context.Context, req server.CreateTokenRequest
 	}
 	onbehalfTransactions = append(onbehalfTransactions, server.TxHashName{OperationName: "unpauseToken", TransactionHash: txUnpause.Hash().Hex()})
 
-	// 8 - Persist the token
-	if _, perr := database.InsertToken(ctx, req.Symbol, req.TokenName, tokenAddr.Hex(), req.NbDecimal, mcAddr.Hex()); perr != nil {
-		logger.LogWarn("could not persist token: %s", perr.Error())
+	// 8 - Persist the token. Mint/Burn resolve it by address from this row and idempotency
+	//     keys on token_name, so a lost write leaves an un-mintable token and breaks
+	//     retries (redeploy reverts on the reused factory salt) — treat a failure as fatal.
+	if _, err = database.InsertToken(ctx, req.Symbol, req.TokenName, tokenAddr.Hex(), req.NbDecimal, mcAddr.Hex()); err != nil {
+		return
 	}
 
 	// 9 - Build response
@@ -123,13 +130,19 @@ func (s *Service) CreateToken(ctx context.Context, req server.CreateTokenRequest
 }
 
 // resolveSharedIRS returns the shared IdentityRegistryStorage address persisted as a
-// contract role, or the zero address if none has been recorded yet.
-func resolveSharedIRS(ctx context.Context) common.Address {
+// contract role. It returns the zero address (and no error) when none has been recorded
+// yet, so the factory deploys a fresh IRS for the first token. A real database error is
+// propagated instead of being swallowed, otherwise a transient failure would silently
+// deploy a second IRS and fragment the shared investor whitelist.
+func resolveSharedIRS(ctx context.Context) (common.Address, error) {
 	details, err := database.GetContractRoleByName(ctx, globals.SharedIdentityRegistryStorageName)
-	if err != nil {
-		return common.Address{}
+	if errors.Is(err, database.ErrContractRoleNotFound) {
+		return common.Address{}, nil
 	}
-	return common.HexToAddress(details.Address)
+	if err != nil {
+		return common.Address{}, err
+	}
+	return common.HexToAddress(details.Address), nil
 }
 
 // buildTokenDetails assembles the ITREXFactoryTokenDetails for a single token.

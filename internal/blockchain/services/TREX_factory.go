@@ -292,9 +292,10 @@ func deployTrexSuite(ctx context.Context, tokenDetails contracts.ITREXFactoryTok
 	logger.LogInfo("ModularCompliance: %s", deploymentDetails.Mc.Hex())
 	logger.LogInfo("ClaimsTopicRegistry: %s", deploymentDetails.Ctr.Hex())
 
-	// Persist the shared IRS so each token created later reuses the same investor whitelist.
-	if _, perr := database.InsertContractRole(ctx, txDeploySuite.Hash().Hex(), deploymentDetails.Irs.Hex(), globals.SharedIdentityRegistryStorageName); perr != nil {
-		logger.LogWarn("could not persist shared IRS role: %s", perr.Error())
+	// Persist the shared IRS so each token created later reuses the same investor
+	// whitelist. This anchor must not be lost, otherwise later tokens fragment KYC.
+	if _, err = database.InsertContractRole(ctx, txDeploySuite.Hash().Hex(), deploymentDetails.Irs.Hex(), globals.SharedIdentityRegistryStorageName); err != nil {
+		return
 	}
 
 	return
