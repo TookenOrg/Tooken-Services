@@ -7,7 +7,6 @@ import (
 
 	"github.com/TookenOrg/tooken-services/internal/api/server"
 	"github.com/TookenOrg/tooken-services/internal/globals"
-	"github.com/TookenOrg/tooken-services/internal/utils"
 	"github.com/TookenOrg/tooken-services/pkg/logger"
 )
 
@@ -228,7 +227,7 @@ func GetActiveRealEstates(ctx context.Context) ([]server.RealEstate, error) {
 	return estates, rows.Err()
 }
 
-func GetRealEstateById(ctx context.Context, id int) (server.RealEstate, error) {
+func GetActiveRealEstateById(ctx context.Context, id int) (server.RealEstate, error) {
 	query := fmt.Sprintf(
 		baseRealEstateQuery,
 		"WHERE re.id = $1 AND re.active = true",
@@ -241,7 +240,7 @@ func GetRealEstateById(ctx context.Context, id int) (server.RealEstate, error) {
 		return server.RealEstate{}, err
 	}
 
-	logger.LogDebug("Real Estate found [%s]", utils.Dump(realEstates))
+	logger.LogDebug("Real Estate found!")
 
 	return realEstates, nil
 }
