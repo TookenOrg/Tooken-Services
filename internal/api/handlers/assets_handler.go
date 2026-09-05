@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"database/sql"
+	"errors"
 	"net/http"
 
 	"github.com/TookenOrg/tooken-services/internal/api/server"
@@ -9,13 +11,14 @@ import (
 )
 
 func (h *Handler) GetActiveRealEstates(gCtx *gin.Context) {
-	logger.LogInfo("🚀 Starting get real estates")
+	logger.LogDebug("🚀 Starting get real estates")
 
 	realEstates, err := h.realEstateSvc.GetActiveRealEstates(gCtx.Request.Context())
 
 	if err != nil {
-		gCtx.JSON(http.StatusBadRequest, server.APIResponse{
-			Message: err.Error(),
+		logger.LogError("Failed to retrieve active real estates: %v", err)
+		gCtx.JSON(http.StatusInternalServerError, server.APIResponse{
+			Message: "Unable to retrieve real estates.",
 		})
 		return
 	}
@@ -24,14 +27,19 @@ func (h *Handler) GetActiveRealEstates(gCtx *gin.Context) {
 }
 
 func (h *Handler) GetRealEstateById(gCtx *gin.Context, id int) {
-	logger.LogInfo("🚀 Starting get one real estate id %d", id)
+	logger.LogDebug("🚀 Starting get one real estate id %d", id)
 
-	realEstate, err := h.realEstateSvc.GetRealEstateById(gCtx.Request.Context(), id)
+	realEstate, err := h.realEstateSvc.GetActiveRealEstateById(gCtx.Request.Context(), id)
 
 	if err != nil {
-		gCtx.JSON(http.StatusBadRequest, server.APIResponse{
-			Message: err.Error(),
-		})
+		if errors.Is(err, sql.ErrNoRows) {
+			gCtx.JSON(http.StatusNotFound, server.APIResponse{Message: "Real estate not found."})
+		} else {
+			logger.LogError("Failed to retrieve real estate %d: %v", id, err)
+			gCtx.JSON(http.StatusInternalServerError, server.APIResponse{
+				Message: "Unable to retrieve real estate.",
+			})
+		}
 		return
 	}
 

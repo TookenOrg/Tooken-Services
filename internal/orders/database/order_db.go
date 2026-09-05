@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -9,7 +10,25 @@ import (
 	"github.com/TookenOrg/tooken-services/internal/globals"
 	"github.com/TookenOrg/tooken-services/internal/utils"
 	"github.com/TookenOrg/tooken-services/pkg/logger"
+	"github.com/lib/pq"
 )
+
+// ErrDuplicateOrderReference is returned when the generated order reference
+// collides with the UNIQUE constraint; callers should regenerate and retry.
+var ErrDuplicateOrderReference = errors.New("duplicate order reference")
+
+// Name of constraint is PostgreSQL
+const orderReferenceConstraint = "issuance_orders_order_reference_uk"
+
+// isDuplicateReferenceErr reports whether err is a Postgres unique-violation
+// (SQLSTATE 23505) on the order_reference constraint.
+func isDuplicateReferenceErr(err error) bool {
+	var pqErr *pq.Error
+	if errors.As(err, &pqErr) {
+		return pqErr.Code == "23505" && pqErr.Constraint == orderReferenceConstraint
+	}
+	return false
+}
 
 const baseIssuanceOrderQuery = `
 SELECT 
@@ -62,55 +81,34 @@ func scanIssuanceOrder(scanner interface {
 	return e, nil
 }
 
-func InsertIssuranceOrder(ctx context.Context, realEstateId, quantity, userId int) (id int, createdAt time.Time, err error) {
+func InsertIssuranceOrder(ctx context.Context, realEstateId, quantity, userId int, orderReference string) (id int, createdAt time.Time, err error) {
 	query := `
 		INSERT INTO iss.issuance_orders (
 			user_id,
 			asset_id,
 			quantity,
-			status_id
+			status_id,
+			order_reference
 		)
 		VALUES (
 			$1,  
 			$2, 
 			$3,  
-			$4   
+			$4,
+			$5
 		)
 		RETURNING id, created_at;
     `
 
-	err = globals.DB.QueryRow(query, userId, realEstateId, quantity, 1).Scan(&id, &createdAt)
+	err = globals.DB.QueryRowContext(ctx, query, userId, realEstateId, quantity, 1, orderReference).Scan(&id, &createdAt)
 	if err != nil {
+		if isDuplicateReferenceErr(err) {
+			return 0, time.Time{}, ErrDuplicateOrderReference
+		}
 		return 0, time.Time{}, fmt.Errorf("failed to insert issuance order: %w", err)
 	}
 
-	logger.LogInfo("Issuance order inserted. ID=%d", id)
-
-	return
-}
-
-func UpdateReferenceIssuanceOrder(ctx context.Context, orderId int, orderReference string) (err error) {
-	query := `
-		UPDATE iss.issuance_orders
-		SET order_reference = $1
-		WHERE id = $2;
-    `
-
-	res, err := globals.DB.Exec(query, orderReference, orderId)
-	if err != nil {
-		return logger.LogError("failed to insert issuance order: %v", err)
-	}
-
-	updatedRow, err := res.RowsAffected()
-	if err != nil {
-		return
-	}
-
-	if updatedRow != 1 {
-		return logger.LogError("No row updated or more than one raw updated")
-	}
-
-	logger.LogInfo("Issuance order updated with reference %s", orderReference)
+	logger.LogInfo("Issuance order inserted. ID=%d Ref=%s", id, orderReference)
 
 	return
 }

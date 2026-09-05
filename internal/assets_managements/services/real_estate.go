@@ -12,6 +12,6 @@ func (s *Service) GetActiveRealEstates(ctx context.Context) (realEstates []serve
 	return database.GetActiveRealEstates(ctx)
 }
 
-func (s *Service) GetRealEstateById(ctx context.Context, id int) (realEstate server.RealEstate, err error) {
-	return database.GetRealEstateById(ctx, id)
+func (s *Service) GetActiveRealEstateById(ctx context.Context, id int) (realEstate server.RealEstate, err error) {
+	return database.GetActiveRealEstateById(ctx, id)
 }

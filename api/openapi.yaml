@@ -175,7 +175,7 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/APIResponse"
-  
+
   /assets/real-estates/{id}:
     get:
       tags:
@@ -195,6 +195,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/RealEstate"
+        "404":
+          description: "Real Estate Not Found"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
         "500":
           description: "Internal Server Error"
           content:
