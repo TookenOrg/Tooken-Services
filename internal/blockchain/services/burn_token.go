@@ -2,7 +2,7 @@ package services
 
 import (
 	"context"
-	"errors"
+	"fmt"
 
 	"github.com/TookenOrg/tooken-services/internal/api/server"
 	contracts "github.com/TookenOrg/tooken-services/internal/blockchain/contracts/bindings"
@@ -20,14 +20,9 @@ func (s *Service) Burn(ctx context.Context, tokenAddr, to string, humanAmount fl
 		return
 	}
 
-	ok := controlInputMintBurn(tokenAddr, to, humanAmount, tokenInfos.NbDecimal)
-	if !ok {
-		err = errors.New("Input data for burn are incorrect")
-		return
-	}
-
-	amtWei, err := utils.ConvertFloatToWei(humanAmount, tokenInfos.NbDecimal)
+	amtWei, err := controlInputMintBurn(tokenAddr, to, humanAmount, tokenInfos.NbDecimal)
 	if err != nil {
+		err = fmt.Errorf("input data for burn are incorrect: %w", err)
 		return
 	}
 

@@ -68,6 +68,16 @@ var realEstateCoreColumns = []realEstateColumn{
 	{"res.energy_class", func(d *RealEstateDTO) any { return &d.Specification.EnergyClass }},
 	{"res.ges_class", func(d *RealEstateDTO) any { return &d.Specification.GesClass }},
 
+	{"(addr.real_estate_id IS NOT NULL) AS has_location",
+		func(d *RealEstateDTO) any { return &d.locationPresent }},
+	// city and country_code are NOT NULL in the table, but the LEFT JOIN turns
+	// them into NULL for an asset without an address. COALESCE keeps the scan
+	// targets as plain strings; the empty value is never read since the
+	// Location sub-struct is dropped when has_location is false.
+	{"COALESCE(addr.city, '') AS city", func(d *RealEstateDTO) any { return &d.Location.City }},
+	{"COALESCE(addr.country_code, '') AS country_code",
+		func(d *RealEstateDTO) any { return &d.Location.CountryCode }},
+
 	{"(conf.real_estate_id IS NOT NULL) AS has_shares_config",
 		func(d *RealEstateDTO) any { return &d.sharesConfigPresent }},
 	{"conf.compartment_ref", func(d *RealEstateDTO) any { return &d.SharesConfig.CompartmentRef }},
@@ -98,9 +108,8 @@ var realEstateCoreColumns = []realEstateColumn{
 
 // realEstateBaseFrom holds the joins required by the columns above.
 //
-// The address, the issuer, the token and the media are absent on purpose: they
-// are loaded separately by the detail query. A list has no business joining —
-// let alone exposing — the exact location of the assets.
+// The issuer, the token, the media and the full address are absent on purpose:
+// they are loaded separately by the detail query.
 const realEstateBaseFrom = `
 FROM ass.real_estate re
 LEFT JOIN ass.real_estate_type ret
@@ -113,6 +122,12 @@ LEFT JOIN ass.real_estate_shares_config conf
     ON re.id = conf.real_estate_id
 LEFT JOIN ass.payment_frequency_type payt
     ON conf.payment_frequency_type = payt.id
+
+-- The address table is joined, but only city and country_code are ever
+-- selected here. The street, the postal code and the coordinates pinpoint a
+-- tokenized asset: they stay out of any query that can serve a public list.
+LEFT JOIN ass.real_estate_address addr
+    ON re.id = addr.real_estate_id
 
 -- Shares already taken. The aggregate is computed ONCE and then joined: a
 -- correlated subquery would be re-executed per asset (N+1) — measured at 196 ms

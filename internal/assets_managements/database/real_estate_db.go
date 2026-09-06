@@ -24,6 +24,7 @@ func scanRealEstate(scanner rowScanner, cols []realEstateColumn) (RealEstateDTO,
 	dto := RealEstateDTO{
 		Specification: &RealEstateSpecificationDTO{},
 		SharesConfig:  &RealEstateSharesConfigDTO{},
+		Location:      &RealEstateLocationDTO{},
 	}
 
 	if err := scanner.Scan(scanTargets(&dto, cols)...); err != nil {
@@ -35,6 +36,9 @@ func scanRealEstate(scanner rowScanner, cols []realEstateColumn) (RealEstateDTO,
 	}
 	if !dto.sharesConfigPresent {
 		dto.SharesConfig = nil
+	}
+	if !dto.locationPresent {
+		dto.Location = nil
 	}
 
 	return dto, nil

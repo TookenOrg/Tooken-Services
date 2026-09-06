@@ -21,6 +21,7 @@ func TestRealEstateColumnsAreAligned(t *testing.T) {
 	var dto RealEstateDTO
 	dto.Specification = &RealEstateSpecificationDTO{}
 	dto.SharesConfig = &RealEstateSharesConfigDTO{}
+	dto.Location = &RealEstateLocationDTO{}
 
 	dest := scanTargets(&dto, cols)
 	if len(dest) != len(cols) {
@@ -43,17 +44,26 @@ func TestRealEstateColumnsAreAligned(t *testing.T) {
 	}
 }
 
-// The list joins neither the address, nor the media, nor the issuer: the exact
-// location of an asset is the most sensitive data in the model and has no
-// business being in a list endpoint.
-func TestListQueryDoesNotJoinSensitiveTables(t *testing.T) {
+// The list may read the coarse location (city, country_code) but never the
+// columns that pinpoint an asset. Checking the selected columns rather than the
+// joined tables is the stronger guarantee: the address table is joined, and
+// what must not leak is what is read from it.
+func TestListQueryReadsNoPinpointingColumn(t *testing.T) {
 	query := buildRealEstateQuery(realEstateCoreColumns, "WHERE re.active = true")
 
 	for _, forbidden := range []string{
-		"ass.real_estate_address",
-		"ass.real_estate_media",
-		"ass.issuer",
+		"addr.street",
+		"addr.street_complement",
+		"addr.postal_code",
+		"addr.latitude",
+		"addr.longitude",
 	} {
+		if strings.Contains(query, forbidden) {
+			t.Errorf("the list query reads %s", forbidden)
+		}
+	}
+
+	for _, forbidden := range []string{"ass.real_estate_media", "ass.issuer"} {
 		if strings.Contains(query, forbidden) {
 			t.Errorf("the list query joins %s", forbidden)
 		}

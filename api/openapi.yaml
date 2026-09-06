@@ -115,7 +115,7 @@ paths:
               schema:
                 type: array
                 items:
-                  $ref: "#/components/schemas/RealEstate"
+                  $ref: "#/components/schemas/RealEstateSummary"
         "500":
           description: "Internal Server Error"
           content:
@@ -492,11 +492,21 @@ paths:
               $ref: "#/components/schemas/MintTokenRequest"
       responses:
         "202":
-          description: Token minted
+          description: >-
+            Mint accepted and started. The on-chain work continues in the
+            background, so this status does not mean it succeeded.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/APIResponse"
+        "400":
+          description: >-
+            The request was refused before anything was sent to the chain:
+            malformed address, or an amount that cannot be converted exactly.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MintTokenResponse"
         "500":
           description: Internal server error
           content:
@@ -520,11 +530,21 @@ paths:
               $ref: "#/components/schemas/BurnTokenRequest"
       responses:
         "202":
-          description: Token minted
+          description: >-
+            Burn accepted and started. The on-chain work continues in the
+            background, so this status does not mean it succeeded.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/APIResponse"
+        "400":
+          description: >-
+            The request was refused before anything was sent to the chain:
+            malformed address, or an amount that cannot be converted exactly.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BurnTokenResponse"
         "500":
           description: Internal server error
           content:
@@ -754,7 +774,15 @@ components:
         amount:
           type: number
           format: double
-          description: The amount of tokens to mint, in human format (not wei)
+          description: >-
+            The amount of tokens to mint, in human format (not wei). The request is
+            refused rather than approximated when the amount cannot be converted
+            exactly: it must carry at most 15 significant digits, stay below
+            9007199254740992, and have no more decimals than the token declares.
+            The result is written to an immutable ledger, so an amount that
+            merely resembles the one requested is worse than a rejection.
+          maximum: 9007199254740991
+          minimum: 0
           example: 1000.87
         to:
           type: string
@@ -783,7 +811,15 @@ components:
         amount:
           type: number
           format: double
-          description: The amount of tokens to burn, in human format (not wei)
+          description: >-
+            The amount of tokens to burn, in human format (not wei). The request is
+            refused rather than approximated when the amount cannot be converted
+            exactly: it must carry at most 15 significant digits, stay below
+            9007199254740992, and have no more decimals than the token declares.
+            The result is written to an immutable ledger, so an amount that
+            merely resembles the one requested is worse than a rejection.
+          maximum: 9007199254740991
+          minimum: 0
           example: 1000.87
         to:
           type: string
@@ -990,8 +1026,12 @@ components:
             $ref: "#/components/schemas/TxHashName"
           description: A list of transactions performed on behalf of the identity
 
-    RealEstate:
+    RealEstateSummary:
       type: object
+      description: >
+        Real estate as served by the list endpoint. Deliberately excludes the
+        street address, the media gallery, the issuer and the token: a public
+        list must expose the strict minimum.
       required:
         - id
       properties:
@@ -1007,6 +1047,11 @@ components:
           type: string
         estate_type_id:
           type: integer
+        status:
+          type: string
+          description: Lifecycle status code (draft, in_review, published, fundraising, funded, closed, cancelled)
+        status_id:
+          type: integer
         active:
           type: boolean
           description: is estate active
@@ -1016,12 +1061,51 @@ components:
         contract_address:
           type: string
           description: Address of estate on blockchain (token)
-        specificiation:
+        location:
+          $ref: "#/components/schemas/RealEstateLocation"
+        specification:
           $ref: "#/components/schemas/RealEstateSpecification"
         configuration:
           $ref: "#/components/schemas/RealEstateConfiguration"
         progression:
           $ref: "#/components/schemas/RealEstateProgression"
+
+    RealEstate:
+      description: >
+        Full real estate record served by the detail endpoint. The street
+        address stays out of this schema until the endpoint can tell a
+        KYC-verified caller from an anonymous one.
+      allOf:
+        - $ref: "#/components/schemas/RealEstateSummary"
+        - type: object
+          properties:
+            updated_at:
+              type: string
+              format: date-time
+            published_at:
+              type: string
+              format: date-time
+            media:
+              type: array
+              items:
+                $ref: "#/components/schemas/RealEstateMedia"
+            token:
+              $ref: "#/components/schemas/RealEstateToken"
+            issuer:
+              $ref: "#/components/schemas/RealEstateIssuer"
+
+    RealEstateLocation:
+      type: object
+      description: >
+        Coarse location, safe to expose publicly. The street, the postal code
+        and the coordinates are held back: they pinpoint a tokenized asset.
+      properties:
+        city:
+          type: string
+        country_code:
+          type: string
+          description: ISO 3166-1 alpha-2
+          example: LU
 
     RealEstateSpecification:
       type: object
@@ -1044,15 +1128,39 @@ components:
           format: float
         build_year:
           type: integer
+        energy_class:
+          type: string
+          description: Energy performance class, A to G
+          example: C
+        ges_class:
+          type: string
+          description: Greenhouse gas class, A to G
+          example: D
 
     RealEstateConfiguration:
       type: object
+      description: >
+        Amounts and share counts are carried as decimal strings. JSON has a
+        single numeric type, which most parsers read as a binary double: 199.99
+        comes back as 199.99001, and any integer above 2^53 is silently
+        rounded. The string is a transport format, not the type of the data.
       properties:
         total_shares:
-          type: integer
+          type: string
+          description: Exact integer count, NUMERIC(20,0)
+          example: "1500"
         price_per_share:
-          type: number
-          format: float
+          type: string
+          description: Exact decimal amount, NUMERIC(20,8)
+          example: "199.99"
+        total_valuation:
+          type: string
+          description: total_shares x price_per_share, computed by the database
+          example: "299985"
+        currency_code:
+          type: string
+          description: ISO 4217
+          example: EUR
         yield:
           type: number
           format: float
@@ -1068,9 +1176,60 @@ components:
       properties:
         tokens_sold:
           type: integer
+          description: >
+            Shares held by non-cancelled issuance orders. An integer, because
+            an order quantity is an integer; only total_shares needs a string.
         tokens_sold_pctg:
           type: number
           format: float
+
+    RealEstateMedia:
+      type: object
+      properties:
+        id:
+          type: integer
+        url:
+          type: string
+        alt_text:
+          type: string
+        media_type:
+          type: string
+          description: image, video, floorplan or virtual_tour
+        position:
+          type: integer
+        is_cover:
+          type: boolean
+
+    RealEstateToken:
+      type: object
+      description: The ERC-3643 contract of the asset. Absent means not tokenized yet.
+      properties:
+        id:
+          type: integer
+        symbol:
+          type: string
+        token_name:
+          type: string
+        address:
+          type: string
+        nb_decimal:
+          type: integer
+
+    RealEstateIssuer:
+      type: object
+      description: The legal vehicle issuing the shares.
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        legal_form:
+          type: string
+        country_code:
+          type: string
+          description: ISO 3166-1 alpha-2
+        status:
+          type: string
 
     CreateIssuanceOrderRequest:
       type: object

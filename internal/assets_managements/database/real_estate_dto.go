@@ -39,8 +39,12 @@ type RealEstateDTO struct {
 	UpdatedAt       time.Time
 	PublishedAt     *time.Time
 
+	// Coarse location, read by both the list and the detail. Separate from
+	// Address on purpose: this is the part that is safe to expose publicly.
+	Location *RealEstateLocationDTO
+
 	// 1-1 subsets. nil means the row does not exist in the database, or was not
-	// requested by the query (see the list, which does not join the address).
+	// requested by the query (see the list, which does not load the full address).
 	Specification *RealEstateSpecificationDTO
 	SharesConfig  *RealEstateSharesConfigDTO
 	Address       *RealEstateAddressDTO
@@ -58,6 +62,15 @@ type RealEstateDTO struct {
 	// implementation detail, callers read Specification == nil.
 	specificationPresent bool
 	sharesConfigPresent  bool
+	locationPresent      bool
+}
+
+// RealEstateLocationDTO holds the only two address columns a public endpoint
+// may read. The street, the postal code and the coordinates are never selected
+// by the list query, so no amount of mapper carelessness can leak them.
+type RealEstateLocationDTO struct {
+	City        string
+	CountryCode string
 }
 
 // RealEstateSpecificationDTO maps ass.real_estate_specification (1-1).
