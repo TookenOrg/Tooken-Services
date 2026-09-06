@@ -45,16 +45,22 @@ var allowedMediaTypes = map[string]bool{
 	"virtual_tour": true,
 }
 
-// addressMode says whether a write must carry an address.
+// writeMode tells a creation from a patch, which is what decides whether the
+// fields that describe the asset itself are mandatory.
 //
-// A create must: an asset nobody can locate is not a real estate record. A
-// patch must not, or an asset inherited without an address could never be
-// corrected.
-type addressMode bool
+// A creation must carry an address and an estate type: an asset nobody can
+// locate, or that belongs to no category, is not a registry entry. A patch must
+// not require them, or a row inherited without one could never be corrected —
+// not even to fix its title.
+//
+// The distinction is only about what is *demanded*. What is *validated* is
+// always the whole merged result, so a patch can never leave the asset in a
+// shape a creation would have refused.
+type writeMode bool
 
 const (
-	addressRequired addressMode = true
-	addressOptional addressMode = false
+	writeCreate writeMode = true
+	writePatch  writeMode = false
 )
 
 // isBlankAddress reports an address the caller never filled, as opposed to one
@@ -90,7 +96,7 @@ func conflict(format string, args ...any) error {
 // identifiers, the timestamps, the derived valuation and the status, and the
 // caller is better served by what was actually stored than by what was sent.
 func (s *Service) CreateRealEstate(ctx context.Context, req server.RealEstateWriteRequest) (server.RealEstate, error) {
-	in, err := toWriteDTO(req, addressRequired)
+	in, err := toWriteDTO(req, writeCreate)
 	if err != nil {
 		return server.RealEstate{}, err
 	}
@@ -126,7 +132,7 @@ func (s *Service) PatchRealEstate(ctx context.Context, id int, patch server.Real
 	// An asset stored before this endpoint existed may carry no address. A
 	// patch must still be able to fix its title, so the address is only
 	// demanded when the merged request actually contains one.
-	in, err := toWriteDTO(merged, addressOptional)
+	in, err := toWriteDTO(merged, writePatch)
 	if err != nil {
 		return server.RealEstate{}, err
 	}
@@ -164,10 +170,16 @@ func (s *Service) PatchRealEstate(ctx context.Context, id int, patch server.Real
 // accepted in, never a float.
 func toWriteRequest(dto database.RealEstateDTO) server.RealEstateWriteRequest {
 	req := server.RealEstateWriteRequest{
-		Description:  dto.Description,
-		Imageurl:     dto.Imageurl,
-		EstateTypeId: dto.EstateTypeId,
-		IssuerId:     dto.IssuerId,
+		Description: dto.Description,
+		Imageurl:    dto.Imageurl,
+		IssuerId:    dto.IssuerId,
+	}
+
+	// The stored value cannot be NULL — the column is NOT NULL since migration
+	// 000012 — but a row written before it can be, and a patch on such a row
+	// must not crash. It simply has to name a type, like a creation does.
+	if dto.EstateTypeId != nil {
+		req.EstateTypeId = *dto.EstateTypeId
 	}
 
 	if dto.Title != nil {
@@ -255,7 +267,9 @@ func applyPatch(current server.RealEstateWriteRequest, patch server.RealEstatePa
 	}
 	setIfPresent(&current.Description, patch.Description)
 	setIfPresent(&current.Imageurl, patch.Imageurl)
-	setIfPresent(&current.EstateTypeId, patch.EstateTypeId)
+	if patch.EstateTypeId != nil {
+		current.EstateTypeId = *patch.EstateTypeId
+	}
 	setIfPresent(&current.IssuerId, patch.IssuerId)
 
 	if a := patch.Address; a != nil {
@@ -363,6 +377,35 @@ func (s *Service) DeleteRealEstate(ctx context.Context, id int) error {
 	return nil
 }
 
+// Mirrors of the column lengths of ass.real_estate, as set by migration 000012
+// and advertised by api/openapi.yaml. The three definitions have to move
+// together; the database stays the one that enforces them.
+const (
+	maxTitleLength       = 255
+	maxDescriptionLength = 2000
+	maxImageURLLength    = 500
+)
+
+func checkLengths(in database.RealEstateWriteDTO) error {
+	// Counted in runes: a 200-character description written in accented French
+	// is not twice as long as the same text in English.
+	if n := len([]rune(in.Title)); n > maxTitleLength {
+		return invalid("title must be at most %d characters, got %d", maxTitleLength, n)
+	}
+	if in.Description != nil {
+		if n := len([]rune(*in.Description)); n > maxDescriptionLength {
+			return invalid("description must be at most %d characters, got %d", maxDescriptionLength, n)
+		}
+	}
+	if in.Imageurl != nil {
+		if n := len([]rune(*in.Imageurl)); n > maxImageURLLength {
+			return invalid("imageurl must be at most %d characters, got %d", maxImageURLLength, n)
+		}
+	}
+
+	return nil
+}
+
 // fkFields names the constraint that a payload can violate, and the field the
 // caller has to fix. A raw constraint name means nothing to a client.
 var fkFields = map[string]string{
@@ -399,6 +442,14 @@ func translateWriteError(err error) error {
 		return conflict("this value is already used (%s)", pqErr.Constraint)
 	case "check_violation":
 		return invalid("a value is out of the range allowed by the database (%s)", pqErr.Constraint)
+	case "string_data_right_truncation":
+		// The service checks the lengths it knows about; this catches the
+		// column whose limit it does not, and still names the problem.
+		return invalid("a value is longer than the database allows (%s)", pqErr.Column)
+	case "not_null_violation":
+		// Schema drift: a column the contract treats as optional is mandatory
+		// in the table. Naming it turns an opaque 500 into something actionable.
+		return invalid("%s cannot be empty in this database", pqErr.Column)
 	}
 
 	return err
@@ -449,12 +500,12 @@ func checkSharesConfigChange(state database.RealEstateGuardStateDTO, in *databas
 //
 // This is where the decimal strings of the contract become decimal.Decimal: a
 // value that cannot be parsed is a 400, never a silent zero.
-func toWriteDTO(req server.RealEstateWriteRequest, mode addressMode) (database.RealEstateWriteDTO, error) {
+func toWriteDTO(req server.RealEstateWriteRequest, mode writeMode) (database.RealEstateWriteDTO, error) {
 	in := database.RealEstateWriteDTO{
 		Title:        strings.TrimSpace(req.Title),
 		Description:  trimmedPtr(req.Description),
 		Imageurl:     trimmedPtr(req.Imageurl),
-		EstateTypeId: req.EstateTypeId,
+		EstateTypeId: &req.EstateTypeId,
 		IssuerId:     req.IssuerId,
 	}
 
@@ -462,7 +513,22 @@ func toWriteDTO(req server.RealEstateWriteRequest, mode addressMode) (database.R
 		return in, invalid("title is required")
 	}
 
-	if mode == addressRequired || !isBlankAddress(req.Address) {
+	// The column lengths of ass.real_estate are mirrored here so an oversized
+	// value comes back as a 400 naming the field, instead of the 500 that a
+	// string_data_right_truncation would produce.
+	if err := checkLengths(in); err != nil {
+		return in, err
+	}
+
+	// estate_type is NOT NULL in the table: an asset without a type cannot be
+	// stored at all, so the contract demands it rather than letting the insert
+	// fail on a constraint the caller cannot read. Demanded on creation only,
+	// for the reason given on writeMode.
+	if mode == writeCreate && (in.EstateTypeId == nil || *in.EstateTypeId <= 0) {
+		return in, invalid("estate_type_id is required")
+	}
+
+	if mode == writeCreate || !isBlankAddress(req.Address) {
 		address, err := toAddressWriteDTO(req.Address)
 		if err != nil {
 			return in, err

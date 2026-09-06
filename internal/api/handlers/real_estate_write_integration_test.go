@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/TookenOrg/tooken-services/internal/api/server"
@@ -148,6 +149,8 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 			"two covers":          `{"title":"x","address":{"street":"a","postal_code":"b","city":"c","country_code":"LU"},"media":[{"url":"a","is_cover":true},{"url":"b","is_cover":true}]}`,
 			"unknown estate type": `{"title":"x","estate_type_id":999,"address":{"street":"a","postal_code":"b","city":"c","country_code":"LU"}}`,
 			"empty title":         `{"title":"   ","address":{"street":"a","postal_code":"b","city":"c","country_code":"LU"}}`,
+			"no estate type":      `{"title":"x","address":{"street":"a","postal_code":"b","city":"c","country_code":"LU"}}`,
+			"title over 255":      `{"title":"` + strings.Repeat("A", 256) + `","estate_type_id":1,"address":{"street":"a","postal_code":"b","city":"c","country_code":"LU"}}`,
 		}
 		for name, p := range cases {
 			code, body := do("POST", "/assets/real-estates", mgr, p)
@@ -314,9 +317,9 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 
 	t.Run("guards on a tokenized asset", func(t *testing.T) {
 		tokenID := mustScanID(t, `INSERT INTO blk.token (address, token_name, symbol, nb_decimal)
-		    VALUES ('0xguard-' || gen_random_uuid(),'G','G',0) RETURNING id`)
-		assetID := mustScanID(t, `INSERT INTO ass.real_estate (title, status_id, token_id)
-		    VALUES ('Tokenized guard', 3, $1) RETURNING id`, tokenID)
+		    VALUES ('0x' || lpad(md5(random()::text), 40, '0'),'G','G',0) RETURNING id`)
+		assetID := mustScanID(t, `INSERT INTO ass.real_estate (title, estate_type, status_id, token_id)
+		    VALUES ('Tokenized guard', 1, 3, $1) RETURNING id`, tokenID)
 		mustExec(t, `INSERT INTO ass.real_estate_shares_config (real_estate_id, total_shares, price_per_share) VALUES ($1, 1000, 10)`, assetID)
 
 		p := `{"configuration":{"total_shares":"500"}}`
@@ -336,7 +339,7 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 	// A share already reserved by an order is a commitment: the asset can grow,
 	// but it cannot shrink under what investors were promised.
 	t.Run("total shares cannot fall under the reserved ones", func(t *testing.T) {
-		assetID := mustScanID(t, `INSERT INTO ass.real_estate (title, status_id) VALUES ('Reserved guard', 3) RETURNING id`)
+		assetID := mustScanID(t, `INSERT INTO ass.real_estate (title, estate_type, status_id) VALUES ('Reserved guard', 1, 3) RETURNING id`)
 		mustExec(t, `INSERT INTO ass.real_estate_shares_config (real_estate_id, total_shares, price_per_share) VALUES ($1, 1000, 10)`, assetID)
 		// status 2 = RESERVED, which carries counts_as_reserved. The reference is
 		// derived from the asset so the suite can run twice on the same database:
@@ -359,8 +362,62 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 		}
 	})
 
+	// Everything below reproduces what the production table used to reject with
+	// a 500, before migration 000012 aligned it with the contract.
+	t.Run("the shape the contract promises is the shape the table has", func(t *testing.T) {
+		t.Run("an asset without description or image is created", func(t *testing.T) {
+			p := `{"title":"Bare asset","estate_type_id":1,"address":{"street":"a","postal_code":"b","city":"c","country_code":"LU"}}`
+			code, body := do("POST", "/assets/real-estates", mgr, p)
+			if code != http.StatusCreated {
+				t.Errorf("want 201 got %d: %s", code, body)
+			}
+		})
+
+		t.Run("a title of 200 characters is accepted", func(t *testing.T) {
+			p := `{"title":"` + strings.Repeat("A", 200) + `","estate_type_id":1,"address":{"street":"a","postal_code":"b","city":"c","country_code":"LU"}}`
+			code, body := do("POST", "/assets/real-estates", mgr, p)
+			if code != http.StatusCreated {
+				t.Errorf("want 201 got %d: %s", code, body)
+			}
+		})
+
+		// Without the foreign key this was stored as-is, which is worse than a
+		// 500: the registry ends up pointing at a type that does not exist.
+		t.Run("an unknown estate type is refused by the database too", func(t *testing.T) {
+			var stored int
+			err := db.QueryRow(`INSERT INTO ass.real_estate (title, estate_type, status_id)
+			    VALUES ('Ghost type', 999999, 3) RETURNING id`).Scan(&stored)
+			if err == nil {
+				t.Errorf("row %d was stored with a type that does not exist", stored)
+			}
+		})
+
+		// A registry compares instants. Two rows written from servers on
+		// different offsets are not comparable if the zone is dropped.
+		t.Run("every date of the table carries its zone", func(t *testing.T) {
+			rows, err := db.Query(`
+			    SELECT column_name, data_type
+			    FROM information_schema.columns
+			    WHERE table_schema = 'ass' AND table_name = 'real_estate'
+			      AND data_type LIKE 'timestamp%'`)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var name, kind string
+				if err := rows.Scan(&name, &kind); err != nil {
+					t.Fatal(err)
+				}
+				if kind != "timestamp with time zone" {
+					t.Errorf("%s is %q, want timestamp with time zone", name, kind)
+				}
+			}
+		})
+	})
+
 	t.Run("draft is invisible to the public", func(t *testing.T) {
-		draftID := mustScanID(t, `INSERT INTO ass.real_estate (title, status_id) VALUES ('Secret draft', 1) RETURNING id`)
+		draftID := mustScanID(t, `INSERT INTO ass.real_estate (title, estate_type, status_id) VALUES ('Secret draft', 1, 1) RETURNING id`)
 
 		code, _ := do("GET", "/assets/real-estates/"+itoa(draftID), "", "")
 		if code != http.StatusNotFound {

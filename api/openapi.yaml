@@ -1521,6 +1521,7 @@ components:
       required:
         - title
         - address
+        - estate_type_id
       properties:
         title:
           type: string
@@ -1528,11 +1529,15 @@ components:
           maxLength: 255
         description:
           type: string
+          maxLength: 2000
         imageurl:
           type: string
+          maxLength: 500
         estate_type_id:
           type: integer
-          description: Identifier from ass.real_estate_type
+          description: >
+            Identifier from ass.real_estate_type. Required: the column is NOT
+            NULL, so an asset without a type cannot be stored.
         issuer_id:
           type: integer
           description: Identifier from ass.issuer, the legal vehicle issuing the shares

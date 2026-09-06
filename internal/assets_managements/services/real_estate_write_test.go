@@ -24,8 +24,9 @@ func validAddress() server.RealEstateAddress {
 
 func validRequest() server.RealEstateWriteRequest {
 	return server.RealEstateWriteRequest{
-		Title:   "Villa Belair",
-		Address: validAddress(),
+		Title:        "Villa Belair",
+		EstateTypeId: 1,
+		Address:      validAddress(),
 	}
 }
 
@@ -110,7 +111,7 @@ func TestToWriteDTORejectsInvalidPayloads(t *testing.T) {
 			req := validRequest()
 			tt.req(&req)
 
-			if _, err := toWriteDTO(req, addressRequired); !errors.Is(err, ErrInvalidRealEstate) {
+			if _, err := toWriteDTO(req, writeCreate); !errors.Is(err, ErrInvalidRealEstate) {
 				t.Errorf("want ErrInvalidRealEstate, got %v", err)
 			}
 		})
@@ -130,7 +131,7 @@ func TestToWriteDTONormalises(t *testing.T) {
 	}
 	req.Media = &[]server.RealEstateMediaInput{{Url: "https://x/1.jpg"}, {Url: "https://x/2.jpg"}}
 
-	in, err := toWriteDTO(req, addressRequired)
+	in, err := toWriteDTO(req, writeCreate)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -176,7 +177,7 @@ func TestToWriteDTODefaultsCurrency(t *testing.T) {
 	req := validRequest()
 	req.Configuration = &server.RealEstateConfigurationInput{TotalShares: "10", PricePerShare: "1"}
 
-	in, err := toWriteDTO(req, addressRequired)
+	in, err := toWriteDTO(req, writeCreate)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -264,11 +265,11 @@ func TestAddressRequiredOnCreateOnly(t *testing.T) {
 	req := validRequest()
 	req.Address = server.RealEstateAddress{}
 
-	if _, err := toWriteDTO(req, addressRequired); !errors.Is(err, ErrInvalidRealEstate) {
+	if _, err := toWriteDTO(req, writeCreate); !errors.Is(err, ErrInvalidRealEstate) {
 		t.Errorf("a create without an address must be refused, got %v", err)
 	}
 
-	in, err := toWriteDTO(req, addressOptional)
+	in, err := toWriteDTO(req, writePatch)
 	if err != nil {
 		t.Fatalf("a patch without an address must be accepted, got %v", err)
 	}
@@ -279,7 +280,7 @@ func TestAddressRequiredOnCreateOnly(t *testing.T) {
 	// A half-filled address is a mistake, not an omission: it stays refused
 	// whatever the mode.
 	req.Address.City = "Luxembourg"
-	if _, err := toWriteDTO(req, addressOptional); !errors.Is(err, ErrInvalidRealEstate) {
+	if _, err := toWriteDTO(req, writePatch); !errors.Is(err, ErrInvalidRealEstate) {
 		t.Errorf("a partial address must be refused even on a patch, got %v", err)
 	}
 }
@@ -342,7 +343,7 @@ func TestApplyPatch(t *testing.T) {
 	t.Run("an empty string clears an optional value", func(t *testing.T) {
 		got := applyPatch(current, server.RealEstatePatchRequest{Description: strPtrT("")})
 
-		in, err := toWriteDTO(got, addressRequired)
+		in, err := toWriteDTO(got, writePatch)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
