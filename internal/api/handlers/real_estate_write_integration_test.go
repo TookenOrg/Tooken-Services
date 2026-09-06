@@ -79,13 +79,22 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 		return w.Code, w.Body.String()
 	}
 
+	// An issuer is part of what a published offer must name, so the referential
+	// needs one before an asset can be born visible.
+	if _, err := db.Exec(`
+	    INSERT INTO ass.issuer (id, name, legal_form) VALUES (1, 'Tooken RE I', 'SA')
+	    ON CONFLICT (id) DO NOTHING`); err != nil {
+		t.Fatal(err)
+	}
+
 	payload := `{
       "title": "Villa Belair",
       "description": "Nice",
       "estate_type_id": 1,
+      "issuer_id": 1,
       "address": {"street":"12 rue de la Gare","postal_code":"L-1611","city":"Luxembourg","country_code":"lu","latitude":"49.611622","longitude":"6.131935"},
       "specification": {"surface_area":"128.50","bedroom_number":4,"energy_class":"c"},
-      "configuration": {"total_shares":"1500","price_per_share":"199.99","currency_code":"eur","entry_fee_rate":"2.5"},
+      "configuration": {"total_shares":"1500","price_per_share":"199.99","currency_code":"eur","yield":"4.25","entry_fee_rate":"2.5"},
       "media": [{"url":"https://x/1.jpg","is_cover":true},{"url":"https://x/2.jpg"}]
     }`
 
@@ -232,18 +241,34 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 	// Clearing has to stay possible, otherwise a value entered by mistake could
 	// never be removed. An empty string is the way to say it.
 	t.Run("empty string clears an optional value", func(t *testing.T) {
-		code, body := do("PATCH", "/assets/real-estates/"+itoa(id), mgr, `{"description":""}`)
+		code, body := do("PATCH", "/assets/real-estates/"+itoa(id), mgr,
+			`{"specification":{"energy_class":""}}`)
 		if code != 200 {
 			t.Fatalf("want 200 got %d: %s", code, body)
 		}
 
 		var re map[string]any
 		json.Unmarshal([]byte(body), &re)
-		if re["description"] != nil {
-			t.Errorf("description not cleared: %v", re["description"])
+		spec, _ := re["specification"].(map[string]any)
+		if spec != nil && spec["energy_class"] != nil {
+			t.Errorf("energy class not cleared: %v", spec["energy_class"])
 		}
 		if re["title"] != "Villa Belair v2" {
 			t.Errorf("title lost: %v", re["title"])
+		}
+	})
+
+	// The counterpart of that freedom: what a published asset promises to an
+	// investor cannot be taken away by a patch. Antony's arbitration was to
+	// refuse rather than silently unpublish — an asset can be mid-fundraising,
+	// and pulling it off the site over a mistyped field is worse than asking
+	// for the field back.
+	t.Run("a published asset cannot lose what investors rely on", func(t *testing.T) {
+		for _, patch := range []string{`{"description":""}`, `{"configuration":{"yield":""}}`} {
+			code, body := do("PATCH", "/assets/real-estates/"+itoa(id), mgr, patch)
+			if code != http.StatusConflict {
+				t.Errorf("%s: want 409 got %d: %s", patch, code, body)
+			}
 		}
 	})
 
@@ -339,8 +364,9 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 	// A share already reserved by an order is a commitment: the asset can grow,
 	// but it cannot shrink under what investors were promised.
 	t.Run("total shares cannot fall under the reserved ones", func(t *testing.T) {
-		assetID := mustScanID(t, `INSERT INTO ass.real_estate (title, estate_type, status_id) VALUES ('Reserved guard', 1, 3) RETURNING id`)
-		mustExec(t, `INSERT INTO ass.real_estate_shares_config (real_estate_id, total_shares, price_per_share) VALUES ($1, 1000, 10)`, assetID)
+		assetID := mustScanID(t, `INSERT INTO ass.real_estate (title, description, imageurl, estate_type, issuer_id, status_id)
+		    VALUES ('Reserved guard', 'A guard', 'https://x/g.jpg', 1, 1, 3) RETURNING id`)
+		mustExec(t, `INSERT INTO ass.real_estate_shares_config (real_estate_id, total_shares, price_per_share, yield) VALUES ($1, 1000, 10, 4)`, assetID)
 		// status 2 = RESERVED, which carries counts_as_reserved. The reference is
 		// derived from the asset so the suite can run twice on the same database:
 		// order_ref is unique.
@@ -476,9 +502,152 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 		if !bytes.Contains([]byte(listMgr), []byte("Secret draft")) {
 			t.Errorf("draft missing from the manager listing")
 		}
-		if bytes.Contains([]byte(listMgr), []byte("Villa Belair")) {
-			t.Errorf("deleted asset still listed")
+		// Matching on the id, not on the title: the database is not wiped
+		// between runs, so an identical title from a previous run would make
+		// this assertion fail on a perfectly correct listing.
+		var listed []map[string]any
+		json.Unmarshal([]byte(listMgr), &listed)
+		for _, e := range listed {
+			if n, ok := e["id"].(float64); ok && int(n) == id {
+				t.Errorf("deleted asset still listed: %v", e)
+			}
 		}
+	})
+
+	// The lifecycle Antony arbitrated: a stub is born as a draft, it becomes
+	// visible only once it carries what an investor needs to decide, and the
+	// button that makes it visible says exactly what is missing when it cannot.
+	t.Run("publication", func(t *testing.T) {
+		stub := `{"title":"Half filled","estate_type_id":1,
+		  "address":{"street":"a","postal_code":"b","city":"c","country_code":"LU"}}`
+
+		code, body := do("POST", "/assets/real-estates", mgr, stub)
+		if code != http.StatusCreated {
+			t.Fatalf("want 201 got %d: %s", code, body)
+		}
+
+		var draft map[string]any
+		json.Unmarshal([]byte(body), &draft)
+		draftID := int(draft["id"].(float64))
+
+		t.Run("an incomplete asset is born a draft", func(t *testing.T) {
+			if draft["status"] != "draft" {
+				t.Errorf("want draft got %v", draft["status"])
+			}
+			if draft["active"] != false {
+				t.Errorf("an incomplete asset is active: %v", draft["active"])
+			}
+			if draft["published_at"] != nil {
+				t.Errorf("a draft carries a publication date: %v", draft["published_at"])
+			}
+			if code, _ := do("GET", "/assets/real-estates/"+itoa(draftID), "", ""); code != http.StatusNotFound {
+				t.Errorf("a draft is visible to the public: %d", code)
+			}
+		})
+
+		t.Run("publishing names everything that is missing", func(t *testing.T) {
+			code, body := do("POST", "/assets/real-estates/"+itoa(draftID)+"/publish", mgr, "")
+			if code != http.StatusConflict {
+				t.Fatalf("want 409 got %d: %s", code, body)
+			}
+			for _, field := range []string{
+				"issuer_id", "description", "media",
+				"configuration.total_shares", "configuration.price_per_share",
+				"configuration.currency_code", "configuration.yield",
+			} {
+				if !strings.Contains(body, field) {
+					t.Errorf("%s is required but not named: %s", field, body)
+				}
+			}
+		})
+
+		t.Run("only a manager can publish", func(t *testing.T) {
+			if code, _ := do("POST", "/assets/real-estates/"+itoa(draftID)+"/publish", "", ""); code != http.StatusUnauthorized {
+				t.Errorf("anonymous: want 401 got %d", code)
+			}
+			if code, _ := do("POST", "/assets/real-estates/"+itoa(draftID)+"/publish", usr, ""); code != http.StatusForbidden {
+				t.Errorf("plain user: want 403 got %d", code)
+			}
+		})
+
+		t.Run("completed then published", func(t *testing.T) {
+			complete := `{"description":"Now browsable","issuer_id":1,
+			  "media":[{"url":"https://x/h.jpg","is_cover":true}],
+			  "configuration":{"total_shares":"800","price_per_share":"125","currency_code":"EUR","yield":"3.9"}}`
+
+			code, body := do("PATCH", "/assets/real-estates/"+itoa(draftID), mgr, complete)
+			if code != http.StatusOK {
+				t.Fatalf("patch: want 200 got %d: %s", code, body)
+			}
+
+			// Completing does not publish on its own: making an asset visible
+			// stays an explicit decision.
+			var patched map[string]any
+			json.Unmarshal([]byte(body), &patched)
+			if patched["status"] != "draft" {
+				t.Errorf("a patch published the asset by itself: %v", patched["status"])
+			}
+
+			code, body = do("POST", "/assets/real-estates/"+itoa(draftID)+"/publish", mgr, "")
+			if code != http.StatusOK {
+				t.Fatalf("publish: want 200 got %d: %s", code, body)
+			}
+
+			var published map[string]any
+			json.Unmarshal([]byte(body), &published)
+			if published["status"] != "published" || published["active"] != true {
+				t.Errorf("not published: %v", body)
+			}
+			if published["published_at"] == nil {
+				t.Errorf("no publication date: %s", body)
+			}
+
+			if code, _ := do("GET", "/assets/real-estates/"+itoa(draftID), "", ""); code != http.StatusOK {
+				t.Errorf("a published asset stays hidden from the public: %d", code)
+			}
+
+			// Two managers clicking the same button must not produce a failure,
+			// and the date of the first publication is the one that counts.
+			code, body = do("POST", "/assets/real-estates/"+itoa(draftID)+"/publish", mgr, "")
+			if code != http.StatusOK {
+				t.Fatalf("republish: want 200 got %d: %s", code, body)
+			}
+			var again map[string]any
+			json.Unmarshal([]byte(body), &again)
+			if again["published_at"] != published["published_at"] {
+				t.Errorf("publication date moved: %v then %v", published["published_at"], again["published_at"])
+			}
+		})
+
+		// The correction that matters most: an asset published before these
+		// requirements existed must stay editable, otherwise every patch would
+		// be refused, including the one completing it.
+		t.Run("an asset published incomplete can still be patched", func(t *testing.T) {
+			legacyID := mustScanID(t, `
+			    INSERT INTO ass.real_estate (title, estate_type, status_id)
+			    VALUES ('Legacy listing', 1, 3) RETURNING id`)
+
+			code, body := do("PATCH", "/assets/real-estates/"+itoa(legacyID), mgr,
+				`{"title":"Legacy listing renamed"}`)
+			if code != http.StatusOK {
+				t.Fatalf("want 200 got %d: %s", code, body)
+			}
+		})
+
+		t.Run("a deleted asset cannot be published", func(t *testing.T) {
+			goneID := mustScanID(t, `
+			    INSERT INTO ass.real_estate (title, estate_type, status_id, deleted_at)
+			    VALUES ('Gone', 1, 7, now()) RETURNING id`)
+
+			code, _ := do("POST", "/assets/real-estates/"+itoa(goneID)+"/publish", mgr, "")
+			if code != http.StatusNotFound {
+				t.Errorf("want 404 got %d", code)
+			}
+			code, _ = do("POST", "/assets/real-estates/999999/publish", mgr, "")
+			if code != http.StatusNotFound {
+				t.Errorf("unknown id: want 404 got %d", code)
+			}
+		})
 	})
 }
 

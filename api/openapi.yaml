@@ -163,6 +163,73 @@ paths:
               schema:
                 $ref: "#/components/schemas/APIResponse"
 
+  /assets/real-estates/{id}/publish:
+    post:
+      tags:
+        - Assets
+      summary: Publish a real estate
+      description: >
+        Makes a draft visible to investors. Reserved to a MANAGER or an ADMIN.
+
+        An asset created with everything it needs is published straight away, so
+        this endpoint is only for the ones filled in over several steps.
+
+        What is checked is the stored asset, not a payload: the decision is
+        taken on the record as it stands, possibly long after it was written and
+        by someone else. An asset that still lacks what an investor relies on —
+        its issuer, its economics, a description, a visual — is refused with 409
+        naming the missing fields, so the caller knows what to complete.
+
+        Publishing an already published asset is not an error: it changes
+        nothing and returns the asset, so two managers clicking the same button
+        do not produce a failure.
+      operationId: publishRealEstate
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RealEstate"
+        "401":
+          description: Missing or invalid token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "403":
+          description: The role does not allow publishing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "404":
+          description: Real Estate Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "409":
+          description: The asset is not complete enough to be published
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+
   /assets/real-estate/issuance/orders:
     post:
       security:

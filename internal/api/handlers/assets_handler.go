@@ -123,6 +123,23 @@ func (h *Handler) PatchRealEstate(gCtx *gin.Context, id int) {
 	gCtx.JSON(http.StatusOK, realEstate)
 }
 
+func (h *Handler) PublishRealEstate(gCtx *gin.Context, id int) {
+	logger.LogDebug("🚀 Starting publish real estate id %d", id)
+
+	if !middleware.RequireRole(gCtx, authUtils.RoleManager, authUtils.RoleAdmin) {
+		return
+	}
+
+	realEstate, err := h.realEstateSvc.PublishRealEstate(gCtx.Request.Context(), id)
+	if err != nil {
+		respondRealEstateError(gCtx, err, "Unable to publish real estate.")
+		return
+	}
+
+	logger.LogInfo("✅ Real estate %d published", id)
+	gCtx.JSON(http.StatusOK, realEstate)
+}
+
 func (h *Handler) DeleteRealEstate(gCtx *gin.Context, id int) {
 	logger.LogDebug("🚀 Starting delete real estate id %d", id)
 

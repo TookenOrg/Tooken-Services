@@ -101,7 +101,10 @@ func (s *Service) CreateRealEstate(ctx context.Context, req server.RealEstateWri
 		return server.RealEstate{}, err
 	}
 
-	id, err := database.CreateRealEstate(ctx, in)
+	// A complete asset goes online immediately, an incomplete one waits as a
+	// draft. See publicationRequirements for what "complete" means and why the
+	// definition lives in one place.
+	id, err := database.CreateRealEstate(ctx, in, initialStatus(in))
 	if err != nil {
 		return server.RealEstate{}, translateWriteError(err)
 	}
@@ -127,7 +130,8 @@ func (s *Service) PatchRealEstate(ctx context.Context, id int, patch server.Real
 		return server.RealEstate{}, err
 	}
 
-	merged := applyPatch(toWriteRequest(current), patch)
+	stored := toWriteRequest(current)
+	merged := applyPatch(stored, patch)
 
 	// An asset stored before this endpoint existed may carry no address. A
 	// patch must still be able to fix its title, so the address is only
@@ -150,6 +154,17 @@ func (s *Service) PatchRealEstate(ctx context.Context, id int, patch server.Real
 	}
 
 	if err := checkSharesConfigChange(state, in.SharesConfig); err != nil {
+		return server.RealEstate{}, err
+	}
+
+	// The stored asset is converted with the same rules as the merged one, so
+	// the comparison of what is missing before and after is meaningful.
+	was, err := toWriteDTO(stored, writePatch)
+	if err != nil {
+		return server.RealEstate{}, err
+	}
+
+	if err := checkStillPublishable(state.StatusId, was, in); err != nil {
 		return server.RealEstate{}, err
 	}
 
@@ -255,13 +270,39 @@ func toWriteRequest(dto database.RealEstateDTO) server.RealEstateWriteRequest {
 	return req
 }
 
+// cloneWriteRequest detaches every section a patch can write through, so the
+// original stays exactly as it was read from the database.
+func cloneWriteRequest(req server.RealEstateWriteRequest) server.RealEstateWriteRequest {
+	if s := req.Specification; s != nil {
+		copied := *s
+		req.Specification = &copied
+	}
+	if c := req.Configuration; c != nil {
+		copied := *c
+		req.Configuration = &copied
+	}
+	if m := req.Media; m != nil {
+		copied := append([]server.RealEstateMediaInput(nil), *m...)
+		req.Media = &copied
+	}
+
+	return req
+}
+
 // applyPatch lays the supplied fields over the current asset.
 //
 // Only a field actually present in the JSON body is applied: everything else
 // keeps the value it already had. An empty string is not an omission, it is the
 // way to clear an optional value, and it travels down to the same code that
 // turns a blank into a NULL on a create.
+//
+// The request is taken by value, but its sections are pointers: writing through
+// them would edit the caller's copy of the stored asset as well. The caller
+// compares the asset before and after the patch, so a shared section would make
+// the two identical and the comparison blind. Hence the clone.
 func applyPatch(current server.RealEstateWriteRequest, patch server.RealEstatePatchRequest) server.RealEstateWriteRequest {
+	current = cloneWriteRequest(current)
+
 	if patch.Title != nil {
 		current.Title = *patch.Title
 	}

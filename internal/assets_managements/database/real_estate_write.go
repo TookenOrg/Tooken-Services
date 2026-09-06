@@ -21,11 +21,15 @@ import (
 // a float64 would put back the rounding that migration 000001 and the DTOs were
 // written to remove.
 
-// StatusPublished is the status an asset is created with.
-//
-// A manager who clicks "create" expects the asset on the site, not a draft
-// nobody asked for. The trigger of migration 000006 derives active = true from
-// it, so nothing else has to be set.
+// StatusDraft is where an asset starts when its record is not complete enough
+// to be shown to an investor. It is not public, so the trigger of migration
+// 000006 derives active = false from it.
+const StatusDraft = 1
+
+// StatusPublished is the status of an asset offered to investors. A manager who
+// creates a complete asset gets it directly, without a publication step nobody
+// asked for; an incomplete one waits in StatusDraft. The trigger of migration
+// 000006 derives active = true from it, so nothing else has to be set.
 const StatusPublished = 3
 
 // StatusCancelled is the status a soft-deleted asset carries. Constraint
@@ -158,16 +162,22 @@ WHERE re.id = $1
 
 // CreateRealEstate inserts the asset and all its sections, and returns the new
 // identifier.
-func CreateRealEstate(ctx context.Context, in RealEstateWriteDTO) (id int, err error) {
+// The status is decided by the service, from the completeness of the payload.
+// published_at only makes sense for an asset that is actually published, so a
+// draft is created without one.
+func CreateRealEstate(ctx context.Context, in RealEstateWriteDTO, statusID int) (id int, err error) {
 	err = inTransaction(ctx, func(tx *sql.Tx) error {
 		const query = `
 INSERT INTO ass.real_estate (title, description, imageurl, estate_type, issuer_id, status_id, published_at)
-VALUES ($1, $2, $3, $4, $5, $6, now())
+VALUES ($1, $2, $3, $4, $5, $6, CASE WHEN $7 THEN now() END)
 RETURNING id
 `
 
 		if err := tx.QueryRowContext(ctx, query,
-			in.Title, in.Description, in.Imageurl, in.EstateTypeId, in.IssuerId, StatusPublished,
+			in.Title, in.Description, in.Imageurl, in.EstateTypeId, in.IssuerId, statusID,
+			// A boolean rather than a second status parameter: comparing $6 with
+			// itself left PostgreSQL unable to deduce one type for it.
+			statusID == StatusPublished,
 		).Scan(&id); err != nil {
 			return fmt.Errorf("insert real estate: %w", err)
 		}
@@ -396,4 +406,35 @@ func inTransaction(ctx context.Context, fn func(*sql.Tx) error) (err error) {
 	}
 
 	return tx.Commit()
+}
+
+// PublishRealEstate moves an asset to the published status.
+//
+// published_at is only set the first time: it records when investors were first
+// shown the asset, which unpublishing and republishing must not rewrite.
+// updated_at keeps tracking the last change, so nothing is lost.
+func PublishRealEstate(ctx context.Context, id int) error {
+	const query = `
+UPDATE ass.real_estate
+SET status_id = $2,
+    published_at = COALESCE(published_at, now()),
+    updated_at = now()
+WHERE id = $1
+  AND deleted_at IS NULL
+`
+
+	res, err := globals.DB.ExecContext(ctx, query, id, StatusPublished)
+	if err != nil {
+		return err
+	}
+
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return sql.ErrNoRows
+	}
+
+	return nil
 }
