@@ -74,3 +74,16 @@ func TestReservedScopeComesFromTheReferential(t *testing.T) {
 		}
 	}
 }
+
+// A multi-row query without ORDER BY has no defined order at all: PostgreSQL
+// returns whatever the plan produces. An UPDATE moves the row to the end of the
+// heap, so a migration is enough to reshuffle the list — which is exactly what
+// happened when migration 000008 rewrote the assets with an empty
+// contract_address.
+func TestListQueryIsOrdered(t *testing.T) {
+	query := buildRealEstateQuery(realEstateCoreColumns, "WHERE re.active = true\nORDER BY re.id")
+
+	if !strings.Contains(query, "ORDER BY") {
+		t.Error("a query returning several rows must define its order explicitly")
+	}
+}

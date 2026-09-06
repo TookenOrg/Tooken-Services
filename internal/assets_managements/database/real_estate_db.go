@@ -42,9 +42,17 @@ func scanRealEstate(scanner rowScanner, cols []realEstateColumn) (RealEstateDTO,
 
 // GetActiveRealEstates serves the list: no address, no issuer, no token, no
 // gallery. A single query, whatever the number of assets.
+//
+// The ORDER BY is not cosmetic. Without it PostgreSQL guarantees nothing: rows
+// come back in whatever order the plan happens to produce, which is physical
+// heap order for a sequential scan. Any UPDATE rewrites the row at the end of
+// the heap, so a single migration is enough to silently reshuffle the list —
+// and a parallel scan would do the same. It is also a prerequisite for the
+// pagination to come: without a total order, LIMIT/OFFSET can skip a row or
+// serve it twice.
 func GetActiveRealEstates(ctx context.Context) ([]RealEstateDTO, error) {
 	cols := realEstateCoreColumns
-	query := buildRealEstateQuery(cols, "WHERE re.active = true")
+	query := buildRealEstateQuery(cols, "WHERE re.active = true\nORDER BY re.id")
 
 	rows, err := globals.DB.QueryContext(ctx, query)
 	if err != nil {

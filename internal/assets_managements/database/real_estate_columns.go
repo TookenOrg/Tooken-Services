@@ -134,6 +134,9 @@ LEFT JOIN (
 `
 
 // buildRealEstateQuery assembles the SELECT from the column table.
-func buildRealEstateQuery(cols []realEstateColumn, where string) string {
-	return fmt.Sprintf("SELECT\n%s\n%s%s", selectList(cols), realEstateBaseFrom, where)
+//
+// `clauses` carries everything that follows the FROM: the WHERE filter and,
+// for any query that can return several rows, an explicit ORDER BY.
+func buildRealEstateQuery(cols []realEstateColumn, clauses string) string {
+	return fmt.Sprintf("SELECT\n%s\n%s%s", selectList(cols), realEstateBaseFrom, clauses)
 }
