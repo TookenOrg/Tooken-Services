@@ -2,10 +2,12 @@ package services
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/TookenOrg/tooken-services/internal/api/server"
 	"github.com/TookenOrg/tooken-services/internal/assets_managements/database"
+	"github.com/lib/pq"
 	"github.com/shopspring/decimal"
 )
 
@@ -351,4 +353,43 @@ func TestApplyPatch(t *testing.T) {
 			t.Errorf("description not cleared: %q", *in.Description)
 		}
 	})
+}
+
+// A primary key collision comes from a sequence sitting behind its data, never
+// from the payload. Reporting it as a conflict sent the caller looking for a
+// duplicate value they never sent.
+func TestTranslateWriteErrorTellsPrimaryKeyFromUserConflict(t *testing.T) {
+	tests := []struct {
+		name         string
+		constraint   string
+		wantSentinel error
+	}{
+		{"generated name", "real_estate_pkey", nil},
+		{"handwritten name", "pk_real_estates", nil},
+		{"a value the caller did send", "real_estate_shares_config_compartment_ref_uk", ErrRealEstateConflict},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := translateWriteError(&pq.Error{
+				Code:       "23505",
+				Constraint: tc.constraint,
+				Detail:     "Key (id)=(1) already exists.",
+			})
+
+			if tc.wantSentinel != nil {
+				if !errors.Is(err, tc.wantSentinel) {
+					t.Fatalf("got %v, want a %v", err, tc.wantSentinel)
+				}
+				return
+			}
+
+			if errors.Is(err, ErrRealEstateConflict) || errors.Is(err, ErrInvalidRealEstate) {
+				t.Fatalf("a sequence gap must not be reported to the caller as their mistake: %v", err)
+			}
+			if !strings.Contains(err.Error(), "000013") {
+				t.Errorf("the message must point at the repair, got %q", err)
+			}
+		})
+	}
 }

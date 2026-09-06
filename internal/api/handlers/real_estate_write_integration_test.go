@@ -416,6 +416,42 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 		})
 	})
 
+	// An explicit id does not advance the identity sequence, so seeding rows or
+	// restoring a dump leaves the next generated id pointing at a row that
+	// already exists. This is what migration 000013 repairs.
+	t.Run("a sequence left behind by explicit ids", func(t *testing.T) {
+		// Exactly the state a seeded table is in: rows carry ids 1..N while the
+		// sequence never moved, so the next generated id is one that exists.
+		mustExec(t, `INSERT INTO ass.real_estate (id, title, estate_type, status_id)
+		    VALUES (1, 'Seeded with its id', 1, 3)
+		    ON CONFLICT (id) DO NOTHING`)
+		mustExec(t, `SELECT setval(pg_get_serial_sequence('ass.real_estate', 'id'), 1, false)`)
+
+		payload := `{"title":"After the gap","estate_type_id":1,"address":{"street":"a","postal_code":"b","city":"c","country_code":"LU"}}`
+
+		// The caller sent no id, so this must not come back as a 409 telling him
+		// a value of his is already taken.
+		code, body := do("POST", "/assets/real-estates", mgr, payload)
+		if code != http.StatusInternalServerError {
+			t.Errorf("want 500 got %d: %s", code, body)
+		}
+		if strings.Contains(body, "already used") {
+			t.Errorf("a sequence gap must not be blamed on the payload: %s", body)
+		}
+
+		migration, err := os.ReadFile("../../../tools/db/migrations/000013_resync_identity_sequences.up.sql")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Exec(string(migration)); err != nil {
+			t.Fatalf("migration 000013 failed: %v", err)
+		}
+
+		if code, body := do("POST", "/assets/real-estates", mgr, payload); code != http.StatusCreated {
+			t.Errorf("want 201 after the repair, got %d: %s", code, body)
+		}
+	})
+
 	t.Run("draft is invisible to the public", func(t *testing.T) {
 		draftID := mustScanID(t, `INSERT INTO ass.real_estate (title, estate_type, status_id) VALUES ('Secret draft', 1, 1) RETURNING id`)
 

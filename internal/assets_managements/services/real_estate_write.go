@@ -414,6 +414,16 @@ var fkFields = map[string]string{
 	"real_estate_shares_config_payment_frequency_type_fkey": "configuration.payment_frequency_type_id",
 }
 
+// isPrimaryKey recognises a primary key from its name.
+//
+// The driver does not say which kind of constraint it hit, and asking the
+// catalog on every failed write would put a query on the error path. The two
+// naming styles present in this database are covered: `pk_...`, used by the
+// tables created by hand, and `..._pkey`, the name PostgreSQL generates.
+func isPrimaryKey(constraint string) bool {
+	return strings.HasPrefix(constraint, "pk_") || strings.HasSuffix(constraint, "_pkey")
+}
+
 // translateWriteError turns the constraint violations a payload can cause into
 // the sentinel the handler understands.
 //
@@ -434,6 +444,16 @@ func translateWriteError(err error) error {
 		}
 		return invalid("a referenced record does not exist (%s)", pqErr.Constraint)
 	case "unique_violation":
+		// A primary key collision is not the caller's doing: the id was handed
+		// out by the table's own identity. It means the sequence sits behind
+		// the data, which happens as soon as rows are inserted with an explicit
+		// id. Answering 409 sent the manager looking for a duplicate value in a
+		// payload that never carried one.
+		if isPrimaryKey(pqErr.Constraint) {
+			return fmt.Errorf(
+				"the identity sequence of the table is behind its data (%s, %s): replay migration 000013 to resynchronise it",
+				pqErr.Constraint, pqErr.Detail)
+		}
 		// A compartment reference identifies a ring-fenced estate: two assets
 		// claiming the same one is a state conflict, not a typo.
 		if pqErr.Constraint == "real_estate_shares_config_compartment_ref_uk" {
