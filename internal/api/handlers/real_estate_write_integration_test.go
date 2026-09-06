@@ -54,6 +54,15 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 	g.Use(middleware.AutoAuthMiddleware())
 	server.RegisterHandlers(g, NewHandler())
 
+	// The referential is empty in a freshly migrated database, and every write
+	// below points at type 1. Seeding it here keeps the suite runnable from the
+	// migrations alone, without a manual step to forget.
+	if _, err := db.Exec(`
+	    INSERT INTO ass.real_estate_type (id, name) VALUES (1, 'Apartment')
+	    ON CONFLICT (id) DO NOTHING`); err != nil {
+		t.Fatal(err)
+	}
+
 	mgr, _ := authUtils.GenerateJWT(1, "m@t.lu", authUtils.RoleManager)
 	usr, _ := authUtils.GenerateJWT(2, "u@t.lu", authUtils.RoleUser)
 
@@ -285,11 +294,30 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 		}
 	})
 
+	// Fixtures must never fail silently: a rejected INSERT would leave the guard
+	// with nothing to guard, and the assertion below would pass for the wrong
+	// reason.
+	mustExec := func(t *testing.T, query string, args ...any) {
+		t.Helper()
+		if _, err := db.Exec(query, args...); err != nil {
+			t.Fatalf("fixture failed: %v", err)
+		}
+	}
+	mustScanID := func(t *testing.T, query string, args ...any) int {
+		t.Helper()
+		var id int
+		if err := db.QueryRow(query, args...).Scan(&id); err != nil {
+			t.Fatalf("fixture failed: %v", err)
+		}
+		return id
+	}
+
 	t.Run("guards on a tokenized asset", func(t *testing.T) {
-		var tokenID, assetID int
-		db.QueryRow(`INSERT INTO blk.token (address, token_name, symbol, nb_decimal) VALUES ('0xguard','G','G',0) RETURNING id`).Scan(&tokenID)
-		db.QueryRow(`INSERT INTO ass.real_estate (title, status_id, token_id) VALUES ('Tokenized guard', 3, $1) RETURNING id`, tokenID).Scan(&assetID)
-		db.Exec(`INSERT INTO ass.real_estate_shares_config (real_estate_id, total_shares, price_per_share) VALUES ($1, 1000, 10)`, assetID)
+		tokenID := mustScanID(t, `INSERT INTO blk.token (address, token_name, symbol, nb_decimal)
+		    VALUES ('0xguard-' || gen_random_uuid(),'G','G',0) RETURNING id`)
+		assetID := mustScanID(t, `INSERT INTO ass.real_estate (title, status_id, token_id)
+		    VALUES ('Tokenized guard', 3, $1) RETURNING id`, tokenID)
+		mustExec(t, `INSERT INTO ass.real_estate_shares_config (real_estate_id, total_shares, price_per_share) VALUES ($1, 1000, 10)`, assetID)
 
 		p := `{"configuration":{"total_shares":"500"}}`
 		code, body := do("PATCH", "/assets/real-estates/"+itoa(assetID), mgr, p)
@@ -308,11 +336,13 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 	// A share already reserved by an order is a commitment: the asset can grow,
 	// but it cannot shrink under what investors were promised.
 	t.Run("total shares cannot fall under the reserved ones", func(t *testing.T) {
-		var assetID int
-		db.QueryRow(`INSERT INTO ass.real_estate (title, status_id) VALUES ('Reserved guard', 3) RETURNING id`).Scan(&assetID)
-		db.Exec(`INSERT INTO ass.real_estate_shares_config (real_estate_id, total_shares, price_per_share) VALUES ($1, 1000, 10)`, assetID)
-		// status 2 = RESERVED, which carries counts_as_reserved.
-		db.Exec(`INSERT INTO iss.issuance_orders (asset_id, quantity, status_id, order_ref) VALUES ($1, 400, 2, 'ORD-RESERVED-1')`, assetID)
+		assetID := mustScanID(t, `INSERT INTO ass.real_estate (title, status_id) VALUES ('Reserved guard', 3) RETURNING id`)
+		mustExec(t, `INSERT INTO ass.real_estate_shares_config (real_estate_id, total_shares, price_per_share) VALUES ($1, 1000, 10)`, assetID)
+		// status 2 = RESERVED, which carries counts_as_reserved. The reference is
+		// derived from the asset so the suite can run twice on the same database:
+		// order_ref is unique.
+		mustExec(t, `INSERT INTO iss.issuance_orders (asset_id, quantity, status_id, order_ref)
+		    VALUES ($1, 400, 2, $2)`, assetID, "ORD-RESERVED-"+itoa(assetID))
 
 		base := `{"configuration":{"total_shares":"%s"}}`
 
@@ -330,8 +360,7 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 	})
 
 	t.Run("draft is invisible to the public", func(t *testing.T) {
-		var draftID int
-		db.QueryRow(`INSERT INTO ass.real_estate (title, status_id) VALUES ('Secret draft', 1) RETURNING id`).Scan(&draftID)
+		draftID := mustScanID(t, `INSERT INTO ass.real_estate (title, status_id) VALUES ('Secret draft', 1) RETURNING id`)
 
 		code, _ := do("GET", "/assets/real-estates/"+itoa(draftID), "", "")
 		if code != http.StatusNotFound {

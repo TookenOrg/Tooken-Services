@@ -48,9 +48,25 @@ paths:
               schema:
                 $ref: "#/components/schemas/SignUpResponse"
         "400":
-          description: Invalid request
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
         "409":
-          description: Email already exists
+          description: An account already exists for this email
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "500":
+          description: >
+            The account could not be created, a database outage for instance.
+            The cause is logged server side and never returned to the caller.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
 
   /auth/sign-in:
     post:
@@ -65,16 +81,33 @@ paths:
             schema:
               $ref: "#/components/schemas/SignInRequest"
       responses:
-        "201":
-          description: User created successfully
+        "200":
+          description: User authenticated successfully
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/SignInResponse"
         "400":
-          description: Invalid request
-        "409":
-          description: Email already exists
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "401":
+          description: Unknown email or wrong password
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "500":
+          description: >
+            The credentials could not be checked at all, a database outage for
+            instance. Distinct from 401 on purpose: retrying with a different
+            password would not help.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
 
   /user/{userId}:
     get:
@@ -893,6 +926,15 @@ components:
           nullable: true
           description: Date de la dernière connexion
           example: "2026-01-10T15:30:00Z"
+        role:
+          type: string
+          description: >
+            Permission level of the account. The same value is carried by the
+            JWT, which is what the server actually enforces; it is repeated here
+            so a client can hide an action it is not allowed to perform without
+            having to decode the token.
+          enum: [USER, MANAGER, ADMIN]
+          example: USER
 
     InitializeIdentityFactoryResponse:
       allOf:
