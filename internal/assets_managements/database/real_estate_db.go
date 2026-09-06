@@ -54,11 +54,16 @@ func scanRealEstate(scanner rowScanner, cols []realEstateColumn) (RealEstateDTO,
 // and a parallel scan would do the same. It is also a prerequisite for the
 // pagination to come: without a total order, LIMIT/OFFSET can skip a row or
 // serve it twice.
-func GetActiveRealEstates(ctx context.Context) ([]RealEstateDTO, error) {
+//
+// includeUnpublished widens the filter to the assets that are not published
+// yet, for a MANAGER or an ADMIN. Deleted assets stay out either way: they are
+// kept for the audit trail, not to be browsed.
+func GetRealEstates(ctx context.Context, includeUnpublished bool) ([]RealEstateDTO, error) {
 	cols := realEstateCoreColumns
-	query := buildRealEstateQuery(cols, "WHERE re.active = true\nORDER BY re.id")
+	query := buildRealEstateQuery(cols,
+		"WHERE re.deleted_at IS NULL AND (re.active = true OR $1)\nORDER BY re.id")
 
-	rows, err := globals.DB.QueryContext(ctx, query)
+	rows, err := globals.DB.QueryContext(ctx, query, includeUnpublished)
 	if err != nil {
 		return nil, err
 	}
@@ -83,11 +88,17 @@ func GetActiveRealEstates(ctx context.Context) ([]RealEstateDTO, error) {
 // rather than by extra LEFT JOINs. On a single record the cost is negligible,
 // and each DTO keeps the exact typing of its schema instead of being made
 // nullable by the join.
-func GetActiveRealEstateById(ctx context.Context, id int) (RealEstateDTO, error) {
+//
+// includeUnpublished lets a MANAGER or an ADMIN open an asset that is not
+// published yet. For anyone else such an asset yields sql.ErrNoRows, so a draft
+// answers 404 exactly like an identifier that never existed: its existence is
+// not disclosed.
+func GetRealEstateById(ctx context.Context, id int, includeUnpublished bool) (RealEstateDTO, error) {
 	cols := realEstateCoreColumns
-	query := buildRealEstateQuery(cols, "WHERE re.id = $1 AND re.active = true")
+	query := buildRealEstateQuery(cols,
+		"WHERE re.id = $1 AND re.deleted_at IS NULL AND (re.active = true OR $2)")
 
-	row := globals.DB.QueryRowContext(ctx, query, id)
+	row := globals.DB.QueryRowContext(ctx, query, id, includeUnpublished)
 
 	estate, err := scanRealEstate(row, cols)
 	if err != nil {

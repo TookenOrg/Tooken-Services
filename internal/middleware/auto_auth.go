@@ -11,7 +11,7 @@ import (
 )
 
 // Global var for protected routes (with bearer)
-var protectedRoutes map[string]map[string]bool
+var protectedRoutes map[string]map[string]AuthMode
 
 func InitAuth(openapiPath string) error {
 	var err error
@@ -26,41 +26,61 @@ func InitAuth(openapiPath string) error {
 
 func AutoAuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		path := c.Request.URL.Path
+		// FullPath is the route pattern (/real-estates/:id), not the concrete
+		// URL: it is what can be compared to the OpenAPI paths. It is empty
+		// when no route matched, in which case there is nothing to protect.
+		path := c.FullPath()
 		method := c.Request.Method
 
-		if methods, exists := protectedRoutes[path]; exists {
-			if methods[method] {
-				// This route must be protected
-				authHeader := c.GetHeader("Authorization")
-
-				if authHeader == "" {
-					c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-						"error": "Authorization header required",
-					})
-					return
-				}
-
-				if !strings.HasPrefix(authHeader, "Bearer ") {
-					c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-						"error": "Invalid authorization format. Use: Bearer <token>",
-					})
-					return
-				}
-
-				token := strings.TrimPrefix(authHeader, "Bearer ")
-				claims, err := utils.ParseJWT(token)
-				if err != nil {
-					c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-						"error": "Invalid or expired token",
-					})
-					return
-				}
-
-				// Save claims in gCtx
-				c.Set("user_claims", claims)
-			}
+		methods, exists := protectedRoutes[path]
+		if !exists {
+			c.Next()
+			return
 		}
+
+		mode, declared := methods[method]
+		if !declared {
+			c.Next()
+			return
+		}
+
+		authHeader := c.GetHeader("Authorization")
+
+		if authHeader == "" {
+			// An optional-auth route serves anonymous callers; the handler
+			// sees no claims and answers with the public view.
+			if mode == AuthOptional {
+				c.Next()
+				return
+			}
+
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"error": "Authorization header required",
+			})
+			return
+		}
+
+		if !strings.HasPrefix(authHeader, "Bearer ") {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"error": "Invalid authorization format. Use: ******",
+			})
+			return
+		}
+
+		// A malformed or expired token is rejected even where auth is optional:
+		// silently downgrading to anonymous would answer 200 with a truncated
+		// payload, and the caller would never learn its session expired.
+		token := strings.TrimPrefix(authHeader, "Bearer ")
+		claims, err := utils.ParseJWT(token)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"error": "Invalid or expired token",
+			})
+			return
+		}
+
+		// Save claims in gCtx
+		c.Set("user_claims", claims)
 
 		c.Next()
 	}

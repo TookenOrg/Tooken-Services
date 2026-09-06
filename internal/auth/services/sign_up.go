@@ -25,13 +25,13 @@ func (s *Service) SignUp(ctx context.Context, email, password, fullName string) 
 	}
 
 	// 3 - Insert new user
-	userId, err := database.InsertUser(ctx, email, hashedPassword, fullName)
+	userId, role, err := database.InsertUser(ctx, email, hashedPassword, fullName)
 	if err != nil {
 		return
 	}
 
 	// 4 - generate jwt for session
-	jwtToken, err = utils.GenerateJWT(userId, email)
+	jwtToken, err = utils.GenerateJWT(userId, email, role)
 	if err != nil {
 		return
 	}

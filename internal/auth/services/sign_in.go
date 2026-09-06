@@ -29,7 +29,7 @@ func (s *Service) SignIn(ctx context.Context, email, password string) (user serv
 	// 3 - TODO: Update last connexion timestamp
 
 	// 4 - generate jwt for session
-	jwtToken, err = utils.GenerateJWT(userDto.Id, email)
+	jwtToken, err = utils.GenerateJWT(userDto.Id, email, userDto.Role)
 	if err != nil {
 		return
 	}

@@ -24,7 +24,9 @@ func (s *Service) CreateIssuanceOrder(ctx context.Context, req server.CreateIssu
 		return
 	}
 
-	realEstate, err := assetManagementDb.GetActiveRealEstateById(ctx, req.RealEstateId)
+	// false: an order can only be placed on a publicly available asset. A draft
+	// or a deleted asset must be as unreachable here as it is on the listing.
+	realEstate, err := assetManagementDb.GetRealEstateById(ctx, req.RealEstateId, false)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return server.IssuanceOrder{}, logger.LogError("Real Estate not found with id %d", req.RealEstateId)

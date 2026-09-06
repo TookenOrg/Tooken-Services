@@ -15,10 +15,10 @@ import (
 // The DTO models the whole v3 schema; this file decides what actually leaves
 // the server. Two deliberate omissions:
 //
-//   - the full address (street, postal code, coordinates). Both real estate
-//     endpoints are public today, so only the coarse location is exposed. The
-//     rest waits for the endpoint to be able to tell a KYC-verified caller from
-//     an anonymous one.
+//   - the full address (street, postal code, coordinates), served only to a
+//     MANAGER or an ADMIN. The endpoints are public, and a precise address
+//     pinpoints a tokenized asset; the coarse location is what everyone else
+//     gets.
 //   - the fee grid, the investment bounds and the compartment reference, which
 //     only mean something once the subscription funnel exists.
 //
@@ -94,7 +94,11 @@ func toServerRealEstates(dtos []database.RealEstateDTO) []server.RealEstateSumma
 	return estates
 }
 
-func toServerRealEstate(dto database.RealEstateDTO) server.RealEstate {
+// toServerRealEstate builds the detail answer. includeAddress is the single
+// switch guarding the most sensitive part of the model: it is passed down
+// explicitly rather than read from a context, so no future caller can obtain
+// the address without having said so.
+func toServerRealEstate(dto database.RealEstateDTO, includeAddress bool) server.RealEstate {
 	s := toServerRealEstateSummary(dto)
 
 	e := server.RealEstate{
@@ -134,6 +138,19 @@ func toServerRealEstate(dto database.RealEstateDTO) server.RealEstate {
 			LegalForm:   strPtr(i.LegalForm),
 			CountryCode: strPtr(i.CountryCode),
 			Status:      strPtr(i.StatusCode),
+		}
+	}
+
+	if a := dto.Address; a != nil && includeAddress {
+		e.Address = &server.RealEstateAddress{
+			Street:           a.Street,
+			StreetComplement: a.StreetComplement,
+			PostalCode:       a.PostalCode,
+			City:             a.City,
+			Region:           a.Region,
+			CountryCode:      a.CountryCode,
+			Latitude:         nullDecimalToString(a.Latitude),
+			Longitude:        nullDecimalToString(a.Longitude),
 		}
 	}
 

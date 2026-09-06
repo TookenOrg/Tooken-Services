@@ -195,6 +195,9 @@ type RealEstate struct {
 	// Active is estate active
 	Active *bool `json:"active,omitempty"`
 
+	// Address Full postal address. Served only to a MANAGER or an ADMIN; the public answer carries RealEstateLocation instead.
+	Address *RealEstateAddress `json:"address,omitempty"`
+
 	// Configuration Amounts and share counts are carried as decimal strings. JSON has a single numeric type, which most parsers read as a binary double: 199.99 comes back as 199.99001, and any integer above 2^53 is silently rounded. The string is a transport format, not the type of the data.
 	Configuration *RealEstateConfiguration `json:"configuration,omitempty"`
 
@@ -227,6 +230,38 @@ type RealEstate struct {
 	UpdatedAt *time.Time       `json:"updated_at,omitempty"`
 }
 
+// RealEstateAddress Full postal address. Served only to a MANAGER or an ADMIN; the public answer carries RealEstateLocation instead.
+type RealEstateAddress struct {
+	City string `json:"city"`
+
+	// CountryCode ISO 3166-1 alpha-2
+	CountryCode string `json:"country_code"`
+
+	// Latitude Exact decimal, NUMERIC(9,6). Set together with longitude or not at all.
+	Latitude *string `json:"latitude,omitempty"`
+
+	// Longitude Exact decimal, NUMERIC(9,6). Set together with latitude or not at all.
+	Longitude        *string `json:"longitude,omitempty"`
+	PostalCode       string  `json:"postal_code"`
+	Region           *string `json:"region,omitempty"`
+	Street           string  `json:"street"`
+	StreetComplement *string `json:"street_complement,omitempty"`
+}
+
+// RealEstateAddressPatch Address fields to change. Same fields as RealEstateAddress, none required: what is not sent keeps its current value.
+type RealEstateAddressPatch struct {
+	City *string `json:"city,omitempty"`
+
+	// CountryCode ISO 3166-1 alpha-2
+	CountryCode      *string `json:"country_code,omitempty"`
+	Latitude         *string `json:"latitude,omitempty"`
+	Longitude        *string `json:"longitude,omitempty"`
+	PostalCode       *string `json:"postal_code,omitempty"`
+	Region           *string `json:"region,omitempty"`
+	Street           *string `json:"street,omitempty"`
+	StreetComplement *string `json:"street_complement,omitempty"`
+}
+
 // RealEstateConfiguration Amounts and share counts are carried as decimal strings. JSON has a single numeric type, which most parsers read as a binary double: 199.99 comes back as 199.99001, and any integer above 2^53 is silently rounded. The string is a transport format, not the type of the data.
 type RealEstateConfiguration struct {
 	// CurrencyCode ISO 4217
@@ -244,6 +279,53 @@ type RealEstateConfiguration struct {
 	// TotalValuation total_shares x price_per_share, computed by the database
 	TotalValuation *string  `json:"total_valuation,omitempty"`
 	Yield          *float32 `json:"yield,omitempty"`
+}
+
+// RealEstateConfigurationInput Share configuration. total_valuation is absent on purpose: the database computes it from total_shares x price_per_share and refuses any write, which is what keeps the three values from ever disagreeing.
+type RealEstateConfigurationInput struct {
+	// CompartmentRef Luxembourg compartment reference, unique across assets
+	CompartmentRef *string `json:"compartment_ref,omitempty"`
+
+	// CurrencyCode ISO 4217, defaults to EUR
+	CurrencyCode *string `json:"currency_code,omitempty"`
+
+	// EntryFeeRate Percentage between 0 and 100
+	EntryFeeRate *string `json:"entry_fee_rate,omitempty"`
+
+	// ExitFeeRate Percentage between 0 and 100
+	ExitFeeRate   *string `json:"exit_fee_rate,omitempty"`
+	MaxInvestment *string `json:"max_investment,omitempty"`
+
+	// MgmtFeeRate Percentage between 0 and 100
+	MgmtFeeRate            *string `json:"mgmt_fee_rate,omitempty"`
+	MinInvestment          *string `json:"min_investment,omitempty"`
+	PaymentFrequency       *int    `json:"payment_frequency,omitempty"`
+	PaymentFrequencyTypeId *int    `json:"payment_frequency_type_id,omitempty"`
+
+	// PricePerShare Exact positive decimal, NUMERIC(20,8)
+	PricePerShare string `json:"price_per_share"`
+
+	// TotalShares Exact positive integer, NUMERIC(20,0)
+	TotalShares string `json:"total_shares"`
+
+	// Yield Annual yield in percent
+	Yield *string `json:"yield,omitempty"`
+}
+
+// RealEstateConfigurationPatch Share configuration fields to change. total_shares and price_per_share are optional here, unlike on a create, because they already have a value to keep.
+type RealEstateConfigurationPatch struct {
+	CompartmentRef         *string `json:"compartment_ref,omitempty"`
+	CurrencyCode           *string `json:"currency_code,omitempty"`
+	EntryFeeRate           *string `json:"entry_fee_rate,omitempty"`
+	ExitFeeRate            *string `json:"exit_fee_rate,omitempty"`
+	MaxInvestment          *string `json:"max_investment,omitempty"`
+	MgmtFeeRate            *string `json:"mgmt_fee_rate,omitempty"`
+	MinInvestment          *string `json:"min_investment,omitempty"`
+	PaymentFrequency       *int    `json:"payment_frequency,omitempty"`
+	PaymentFrequencyTypeId *int    `json:"payment_frequency_type_id,omitempty"`
+	PricePerShare          *string `json:"price_per_share,omitempty"`
+	TotalShares            *string `json:"total_shares,omitempty"`
+	Yield                  *string `json:"yield,omitempty"`
 }
 
 // RealEstateIssuer The legal vehicle issuing the shares.
@@ -276,6 +358,39 @@ type RealEstateMedia struct {
 	Url       *string `json:"url,omitempty"`
 }
 
+// RealEstateMediaInput defines model for RealEstateMediaInput.
+type RealEstateMediaInput struct {
+	AltText *string `json:"alt_text,omitempty"`
+
+	// IsCover At most one media per asset may be the cover.
+	IsCover *bool `json:"is_cover,omitempty"`
+
+	// MediaType image, video, floorplan or virtual_tour. Defaults to image.
+	MediaType *string `json:"media_type,omitempty"`
+	Position  *int    `json:"position,omitempty"`
+	Url       string  `json:"url"`
+}
+
+// RealEstatePatchRequest Partial update. Every field is optional and an omitted one is left untouched; the sections are merged field by field, except media which is replaced as a whole.
+type RealEstatePatchRequest struct {
+	// Address Address fields to change. Same fields as RealEstateAddress, none required: what is not sent keeps its current value.
+	Address *RealEstateAddressPatch `json:"address,omitempty"`
+
+	// Configuration Share configuration fields to change. total_shares and price_per_share are optional here, unlike on a create, because they already have a value to keep.
+	Configuration *RealEstateConfigurationPatch `json:"configuration,omitempty"`
+	Description   *string                       `json:"description,omitempty"`
+	EstateTypeId  *int                          `json:"estate_type_id,omitempty"`
+	Imageurl      *string                       `json:"imageurl,omitempty"`
+	IssuerId      *int                          `json:"issuer_id,omitempty"`
+
+	// Media Replaces the whole gallery. Send an empty array to clear it.
+	Media *[]RealEstateMediaInput `json:"media,omitempty"`
+
+	// Specification Physical description. Measures travel as decimal strings for the same reason as amounts: a surface stored as NUMERIC must not come back rounded by a JSON parser.
+	Specification *RealEstateSpecificationInput `json:"specification,omitempty"`
+	Title         *string                       `json:"title,omitempty"`
+}
+
 // RealEstateProgression defines model for RealEstateProgression.
 type RealEstateProgression struct {
 	// TokensSold Shares held by non-cancelled issuance orders. An integer, because an order quantity is an integer; only total_shares needs a string.
@@ -298,6 +413,23 @@ type RealEstateSpecification struct {
 	PoolSize    *float32 `json:"pool_size,omitempty"`
 	SurfaceArea *float32 `json:"surface_area,omitempty"`
 	TerraceSize *float32 `json:"terrace_size,omitempty"`
+}
+
+// RealEstateSpecificationInput Physical description. Measures travel as decimal strings for the same reason as amounts: a surface stored as NUMERIC must not come back rounded by a JSON parser.
+type RealEstateSpecificationInput struct {
+	BathroomNumber *int `json:"bathroom_number,omitempty"`
+	BedroomNumber  *int `json:"bedroom_number,omitempty"`
+	BuildYear      *int `json:"build_year,omitempty"`
+
+	// EnergyClass A to G
+	EnergyClass *string `json:"energy_class,omitempty"`
+
+	// GesClass A to G
+	GesClass    *string `json:"ges_class,omitempty"`
+	LotSize     *string `json:"lot_size,omitempty"`
+	PoolSize    *string `json:"pool_size,omitempty"`
+	SurfaceArea *string `json:"surface_area,omitempty"`
+	TerraceSize *string `json:"terrace_size,omitempty"`
 }
 
 // RealEstateSummary Real estate as served by the list endpoint. Deliberately excludes the street address, the media gallery, the issuer and the token: a public list must expose the strict minimum.
@@ -335,6 +467,28 @@ type RealEstateToken struct {
 	NbDecimal *int    `json:"nb_decimal,omitempty"`
 	Symbol    *string `json:"symbol,omitempty"`
 	TokenName *string `json:"token_name,omitempty"`
+}
+
+// RealEstateWriteRequest Whole asset in one payload. The sections are written in a single transaction, so the request either creates a complete asset or changes nothing at all.
+type RealEstateWriteRequest struct {
+	// Address Full postal address. Served only to a MANAGER or an ADMIN; the public answer carries RealEstateLocation instead.
+	Address RealEstateAddress `json:"address"`
+
+	// Configuration Share configuration. total_valuation is absent on purpose: the database computes it from total_shares x price_per_share and refuses any write, which is what keeps the three values from ever disagreeing.
+	Configuration *RealEstateConfigurationInput `json:"configuration,omitempty"`
+	Description   *string                       `json:"description,omitempty"`
+
+	// EstateTypeId Identifier from ass.real_estate_type
+	EstateTypeId *int    `json:"estate_type_id,omitempty"`
+	Imageurl     *string `json:"imageurl,omitempty"`
+
+	// IssuerId Identifier from ass.issuer, the legal vehicle issuing the shares
+	IssuerId *int                    `json:"issuer_id,omitempty"`
+	Media    *[]RealEstateMediaInput `json:"media,omitempty"`
+
+	// Specification Physical description. Measures travel as decimal strings for the same reason as amounts: a surface stored as NUMERIC must not come back rounded by a JSON parser.
+	Specification *RealEstateSpecificationInput `json:"specification,omitempty"`
+	Title         string                        `json:"title"`
 }
 
 // SignInRequest defines model for SignInRequest.
@@ -457,6 +611,12 @@ type GetTrexSuiteInfosParams struct {
 // CreateIssuanceOrderJSONRequestBody defines body for CreateIssuanceOrder for application/json ContentType.
 type CreateIssuanceOrderJSONRequestBody = CreateIssuanceOrderRequest
 
+// CreateRealEstateJSONRequestBody defines body for CreateRealEstate for application/json ContentType.
+type CreateRealEstateJSONRequestBody = RealEstateWriteRequest
+
+// PatchRealEstateJSONRequestBody defines body for PatchRealEstate for application/json ContentType.
+type PatchRealEstateJSONRequestBody = RealEstatePatchRequest
+
 // PostAuthSignInJSONRequestBody defines body for PostAuthSignIn for application/json ContentType.
 type PostAuthSignInJSONRequestBody = SignInRequest
 
@@ -486,12 +646,21 @@ type ServerInterface interface {
 	// Fetch a order in primary market
 	// (GET /assets/real-estate/issuance/orders/{orderRef})
 	FetchIssuanceOrder(c *gin.Context, orderRef string)
+	// Create a real estate
+	// (POST /assets/real-estates)
+	CreateRealEstate(c *gin.Context)
 	// Get all real estates
 	// (GET /assets/real-estates/active)
 	GetActiveRealEstates(c *gin.Context)
+	// Delete a real estate
+	// (DELETE /assets/real-estates/{id})
+	DeleteRealEstate(c *gin.Context, id int)
 	// Get one real estate
 	// (GET /assets/real-estates/{id})
 	GetRealEstateById(c *gin.Context, id int)
+	// Update a real estate
+	// (PATCH /assets/real-estates/{id})
+	PatchRealEstate(c *gin.Context, id int)
 	// Auth existing user and return a JWT
 	// (POST /auth/sign-in)
 	PostAuthSignIn(c *gin.Context)
@@ -601,8 +770,25 @@ func (siw *ServerInterfaceWrapper) FetchIssuanceOrder(c *gin.Context) {
 	siw.Handler.FetchIssuanceOrder(c, orderRef)
 }
 
+// CreateRealEstate operation middleware
+func (siw *ServerInterfaceWrapper) CreateRealEstate(c *gin.Context) {
+
+	c.Set(BearerAuthScopes, []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.CreateRealEstate(c)
+}
+
 // GetActiveRealEstates operation middleware
 func (siw *ServerInterfaceWrapper) GetActiveRealEstates(c *gin.Context) {
+
+	c.Set(BearerAuthScopes, []string{})
 
 	for _, middleware := range siw.HandlerMiddlewares {
 		middleware(c)
@@ -612,6 +798,32 @@ func (siw *ServerInterfaceWrapper) GetActiveRealEstates(c *gin.Context) {
 	}
 
 	siw.Handler.GetActiveRealEstates(c)
+}
+
+// DeleteRealEstate operation middleware
+func (siw *ServerInterfaceWrapper) DeleteRealEstate(c *gin.Context) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(BearerAuthScopes, []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.DeleteRealEstate(c, id)
 }
 
 // GetRealEstateById operation middleware
@@ -628,6 +840,8 @@ func (siw *ServerInterfaceWrapper) GetRealEstateById(c *gin.Context) {
 		return
 	}
 
+	c.Set(BearerAuthScopes, []string{})
+
 	for _, middleware := range siw.HandlerMiddlewares {
 		middleware(c)
 		if c.IsAborted() {
@@ -636,6 +850,32 @@ func (siw *ServerInterfaceWrapper) GetRealEstateById(c *gin.Context) {
 	}
 
 	siw.Handler.GetRealEstateById(c, id)
+}
+
+// PatchRealEstate operation middleware
+func (siw *ServerInterfaceWrapper) PatchRealEstate(c *gin.Context) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(BearerAuthScopes, []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PatchRealEstate(c, id)
 }
 
 // PostAuthSignIn operation middleware
@@ -989,8 +1229,11 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 
 	router.POST(options.BaseURL+"/assets/real-estate/issuance/orders", wrapper.CreateIssuanceOrder)
 	router.GET(options.BaseURL+"/assets/real-estate/issuance/orders/:orderRef", wrapper.FetchIssuanceOrder)
+	router.POST(options.BaseURL+"/assets/real-estates", wrapper.CreateRealEstate)
 	router.GET(options.BaseURL+"/assets/real-estates/active", wrapper.GetActiveRealEstates)
+	router.DELETE(options.BaseURL+"/assets/real-estates/:id", wrapper.DeleteRealEstate)
 	router.GET(options.BaseURL+"/assets/real-estates/:id", wrapper.GetRealEstateById)
+	router.PATCH(options.BaseURL+"/assets/real-estates/:id", wrapper.PatchRealEstate)
 	router.POST(options.BaseURL+"/auth/sign-in", wrapper.PostAuthSignIn)
 	router.POST(options.BaseURL+"/auth/sign-up", wrapper.PostAuthSignUp)
 	router.POST(options.BaseURL+"/contract/identity", wrapper.CreateIdentity)
@@ -1015,90 +1258,124 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 // Base64 encoded, gzipped, json marshaled Swagger object
 var swaggerSpec = []string{
 
-	"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",
+	"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",
 }
 
 // GetSwagger returns the content of the embedded swagger specification file
