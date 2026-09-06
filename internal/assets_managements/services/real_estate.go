@@ -9,9 +9,20 @@ import (
 
 func (s *Service) GetActiveRealEstates(ctx context.Context) (realEstates []server.RealEstate, err error) {
 	// 1 - Call DB to fetch real_estate
-	return database.GetActiveRealEstates(ctx)
+	dtos, err := database.GetActiveRealEstates(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// 2 - Translate the schema into the API contract
+	return toServerRealEstates(dtos), nil
 }
 
 func (s *Service) GetActiveRealEstateById(ctx context.Context, id int) (realEstate server.RealEstate, err error) {
-	return database.GetActiveRealEstateById(ctx, id)
+	dto, err := database.GetActiveRealEstateById(ctx, id)
+	if err != nil {
+		return server.RealEstate{}, err
+	}
+
+	return toServerRealEstate(dto), nil
 }
