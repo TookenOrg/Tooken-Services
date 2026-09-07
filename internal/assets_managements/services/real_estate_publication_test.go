@@ -181,3 +181,77 @@ func contains(values []string, want string) bool {
 
 	return false
 }
+
+func TestSamePtrInt(t *testing.T) {
+	one, otherOne, two := 1, 1, 2
+
+	cases := []struct {
+		name string
+		a, b *int
+		want bool
+	}{
+		{"both nil", nil, nil, true},
+		{"nil and set", nil, &one, false},
+		{"set and nil", &one, nil, false},
+		{"same value, distinct pointers", &one, &otherOne, true},
+		{"different values", &one, &two, false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := samePtrInt(tc.a, tc.b); got != tc.want {
+				t.Fatalf("samePtrInt = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// checkIssuerStandsBehind must decide without reading the database in every
+// case where the answer cannot depend on the issuer's state. These tests run
+// without a connection on purpose: a query in any of these paths would panic
+// here, which is exactly the regression to catch — a round trip paid on every
+// patch of a draft, or on every patch that does not touch the issuer.
+func TestCheckIssuerStandsBehindSkipsTheQuery(t *testing.T) {
+	withIssuer := func(id *int) database.RealEstateWriteDTO {
+		in := mustWriteDTO(t, completeRequest())
+		in.IssuerId = id
+
+		return in
+	}
+
+	one, otherOne, two := 1, 1, 2
+
+	t.Run("a draft is not visible, so its issuer is not yet a promise", func(t *testing.T) {
+		if err := checkIssuerStandsBehind(t.Context(), database.StatusDraft, withIssuer(&one), withIssuer(&two)); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("an unchanged issuer is not re-judged", func(t *testing.T) {
+		// The value matters, not the pointer: applyPatch rebuilds the request,
+		// so the merged DTO never shares its pointers with the stored one.
+		if err := checkIssuerStandsBehind(t.Context(), database.StatusPublished, withIssuer(&one), withIssuer(&otherOne)); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("clearing the issuer is checkStillPublishable's business", func(t *testing.T) {
+		if err := checkIssuerStandsBehind(t.Context(), database.StatusPublished, withIssuer(&one), withIssuer(nil)); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+}
+
+// issuerStandsBehind answers for an absent issuer without a query, so that a
+// missing issuer is reported once, by publicationRequirements, and not a second
+// time in words the caller cannot act on.
+func TestIssuerStandsBehindWithoutIssuer(t *testing.T) {
+	standing, err := issuerStandsBehind(t.Context(), nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !standing {
+		t.Fatal("an absent issuer must not be reported as withdrawn")
+	}
+}

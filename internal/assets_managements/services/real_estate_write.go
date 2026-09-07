@@ -104,7 +104,24 @@ func (s *Service) CreateRealEstate(ctx context.Context, req server.RealEstateWri
 	// A complete asset goes online immediately, an incomplete one waits as a
 	// draft. See publicationRequirements for what "complete" means and why the
 	// definition lives in one place.
-	id, err := database.CreateRealEstate(ctx, in, initialStatus(in))
+	status := initialStatus(in)
+
+	// A vehicle that is not active cannot carry an offer. Here the asset is
+	// held back as a draft rather than refused: nothing is wrong with what the
+	// manager sent, only with the state of another record he may not control,
+	// and refusing would lose the whole payload over it. Once the issuer is
+	// activated, POST /assets/{id}/publish puts the asset online.
+	if status == database.StatusPublished {
+		standing, err := issuerStandsBehind(ctx, in.IssuerId)
+		if err != nil {
+			return server.RealEstate{}, err
+		}
+		if !standing {
+			status = database.StatusDraft
+		}
+	}
+
+	id, err := database.CreateRealEstate(ctx, in, status)
 	if err != nil {
 		return server.RealEstate{}, translateWriteError(err)
 	}
@@ -165,6 +182,10 @@ func (s *Service) PatchRealEstate(ctx context.Context, id int, patch server.Real
 	}
 
 	if err := checkStillPublishable(state.StatusId, was, in); err != nil {
+		return server.RealEstate{}, err
+	}
+
+	if err := checkIssuerStandsBehind(ctx, state.StatusId, was, in); err != nil {
 		return server.RealEstate{}, err
 	}
 

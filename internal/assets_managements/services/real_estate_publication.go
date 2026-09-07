@@ -29,6 +29,11 @@ import (
 //     naming it is the kind of shortcut a regulator asks about;
 //   - a description and a visual: a listing with neither is not browsable.
 //
+// Naming an issuer is not enough — it must also still stand behind the offer.
+// That condition is checked by issuerStandsBehind rather than here: it is not a
+// field the record is missing but the state of another record, and reading it
+// costs a round trip this pure function is called too often to afford.
+//
 // Surface is deliberately absent: it helps compare assets, it does not prevent
 // the offer from being understood, and demanding it would push a manager to
 // invent a number to get past the check.
@@ -85,6 +90,79 @@ func publicationRequirements(in database.RealEstateWriteDTO) []string {
 	}
 
 	return missing
+}
+
+// issuerStandsBehind reports whether the vehicle named by an asset is still
+// active, and therefore able to carry an offer.
+//
+// An asset with no issuer at all is not this function's business:
+// publicationRequirements already reports issuer_id as missing, and saying it
+// twice in two different words would only make the answer harder to act on.
+//
+// An issuer_id pointing at nothing is treated as "does not stand behind"
+// rather than as a failure: the foreign key makes it impossible, and if the row
+// vanished anyway, refusing to publish is the safe reading.
+func issuerStandsBehind(ctx context.Context, issuerID *int) (bool, error) {
+	if issuerID == nil {
+		return true, nil
+	}
+
+	status, err := database.GetIssuerStatus(ctx, *issuerID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+
+	return status == database.IssuerStatusActive, nil
+}
+
+// checkIssuerStandsBehind refuses to move a visible asset onto a vehicle that
+// is not active.
+//
+// This closes the symmetry of the issuer guards: withdrawing a vehicle that
+// carries published assets was already refused, but nothing stopped a published
+// asset from being pointed at a vehicle already withdrawn — the same forbidden
+// state reached from the other side.
+//
+// Only a CHANGE of issuer is checked, for the same reason checkStillPublishable
+// compares before and after: an asset published under a vehicle that has since
+// been suspended must stay editable, or every patch would be refused —
+// including the one moving it to a vehicle that does stand behind it.
+//
+// That asset also stays visible, which is a deliberate gap: the invariant held
+// here is the one on ENTRY. Taking already published assets off the market when
+// their issuer is withdrawn is wanted, but not yet decided — see PROGRESS.md
+// §11.23 for what it would have to settle first (ongoing fundraisings, and
+// whether the effect is a read-time mask or a status change).
+func checkIssuerStandsBehind(ctx context.Context, statusID int, before, after database.RealEstateWriteDTO) error {
+	if !publicStatuses[statusID] {
+		return nil
+	}
+
+	if samePtrInt(before.IssuerId, after.IssuerId) {
+		return nil
+	}
+
+	standing, err := issuerStandsBehind(ctx, after.IssuerId)
+	if err != nil {
+		return err
+	}
+
+	if !standing {
+		return conflict("a published asset cannot be moved onto an issuer that is not active")
+	}
+
+	return nil
+}
+
+func samePtrInt(a, b *int) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+
+	return *a == *b
 }
 
 func derefString(v *string) string {
@@ -194,6 +272,19 @@ func (s *Service) PublishRealEstate(ctx context.Context, id int) (server.RealEst
 		return server.RealEstate{}, conflict(
 			"this asset is not complete enough to be published, missing: %s",
 			strings.Join(missing, ", "))
+	}
+
+	// Naming a vehicle is not enough: it has to still stand behind the offer.
+	// Publishing under a suspended or dissolved issuer would show investors an
+	// offer nothing backs — the mirror image of the guard that refuses to
+	// withdraw an issuer carrying published assets.
+	standing, err := issuerStandsBehind(ctx, in.IssuerId)
+	if err != nil {
+		return server.RealEstate{}, err
+	}
+	if !standing {
+		return server.RealEstate{}, conflict(
+			"the issuer of this asset is not active; activate it before publishing")
 	}
 
 	// Publishing an already published asset changes nothing and is not an

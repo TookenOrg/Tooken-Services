@@ -34,7 +34,7 @@ Link
 ---
 
 ## 🎯 Target Branch
-- [ ] `develop` (integration)
+- [X] `develop` (integration)
 - [ ] `main` (release)
 
 ---
