@@ -21,7 +21,8 @@ import (
 //
 // What it demands, and why:
 //
-//   - the economics (shares, price, currency, yield): without them there is no
+//   - the economics (shares, price, currency, yield and the rhythm it is paid
+//     at): without them there is no
 //     offer, only a photograph. An investor cannot evaluate, and the front has
 //     nothing to put on the card;
 //   - the issuer: an offer is made by a legal vehicle. Publishing one without
@@ -55,6 +56,8 @@ func publicationRequirements(in database.RealEstateWriteDTO) []string {
 			"configuration.price_per_share",
 			"configuration.currency_code",
 			"configuration.yield",
+			"configuration.payment_frequency",
+			"configuration.payment_frequency_type_id",
 		)
 	}
 
@@ -71,6 +74,14 @@ func publicationRequirements(in database.RealEstateWriteDTO) []string {
 	}
 	if !c.Yield.Valid {
 		missing = append(missing, "configuration.yield")
+	}
+	// A yield with no rhythm cannot be compared to another offer, so the two
+	// travel together: "4.25 %" is only meaningful next to "paid once a year".
+	if c.PaymentFrequency == nil {
+		missing = append(missing, "configuration.payment_frequency")
+	}
+	if c.PaymentFrequencyTypeId == nil {
+		missing = append(missing, "configuration.payment_frequency_type_id")
 	}
 
 	return missing

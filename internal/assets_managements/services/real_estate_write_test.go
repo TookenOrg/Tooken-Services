@@ -82,7 +82,7 @@ func TestToWriteDTORejectsInvalidPayloads(t *testing.T) {
 		}},
 		{"unknown currency", func(r *server.RealEstateWriteRequest) {
 			r.Configuration = &server.RealEstateConfigurationInput{
-				TotalShares: "10", PricePerShare: "1", CurrencyCode: strPtrT("EURO"),
+				TotalShares: "10", PricePerShare: "1", CurrencyCode: "EURO",
 			}
 		}},
 		{"negative surface", func(r *server.RealEstateWriteRequest) {
@@ -129,7 +129,8 @@ func TestToWriteDTONormalises(t *testing.T) {
 	req.Address.CountryCode = "lu"
 	req.Specification = &server.RealEstateSpecificationInput{EnergyClass: strPtrT(" c ")}
 	req.Configuration = &server.RealEstateConfigurationInput{
-		TotalShares: " 1500 ", PricePerShare: "199.99", CurrencyCode: strPtrT("eur"),
+		TotalShares: " 1500 ", PricePerShare: "199.99", CurrencyCode: "eur",
+		PaymentFrequency: 1, PaymentFrequencyTypeId: 1,
 	}
 	req.Media = &[]server.RealEstateMediaInput{{Url: "https://x/1.jpg"}, {Url: "https://x/2.jpg"}}
 
@@ -173,18 +174,22 @@ func TestToWriteDTONormalises(t *testing.T) {
 	}
 }
 
-// A currency defaults to EUR, which is the database default too: the two must
-// agree, otherwise the value depends on which layer wrote the row.
-func TestToWriteDTODefaultsCurrency(t *testing.T) {
+// A currency is never guessed. The column defaults to EUR, and that default
+// used to be copied here: a manager who sent a price without a currency got a
+// registry line saying EUR, which he had not chosen and had no reason to check.
+func TestToWriteDTORequiresCurrency(t *testing.T) {
 	req := validRequest()
-	req.Configuration = &server.RealEstateConfigurationInput{TotalShares: "10", PricePerShare: "1"}
-
-	in, err := toWriteDTO(req, writeCreate)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	req.Configuration = &server.RealEstateConfigurationInput{
+		TotalShares: "10", PricePerShare: "1",
+		PaymentFrequency: 1, PaymentFrequencyTypeId: 1,
 	}
-	if in.SharesConfig.CurrencyCode != "EUR" {
-		t.Errorf("want EUR, got %q", in.SharesConfig.CurrencyCode)
+
+	_, err := toWriteDTO(req, writeCreate)
+	if err == nil {
+		t.Fatal("a price was accepted without its currency")
+	}
+	if !strings.Contains(err.Error(), "currency_code") {
+		t.Errorf("the missing field is not named: %v", err)
 	}
 }
 
@@ -294,7 +299,7 @@ func TestApplyPatch(t *testing.T) {
 	current.Description = strPtrT("Nice")
 	current.Specification = &server.RealEstateSpecificationInput{SurfaceArea: strPtrT("128.50")}
 	current.Configuration = &server.RealEstateConfigurationInput{
-		TotalShares: "1500", PricePerShare: "199.99", CurrencyCode: strPtrT("EUR"),
+		TotalShares: "1500", PricePerShare: "199.99", CurrencyCode: "EUR",
 	}
 	current.Media = &[]server.RealEstateMediaInput{{Url: "a"}, {Url: "b"}}
 
@@ -392,4 +397,54 @@ func TestTranslateWriteErrorTellsPrimaryKeyFromUserConflict(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The payment rhythm goes with the yield, and both columns are nullable: an
+// asset stored before the rule carries neither. Demanding them on a patch would
+// freeze those assets, including the patch that fills them in.
+func TestPaymentRhythmRequiredOnCreateOnly(t *testing.T) {
+	config := func() *server.RealEstateConfigurationInput {
+		return &server.RealEstateConfigurationInput{
+			TotalShares: "10", PricePerShare: "1", CurrencyCode: "EUR",
+		}
+	}
+
+	t.Run("a create must name it", func(t *testing.T) {
+		req := validRequest()
+		req.Configuration = config()
+
+		_, err := toWriteDTO(req, writeCreate)
+		if err == nil {
+			t.Fatal("a configuration was created without a payment rhythm")
+		}
+		if !strings.Contains(err.Error(), "payment_frequency") {
+			t.Errorf("the missing field is not named: %v", err)
+		}
+	})
+
+	t.Run("a patch of an asset that never had one is accepted", func(t *testing.T) {
+		req := validRequest()
+		req.Configuration = config()
+
+		in, err := toWriteDTO(req, writePatch)
+		if err != nil {
+			t.Fatalf("a legacy asset became unpatchable: %v", err)
+		}
+		if in.SharesConfig.PaymentFrequency != nil {
+			t.Errorf("a rhythm was invented: %v", *in.SharesConfig.PaymentFrequency)
+		}
+	})
+
+	t.Run("a negative value is refused in both modes", func(t *testing.T) {
+		for _, mode := range []writeMode{writeCreate, writePatch} {
+			req := validRequest()
+			req.Configuration = config()
+			req.Configuration.PaymentFrequency = -1
+			req.Configuration.PaymentFrequencyTypeId = 1
+
+			if _, err := toWriteDTO(req, mode); err == nil {
+				t.Errorf("a negative frequency was accepted in mode %v", mode)
+			}
+		}
+	})
 }

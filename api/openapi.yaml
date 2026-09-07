@@ -1750,6 +1750,9 @@ components:
       required:
         - total_shares
         - price_per_share
+        - currency_code
+        - payment_frequency
+        - payment_frequency_type_id
       properties:
         total_shares:
           type: string
@@ -1761,7 +1764,10 @@ components:
           example: "199.99"
         currency_code:
           type: string
-          description: ISO 4217, defaults to EUR
+          description: >
+            ISO 4217. Required with the price it applies to: an amount without
+            its currency means nothing, and defaulting it would record a
+            currency nobody chose.
           example: EUR
         yield:
           type: string
@@ -1770,8 +1776,17 @@ components:
         payment_frequency:
           type: integer
           minimum: 1
+          description: >
+            How many times per period the yield is paid. Required with the
+            yield: a return with no rhythm cannot be compared to another one.
+          example: 1
         payment_frequency_type_id:
           type: integer
+          minimum: 1
+          description: >
+            Identifier from ass.payment_frequency_type, the period the frequency
+            counts in. Required for the same reason: "4" alone says nothing.
+          example: 1
         min_investment:
           type: string
         max_investment:

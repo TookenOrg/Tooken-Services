@@ -18,8 +18,11 @@ func completeRequest() server.RealEstateWriteRequest {
 	req.Configuration = &server.RealEstateConfigurationInput{
 		TotalShares:   "1000",
 		PricePerShare: "150",
-		CurrencyCode:  strPtrT("EUR"),
+		CurrencyCode:  "EUR",
 		Yield:         strPtrT("4.25"),
+
+		PaymentFrequency:       1,
+		PaymentFrequencyTypeId: 1,
 	}
 
 	return req
@@ -51,6 +54,8 @@ func TestPublicationRequirements(t *testing.T) {
 		{"no visual", func(r *server.RealEstateWriteRequest) { r.Media = nil }, "media"},
 		{"no configuration", func(r *server.RealEstateWriteRequest) { r.Configuration = nil }, "configuration.yield"},
 		{"no yield", func(r *server.RealEstateWriteRequest) { r.Configuration.Yield = nil }, "configuration.yield"},
+		{"no payment rhythm", func(r *server.RealEstateWriteRequest) { r.Configuration.PaymentFrequency = 0 }, "configuration.payment_frequency"},
+		{"no payment period", func(r *server.RealEstateWriteRequest) { r.Configuration.PaymentFrequencyTypeId = 0 }, "configuration.payment_frequency_type_id"},
 		{"blank yield", func(r *server.RealEstateWriteRequest) { r.Configuration.Yield = strPtrT("") }, "configuration.yield"},
 	}
 

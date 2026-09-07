@@ -230,10 +230,10 @@ func toWriteRequest(dto database.RealEstateDTO) server.RealEstateWriteRequest {
 
 	if c := dto.SharesConfig; c != nil {
 		config := &server.RealEstateConfigurationInput{
-			CurrencyCode:           c.CurrencyCode,
+			CurrencyCode:           derefString(c.CurrencyCode),
 			Yield:                  nullDecimalToString(c.Yield),
-			PaymentFrequency:       c.PaymentFrequency,
-			PaymentFrequencyTypeId: c.PaymentFrequencyTypeId,
+			PaymentFrequency:       derefInt(c.PaymentFrequency),
+			PaymentFrequencyTypeId: derefInt(c.PaymentFrequencyTypeId),
 			MinInvestment:          nullDecimalToString(c.MinInvestment),
 			MaxInvestment:          nullDecimalToString(c.MaxInvestment),
 			EntryFeeRate:           nullDecimalToString(c.EntryFeeRate),
@@ -359,10 +359,16 @@ func applyPatch(current server.RealEstateWriteRequest, patch server.RealEstatePa
 		if c.PricePerShare != nil {
 			target.PricePerShare = *c.PricePerShare
 		}
-		setIfPresent(&target.CurrencyCode, c.CurrencyCode)
+		if c.CurrencyCode != nil {
+			target.CurrencyCode = *c.CurrencyCode
+		}
 		setIfPresent(&target.Yield, c.Yield)
-		setIfPresent(&target.PaymentFrequency, c.PaymentFrequency)
-		setIfPresent(&target.PaymentFrequencyTypeId, c.PaymentFrequencyTypeId)
+		if c.PaymentFrequency != nil {
+			target.PaymentFrequency = *c.PaymentFrequency
+		}
+		if c.PaymentFrequencyTypeId != nil {
+			target.PaymentFrequencyTypeId = *c.PaymentFrequencyTypeId
+		}
 		setIfPresent(&target.MinInvestment, c.MinInvestment)
 		setIfPresent(&target.MaxInvestment, c.MaxInvestment)
 		setIfPresent(&target.EntryFeeRate, c.EntryFeeRate)
@@ -606,7 +612,7 @@ func toWriteDTO(req server.RealEstateWriteRequest, mode writeMode) (database.Rea
 	}
 
 	if req.Configuration != nil {
-		config, err := toSharesConfigWriteDTO(*req.Configuration)
+		config, err := toSharesConfigWriteDTO(*req.Configuration, mode)
 		if err != nil {
 			return in, err
 		}
@@ -740,12 +746,9 @@ func toSpecificationWriteDTO(s server.RealEstateSpecificationInput) (database.Re
 	return out, nil
 }
 
-func toSharesConfigWriteDTO(c server.RealEstateConfigurationInput) (database.RealEstateSharesConfigWriteDTO, error) {
+func toSharesConfigWriteDTO(c server.RealEstateConfigurationInput, mode writeMode) (database.RealEstateSharesConfigWriteDTO, error) {
 	out := database.RealEstateSharesConfigWriteDTO{
-		CurrencyCode:           "EUR",
-		PaymentFrequency:       c.PaymentFrequency,
-		PaymentFrequencyTypeId: c.PaymentFrequencyTypeId,
-		CompartmentRef:         trimmedPtr(c.CompartmentRef),
+		CompartmentRef: trimmedPtr(c.CompartmentRef),
 	}
 
 	totalShares, err := decimal.NewFromString(strings.TrimSpace(c.TotalShares))
@@ -776,13 +779,17 @@ func toSharesConfigWriteDTO(c server.RealEstateConfigurationInput) (database.Rea
 	}
 	out.PricePerShare = pricePerShare
 
-	if c.CurrencyCode != nil && strings.TrimSpace(*c.CurrencyCode) != "" {
-		currency := strings.ToUpper(strings.TrimSpace(*c.CurrencyCode))
-		if !currencyCodeRe.MatchString(currency) {
-			return out, invalid("configuration.currency_code must be an ISO 4217 code, got %q", *c.CurrencyCode)
-		}
-		out.CurrencyCode = currency
+	// No default: a price without its currency means nothing, and writing EUR
+	// for a manager who never chose it puts a value in the registry that
+	// nobody decided. It is asked for, not guessed.
+	currency := strings.ToUpper(strings.TrimSpace(c.CurrencyCode))
+	if currency == "" {
+		return out, invalid("configuration.currency_code is required with a price")
 	}
+	if !currencyCodeRe.MatchString(currency) {
+		return out, invalid("configuration.currency_code must be an ISO 4217 code, got %q", c.CurrencyCode)
+	}
+	out.CurrencyCode = currency
 
 	rates := []struct {
 		label  string
@@ -820,11 +827,51 @@ func toSharesConfigWriteDTO(c server.RealEstateConfigurationInput) (database.Rea
 	out.MinInvestment = minInvestment
 	out.MaxInvestment = maxInvestment
 
-	if c.PaymentFrequency != nil && *c.PaymentFrequency <= 0 {
-		return out, invalid("configuration.payment_frequency must be greater than zero")
+	// The payment rhythm goes with the yield: "4.25 %" without saying how often
+	// it is paid cannot be compared to another offer. Both columns are
+	// nullable, so an asset stored before this rule carries neither; demanding
+	// them on a patch would freeze those assets, including the patch that fills
+	// them in. Zero is how an absent integer arrives, since the contract has no
+	// null for it.
+	frequency, err := requiredPositiveInt(
+		"configuration.payment_frequency", c.PaymentFrequency, mode)
+	if err != nil {
+		return out, err
 	}
+	frequencyType, err := requiredPositiveInt(
+		"configuration.payment_frequency_type_id", c.PaymentFrequencyTypeId, mode)
+	if err != nil {
+		return out, err
+	}
+	out.PaymentFrequency = frequency
+	out.PaymentFrequencyTypeId = frequencyType
 
 	return out, nil
+}
+
+// requiredPositiveInt turns a value the contract cannot leave out into the
+// nullable column behind it: demanded on a create, tolerated as absent on a
+// patch of an asset that never had it, and always refused when negative or
+// deliberately zero.
+func requiredPositiveInt(label string, value int, mode writeMode) (*int, error) {
+	if value > 0 {
+		v := value
+		return &v, nil
+	}
+
+	if value < 0 || mode == writeCreate {
+		return nil, invalid("%s is required and must be greater than zero", label)
+	}
+
+	return nil, nil
+}
+
+func derefInt(v *int) int {
+	if v == nil {
+		return 0
+	}
+
+	return *v
 }
 
 func toMediaWriteDTO(media []server.RealEstateMediaInput) ([]database.RealEstateMediaWriteDTO, error) {

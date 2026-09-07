@@ -63,6 +63,11 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 	    ON CONFLICT (id) DO NOTHING`); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := db.Exec(`
+	    INSERT INTO ass.payment_frequency_type (id, name) VALUES (1, 'Year')
+	    ON CONFLICT (id) DO NOTHING`); err != nil {
+		t.Fatal(err)
+	}
 
 	mgr, _ := authUtils.GenerateJWT(1, "m@t.lu", authUtils.RoleManager)
 	usr, _ := authUtils.GenerateJWT(2, "u@t.lu", authUtils.RoleUser)
@@ -94,7 +99,7 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
       "issuer_id": 1,
       "address": {"street":"12 rue de la Gare","postal_code":"L-1611","city":"Luxembourg","country_code":"lu","latitude":"49.611622","longitude":"6.131935"},
       "specification": {"surface_area":"128.50","bedroom_number":4,"energy_class":"c"},
-      "configuration": {"total_shares":"1500","price_per_share":"199.99","currency_code":"eur","yield":"4.25","entry_fee_rate":"2.5"},
+      "configuration": {"total_shares":"1500","price_per_share":"199.99","currency_code":"eur","yield":"4.25","payment_frequency":1,"payment_frequency_type_id":1,"entry_fee_rate":"2.5"},
       "media": [{"url":"https://x/1.jpg","is_cover":true},{"url":"https://x/2.jpg"}]
     }`
 
@@ -151,15 +156,20 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 
 	t.Run("invalid payloads", func(t *testing.T) {
 		cases := map[string]string{
-			"fractional shares":   `{"title":"x","address":{"street":"a","postal_code":"b","city":"c","country_code":"LU"},"configuration":{"total_shares":"10.5","price_per_share":"1"}}`,
-			"zero price":          `{"title":"x","address":{"street":"a","postal_code":"b","city":"c","country_code":"LU"},"configuration":{"total_shares":"10","price_per_share":"0"}}`,
-			"bad country":         `{"title":"x","address":{"street":"a","postal_code":"b","city":"c","country_code":"LUX"}}`,
-			"half coordinates":    `{"title":"x","address":{"street":"a","postal_code":"b","city":"c","country_code":"LU","latitude":"49.1"}}`,
-			"two covers":          `{"title":"x","address":{"street":"a","postal_code":"b","city":"c","country_code":"LU"},"media":[{"url":"a","is_cover":true},{"url":"b","is_cover":true}]}`,
-			"unknown estate type": `{"title":"x","estate_type_id":999,"address":{"street":"a","postal_code":"b","city":"c","country_code":"LU"}}`,
-			"empty title":         `{"title":"   ","address":{"street":"a","postal_code":"b","city":"c","country_code":"LU"}}`,
-			"no estate type":      `{"title":"x","address":{"street":"a","postal_code":"b","city":"c","country_code":"LU"}}`,
-			"title over 255":      `{"title":"` + strings.Repeat("A", 256) + `","estate_type_id":1,"address":{"street":"a","postal_code":"b","city":"c","country_code":"LU"}}`,
+			"fractional shares": `{"title":"x","address":{"street":"a","postal_code":"b","city":"c","country_code":"LU"},"configuration":{"total_shares":"10.5","price_per_share":"1"}}`,
+			"zero price":        `{"title":"x","address":{"street":"a","postal_code":"b","city":"c","country_code":"LU"},"configuration":{"total_shares":"10","price_per_share":"0"}}`,
+			// A price used to be accepted alone and stored as EUR, a currency
+			// the manager never chose and had no reason to double-check.
+			"price without currency": `{"title":"x","address":{"street":"a","postal_code":"b","city":"c","country_code":"LU"},"configuration":{"total_shares":"10","price_per_share":"1"}}`,
+			// A yield with no rhythm cannot be compared to another offer.
+			"yield without a rhythm": `{"title":"x","address":{"street":"a","postal_code":"b","city":"c","country_code":"LU"},"configuration":{"total_shares":"10","price_per_share":"1","currency_code":"EUR","yield":"4"}}`,
+			"bad country":            `{"title":"x","address":{"street":"a","postal_code":"b","city":"c","country_code":"LUX"}}`,
+			"half coordinates":       `{"title":"x","address":{"street":"a","postal_code":"b","city":"c","country_code":"LU","latitude":"49.1"}}`,
+			"two covers":             `{"title":"x","address":{"street":"a","postal_code":"b","city":"c","country_code":"LU"},"media":[{"url":"a","is_cover":true},{"url":"b","is_cover":true}]}`,
+			"unknown estate type":    `{"title":"x","estate_type_id":999,"address":{"street":"a","postal_code":"b","city":"c","country_code":"LU"}}`,
+			"empty title":            `{"title":"   ","address":{"street":"a","postal_code":"b","city":"c","country_code":"LU"}}`,
+			"no estate type":         `{"title":"x","address":{"street":"a","postal_code":"b","city":"c","country_code":"LU"}}`,
+			"title over 255":         `{"title":"` + strings.Repeat("A", 256) + `","estate_type_id":1,"address":{"street":"a","postal_code":"b","city":"c","country_code":"LU"}}`,
 		}
 		for name, p := range cases {
 			code, body := do("POST", "/assets/real-estates", mgr, p)
@@ -514,6 +524,34 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 		}
 	})
 
+	// A patch merges onto the stored configuration, so an asset that already
+	// has a currency keeps it. One that has no configuration at all is really
+	// creating it, and must name the currency like a create would.
+	t.Run("a patch creating a configuration must name the currency", func(t *testing.T) {
+		bareID := mustScanID(t, `
+		    INSERT INTO ass.real_estate (title, estate_type, status_id)
+		    VALUES ('No configuration yet', 1, 1) RETURNING id`)
+
+		code, body := do("PATCH", "/assets/real-estates/"+itoa(bareID), mgr,
+			`{"configuration":{"total_shares":"100","price_per_share":"5","payment_frequency":1,"payment_frequency_type_id":1}}`)
+		if code != http.StatusBadRequest {
+			t.Fatalf("want 400 got %d: %s", code, body)
+		}
+		if !strings.Contains(body, "currency_code") {
+			t.Errorf("the missing field is not named: %s", body)
+		}
+
+		code, body = do("PATCH", "/assets/real-estates/"+itoa(bareID), mgr,
+			`{"configuration":{"total_shares":"100","price_per_share":"5","currency_code":"chf",
+			  "payment_frequency":1,"payment_frequency_type_id":1}}`)
+		if code != http.StatusOK {
+			t.Fatalf("want 200 got %d: %s", code, body)
+		}
+		if !strings.Contains(body, `"currency_code":"CHF"`) {
+			t.Errorf("the chosen currency was not kept: %s", body)
+		}
+	})
+
 	// The lifecycle Antony arbitrated: a stub is born as a draft, it becomes
 	// visible only once it carries what an investor needs to decide, and the
 	// button that makes it visible says exactly what is missing when it cannot.
@@ -554,6 +592,7 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 				"issuer_id", "description", "media",
 				"configuration.total_shares", "configuration.price_per_share",
 				"configuration.currency_code", "configuration.yield",
+				"configuration.payment_frequency", "configuration.payment_frequency_type_id",
 			} {
 				if !strings.Contains(body, field) {
 					t.Errorf("%s is required but not named: %s", field, body)
@@ -573,7 +612,8 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 		t.Run("completed then published", func(t *testing.T) {
 			complete := `{"description":"Now browsable","issuer_id":1,
 			  "media":[{"url":"https://x/h.jpg","is_cover":true}],
-			  "configuration":{"total_shares":"800","price_per_share":"125","currency_code":"EUR","yield":"3.9"}}`
+			  "configuration":{"total_shares":"800","price_per_share":"125","currency_code":"EUR","yield":"3.9",
+			    "payment_frequency":4,"payment_frequency_type_id":1}}`
 
 			code, body := do("PATCH", "/assets/real-estates/"+itoa(draftID), mgr, complete)
 			if code != http.StatusOK {
