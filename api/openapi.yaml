@@ -48,9 +48,25 @@ paths:
               schema:
                 $ref: "#/components/schemas/SignUpResponse"
         "400":
-          description: Invalid request
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
         "409":
-          description: Email already exists
+          description: An account already exists for this email
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "500":
+          description: >
+            The account could not be created, a database outage for instance.
+            The cause is logged server side and never returned to the caller.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
 
   /auth/sign-in:
     post:
@@ -65,16 +81,33 @@ paths:
             schema:
               $ref: "#/components/schemas/SignInRequest"
       responses:
-        "201":
-          description: User created successfully
+        "200":
+          description: User authenticated successfully
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/SignInResponse"
         "400":
-          description: Invalid request
-        "409":
-          description: Email already exists
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "401":
+          description: Unknown email or wrong password
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "500":
+          description: >
+            The credentials could not be checked at all, a database outage for
+            instance. Distinct from 401 on purpose: retrying with a different
+            password would not help.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
 
   /user/{userId}:
     get:
@@ -106,7 +139,14 @@ paths:
       tags:
         - Assets
       summary: Get all real estates
+      description: >
+        Public listing. A MANAGER or ADMIN presenting a token also sees the
+        assets that are not published yet, so the back office does not need a
+        second endpoint.
       operationId: getActiveRealEstates
+      security:
+        - {}
+        - bearerAuth: []
       responses:
         "200":
           description: OK
@@ -115,9 +155,76 @@ paths:
               schema:
                 type: array
                 items:
-                  $ref: "#/components/schemas/RealEstate"
+                  $ref: "#/components/schemas/RealEstateSummary"
         "500":
           description: "Internal Server Error"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+
+  /assets/real-estates/{id}/publish:
+    post:
+      tags:
+        - Assets
+      summary: Publish a real estate
+      description: >
+        Makes a draft visible to investors. Reserved to a MANAGER or an ADMIN.
+
+        An asset created with everything it needs is published straight away, so
+        this endpoint is only for the ones filled in over several steps.
+
+        What is checked is the stored asset, not a payload: the decision is
+        taken on the record as it stands, possibly long after it was written and
+        by someone else. An asset that still lacks what an investor relies on —
+        its issuer, its economics, a description, a visual — is refused with 409
+        naming the missing fields, so the caller knows what to complete.
+
+        Publishing an already published asset is not an error: it changes
+        nothing and returns the asset, so two managers clicking the same button
+        do not produce a failure.
+      operationId: publishRealEstate
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RealEstate"
+        "401":
+          description: Missing or invalid token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "403":
+          description: The role does not allow publishing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "404":
+          description: Real Estate Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "409":
+          description: The asset is not complete enough to be published
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "500":
+          description: Internal Server Error
           content:
             application/json:
               schema:
@@ -176,12 +283,74 @@ paths:
               schema:
                 $ref: "#/components/schemas/APIResponse"
 
+  /assets/real-estates:
+    post:
+      tags:
+        - Assets
+      summary: Create a real estate
+      description: >
+        Creates the asset and every one-to-one section in a single transaction:
+        an asset without its address or its share configuration would be a
+        half-created record that no reader could use.
+
+        The asset is created published, therefore visible: a manager clicking
+        "create" expects to see the result on the site, not a draft nobody
+        asked for.
+      operationId: createRealEstate
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RealEstateWriteRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RealEstate"
+        "400":
+          description: Invalid payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "403":
+          description: Reserved to MANAGER and ADMIN
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "500":
+          description: "Internal Server Error"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+
   /assets/real-estates/{id}:
     get:
       tags:
         - Assets
       summary: Get one real estate
+      description: >
+        Public detail. A MANAGER or ADMIN presenting a token additionally
+        receives the street address and can read an asset that is not published
+        yet; anyone else gets 404 on such an asset, so the mere existence of a
+        draft is not disclosed.
       operationId: getRealEstateById
+      security:
+        - {}
+        - bearerAuth: []
       parameters:
         - in: path
           name: id
@@ -197,6 +366,140 @@ paths:
                 $ref: "#/components/schemas/RealEstate"
         "404":
           description: "Real Estate Not Found"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "500":
+          description: "Internal Server Error"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+
+    patch:
+      tags:
+        - Assets
+      summary: Update a real estate
+      description: >
+        Partial update, applied in one transaction. An omitted field keeps its
+        current value, so a form that edits one section does not have to resend
+        the whole asset and cannot erase what it never displayed.
+
+        To clear an optional value, send it empty: an empty string is read as
+        "no value", the same way an absent one is on a create. The media
+        gallery is the exception — a list cannot be merged item by item, so a
+        supplied array replaces the whole gallery.
+
+        The merged asset is validated as a whole, not just the fields that
+        changed: a patch cannot leave the asset in a state a create would have
+        refused.
+
+        Some fields stop being writable once the asset is tokenized or has
+        orders: changing the number of shares under an investor who already
+        bought some would rewrite his ownership. Those attempts answer 409.
+      operationId: patchRealEstate
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RealEstatePatchRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RealEstate"
+        "400":
+          description: Invalid payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "403":
+          description: Reserved to MANAGER and ADMIN
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "404":
+          description: "Real Estate Not Found"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "409":
+          description: Change forbidden by the current state of the asset
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "500":
+          description: "Internal Server Error"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+
+    delete:
+      tags:
+        - Assets
+      summary: Delete a real estate
+      description: >
+        Soft deletion: the asset is cancelled and dated, never removed. Orders
+        and payments reference it, and a financial registry that can lose rows
+        cannot be audited.
+
+        A tokenized asset cannot be deleted at all: its token exists on chain
+        and investors hold it. Such an attempt answers 409.
+      operationId: deleteRealEstate
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "403":
+          description: Reserved to MANAGER and ADMIN
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "404":
+          description: "Real Estate Not Found"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "409":
+          description: Asset is tokenized and cannot be deleted
           content:
             application/json:
               schema:
@@ -492,11 +795,21 @@ paths:
               $ref: "#/components/schemas/MintTokenRequest"
       responses:
         "202":
-          description: Token minted
+          description: >-
+            Mint accepted and started. The on-chain work continues in the
+            background, so this status does not mean it succeeded.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/APIResponse"
+        "400":
+          description: >-
+            The request was refused before anything was sent to the chain:
+            malformed address, or an amount that cannot be converted exactly.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MintTokenResponse"
         "500":
           description: Internal server error
           content:
@@ -520,11 +833,21 @@ paths:
               $ref: "#/components/schemas/BurnTokenRequest"
       responses:
         "202":
-          description: Token minted
+          description: >-
+            Burn accepted and started. The on-chain work continues in the
+            background, so this status does not mean it succeeded.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/APIResponse"
+        "400":
+          description: >-
+            The request was refused before anything was sent to the chain:
+            malformed address, or an amount that cannot be converted exactly.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BurnTokenResponse"
         "500":
           description: Internal server error
           content:
@@ -670,6 +993,15 @@ components:
           nullable: true
           description: Date de la dernière connexion
           example: "2026-01-10T15:30:00Z"
+        role:
+          type: string
+          description: >
+            Permission level of the account. The same value is carried by the
+            JWT, which is what the server actually enforces; it is repeated here
+            so a client can hide an action it is not allowed to perform without
+            having to decode the token.
+          enum: [USER, MANAGER, ADMIN]
+          example: USER
 
     InitializeIdentityFactoryResponse:
       allOf:
@@ -754,7 +1086,15 @@ components:
         amount:
           type: number
           format: double
-          description: The amount of tokens to mint, in human format (not wei)
+          description: >-
+            The amount of tokens to mint, in human format (not wei). The request is
+            refused rather than approximated when the amount cannot be converted
+            exactly: it must carry at most 15 significant digits, stay below
+            9007199254740992, and have no more decimals than the token declares.
+            The result is written to an immutable ledger, so an amount that
+            merely resembles the one requested is worse than a rejection.
+          maximum: 9007199254740991
+          minimum: 0
           example: 1000.87
         to:
           type: string
@@ -783,7 +1123,15 @@ components:
         amount:
           type: number
           format: double
-          description: The amount of tokens to burn, in human format (not wei)
+          description: >-
+            The amount of tokens to burn, in human format (not wei). The request is
+            refused rather than approximated when the amount cannot be converted
+            exactly: it must carry at most 15 significant digits, stay below
+            9007199254740992, and have no more decimals than the token declares.
+            The result is written to an immutable ledger, so an amount that
+            merely resembles the one requested is worse than a rejection.
+          maximum: 9007199254740991
+          minimum: 0
           example: 1000.87
         to:
           type: string
@@ -990,8 +1338,12 @@ components:
             $ref: "#/components/schemas/TxHashName"
           description: A list of transactions performed on behalf of the identity
 
-    RealEstate:
+    RealEstateSummary:
       type: object
+      description: >
+        Real estate as served by the list endpoint. Deliberately excludes the
+        street address, the media gallery, the issuer and the token: a public
+        list must expose the strict minimum.
       required:
         - id
       properties:
@@ -1007,6 +1359,11 @@ components:
           type: string
         estate_type_id:
           type: integer
+        status:
+          type: string
+          description: Lifecycle status code (draft, in_review, published, fundraising, funded, closed, cancelled)
+        status_id:
+          type: integer
         active:
           type: boolean
           description: is estate active
@@ -1016,12 +1373,53 @@ components:
         contract_address:
           type: string
           description: Address of estate on blockchain (token)
-        specificiation:
+        location:
+          $ref: "#/components/schemas/RealEstateLocation"
+        specification:
           $ref: "#/components/schemas/RealEstateSpecification"
         configuration:
           $ref: "#/components/schemas/RealEstateConfiguration"
         progression:
           $ref: "#/components/schemas/RealEstateProgression"
+
+    RealEstate:
+      description: >
+        Full real estate record served by the detail endpoint. The street
+        address is only filled for a MANAGER or an ADMIN: for everyone else the
+        field is absent, because a precise address pinpoints a tokenized asset.
+      allOf:
+        - $ref: "#/components/schemas/RealEstateSummary"
+        - type: object
+          properties:
+            updated_at:
+              type: string
+              format: date-time
+            published_at:
+              type: string
+              format: date-time
+            media:
+              type: array
+              items:
+                $ref: "#/components/schemas/RealEstateMedia"
+            token:
+              $ref: "#/components/schemas/RealEstateToken"
+            issuer:
+              $ref: "#/components/schemas/RealEstateIssuer"
+            address:
+              $ref: "#/components/schemas/RealEstateAddress"
+
+    RealEstateLocation:
+      type: object
+      description: >
+        Coarse location, safe to expose publicly. The street, the postal code
+        and the coordinates are held back: they pinpoint a tokenized asset.
+      properties:
+        city:
+          type: string
+        country_code:
+          type: string
+          description: ISO 3166-1 alpha-2
+          example: LU
 
     RealEstateSpecification:
       type: object
@@ -1044,15 +1442,39 @@ components:
           format: float
         build_year:
           type: integer
+        energy_class:
+          type: string
+          description: Energy performance class, A to G
+          example: C
+        ges_class:
+          type: string
+          description: Greenhouse gas class, A to G
+          example: D
 
     RealEstateConfiguration:
       type: object
+      description: >
+        Amounts and share counts are carried as decimal strings. JSON has a
+        single numeric type, which most parsers read as a binary double: 199.99
+        comes back as 199.99001, and any integer above 2^53 is silently
+        rounded. The string is a transport format, not the type of the data.
       properties:
         total_shares:
-          type: integer
+          type: string
+          description: Exact integer count, NUMERIC(20,0)
+          example: "1500"
         price_per_share:
-          type: number
-          format: float
+          type: string
+          description: Exact decimal amount, NUMERIC(20,8)
+          example: "199.99"
+        total_valuation:
+          type: string
+          description: total_shares x price_per_share, computed by the database
+          example: "299985"
+        currency_code:
+          type: string
+          description: ISO 4217
+          example: EUR
         yield:
           type: number
           format: float
@@ -1068,9 +1490,339 @@ components:
       properties:
         tokens_sold:
           type: integer
+          description: >
+            Shares held by non-cancelled issuance orders. An integer, because
+            an order quantity is an integer; only total_shares needs a string.
         tokens_sold_pctg:
           type: number
           format: float
+
+    RealEstateMedia:
+      type: object
+      properties:
+        id:
+          type: integer
+        url:
+          type: string
+        alt_text:
+          type: string
+        media_type:
+          type: string
+          description: image, video, floorplan or virtual_tour
+        position:
+          type: integer
+        is_cover:
+          type: boolean
+
+    RealEstateToken:
+      type: object
+      description: The ERC-3643 contract of the asset. Absent means not tokenized yet.
+      properties:
+        id:
+          type: integer
+        symbol:
+          type: string
+        token_name:
+          type: string
+        address:
+          type: string
+        nb_decimal:
+          type: integer
+
+    RealEstateIssuer:
+      type: object
+      description: The legal vehicle issuing the shares.
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        legal_form:
+          type: string
+        country_code:
+          type: string
+          description: ISO 3166-1 alpha-2
+        status:
+          type: string
+
+    RealEstateAddress:
+      type: object
+      description: >
+        Full postal address. Served only to a MANAGER or an ADMIN; the public
+        answer carries RealEstateLocation instead.
+      required:
+        - street
+        - postal_code
+        - city
+        - country_code
+      properties:
+        street:
+          type: string
+        street_complement:
+          type: string
+        postal_code:
+          type: string
+        city:
+          type: string
+        region:
+          type: string
+        country_code:
+          type: string
+          description: ISO 3166-1 alpha-2
+          example: LU
+        latitude:
+          type: string
+          description: Exact decimal, NUMERIC(9,6). Set together with longitude or not at all.
+          example: "49.611622"
+        longitude:
+          type: string
+          description: Exact decimal, NUMERIC(9,6). Set together with latitude or not at all.
+          example: "6.131935"
+
+    RealEstateWriteRequest:
+      type: object
+      description: >
+        Whole asset in one payload. The sections are written in a single
+        transaction, so the request either creates a complete asset or changes
+        nothing at all.
+      required:
+        - title
+        - address
+        - estate_type_id
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 255
+        description:
+          type: string
+          maxLength: 2000
+        imageurl:
+          type: string
+          maxLength: 500
+        estate_type_id:
+          type: integer
+          description: >
+            Identifier from ass.real_estate_type. Required: the column is NOT
+            NULL, so an asset without a type cannot be stored.
+        issuer_id:
+          type: integer
+          description: Identifier from ass.issuer, the legal vehicle issuing the shares
+        address:
+          $ref: "#/components/schemas/RealEstateAddress"
+        specification:
+          $ref: "#/components/schemas/RealEstateSpecificationInput"
+        configuration:
+          $ref: "#/components/schemas/RealEstateConfigurationInput"
+        media:
+          type: array
+          items:
+            $ref: "#/components/schemas/RealEstateMediaInput"
+
+    RealEstatePatchRequest:
+      type: object
+      description: >
+        Partial update. Every field is optional and an omitted one is left
+        untouched; the sections are merged field by field, except media which
+        is replaced as a whole.
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 255
+        description:
+          type: string
+        imageurl:
+          type: string
+        estate_type_id:
+          type: integer
+        issuer_id:
+          type: integer
+        address:
+          $ref: "#/components/schemas/RealEstateAddressPatch"
+        specification:
+          $ref: "#/components/schemas/RealEstateSpecificationInput"
+        configuration:
+          $ref: "#/components/schemas/RealEstateConfigurationPatch"
+        media:
+          type: array
+          description: Replaces the whole gallery. Send an empty array to clear it.
+          items:
+            $ref: "#/components/schemas/RealEstateMediaInput"
+
+    RealEstateAddressPatch:
+      type: object
+      description: >
+        Address fields to change. Same fields as RealEstateAddress, none
+        required: what is not sent keeps its current value.
+      properties:
+        street:
+          type: string
+        street_complement:
+          type: string
+        postal_code:
+          type: string
+        city:
+          type: string
+        region:
+          type: string
+        country_code:
+          type: string
+          description: ISO 3166-1 alpha-2
+        latitude:
+          type: string
+        longitude:
+          type: string
+
+    RealEstateConfigurationPatch:
+      type: object
+      description: >
+        Share configuration fields to change. total_shares and price_per_share
+        are optional here, unlike on a create, because they already have a
+        value to keep.
+      properties:
+        total_shares:
+          type: string
+        price_per_share:
+          type: string
+        currency_code:
+          type: string
+        yield:
+          type: string
+        payment_frequency:
+          type: integer
+        payment_frequency_type_id:
+          type: integer
+        min_investment:
+          type: string
+        max_investment:
+          type: string
+        entry_fee_rate:
+          type: string
+        mgmt_fee_rate:
+          type: string
+        exit_fee_rate:
+          type: string
+        compartment_ref:
+          type: string
+
+    RealEstateSpecificationInput:
+      type: object
+      description: >
+        Physical description. Measures travel as decimal strings for the same
+        reason as amounts: a surface stored as NUMERIC must not come back
+        rounded by a JSON parser.
+      properties:
+        surface_area:
+          type: string
+          example: "128.50"
+        lot_size:
+          type: string
+          example: "450"
+        pool_size:
+          type: string
+        terrace_size:
+          type: string
+        bedroom_number:
+          type: integer
+          minimum: 0
+        bathroom_number:
+          type: integer
+          minimum: 0
+        build_year:
+          type: integer
+          minimum: 1000
+        energy_class:
+          type: string
+          description: A to G
+          example: C
+        ges_class:
+          type: string
+          description: A to G
+          example: D
+
+    RealEstateConfigurationInput:
+      type: object
+      description: >
+        Share configuration. total_valuation is absent on purpose: the database
+        computes it from total_shares x price_per_share and refuses any write,
+        which is what keeps the three values from ever disagreeing.
+      required:
+        - total_shares
+        - price_per_share
+        - currency_code
+        - payment_frequency
+        - payment_frequency_type_id
+      properties:
+        total_shares:
+          type: string
+          description: Exact positive integer, NUMERIC(20,0)
+          example: "1500"
+        price_per_share:
+          type: string
+          description: Exact positive decimal, NUMERIC(20,8)
+          example: "199.99"
+        currency_code:
+          type: string
+          description: >
+            ISO 4217. Required with the price it applies to: an amount without
+            its currency means nothing, and defaulting it would record a
+            currency nobody chose.
+          example: EUR
+        yield:
+          type: string
+          description: Annual yield in percent
+          example: "4.25"
+        payment_frequency:
+          type: integer
+          minimum: 1
+          description: >
+            How many times per period the yield is paid. Required with the
+            yield: a return with no rhythm cannot be compared to another one.
+          example: 1
+        payment_frequency_type_id:
+          type: integer
+          minimum: 1
+          description: >
+            Identifier from ass.payment_frequency_type, the period the frequency
+            counts in. Required for the same reason: "4" alone says nothing.
+          example: 1
+        min_investment:
+          type: string
+        max_investment:
+          type: string
+        entry_fee_rate:
+          type: string
+          description: Percentage between 0 and 100
+        mgmt_fee_rate:
+          type: string
+          description: Percentage between 0 and 100
+        exit_fee_rate:
+          type: string
+          description: Percentage between 0 and 100
+        compartment_ref:
+          type: string
+          description: Luxembourg compartment reference, unique across assets
+
+    RealEstateMediaInput:
+      type: object
+      required:
+        - url
+      properties:
+        url:
+          type: string
+        alt_text:
+          type: string
+        media_type:
+          type: string
+          description: image, video, floorplan or virtual_tour. Defaults to image.
+          example: image
+        position:
+          type: integer
+          minimum: 0
+        is_cover:
+          type: boolean
+          description: At most one media per asset may be the cover.
 
     CreateIssuanceOrderRequest:
       type: object

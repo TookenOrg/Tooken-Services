@@ -73,18 +73,35 @@ func TestControlInputMintBurn(t *testing.T) {
 		to       string
 		amount   float64
 		decimals int64
-		want     bool
+		wantWei  string // base-10 string; empty means the input must be refused
 	}{
-		{"valid", valid, valid, 1.0, 18, true},
-		{"bad token address", "not-an-address", valid, 1.0, 18, false},
-		{"bad recipient address", valid, "0xZZZ", 1.0, 18, false},
-		{"negative amount", valid, valid, -1.0, 18, false},
+		{"valid", valid, valid, 1.0, 18, "1000000000000000000"},
+		{"bad token address", "not-an-address", valid, 1.0, 18, ""},
+		{"bad recipient address", valid, "0xZZZ", 1.0, 18, ""},
+		{"negative amount", valid, valid, -1.0, 18, ""},
+
+		// An amount the token cannot represent must be refused, not rounded:
+		// the mint is irreversible and the ledger has to stay exact.
+		{"finer than the token decimals", valid, valid, 1.005, 2, ""},
+		{"would mint nothing at all", valid, valid, 0.9, 0, ""},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := controlInputMintBurn(tt.token, tt.to, tt.amount, tt.decimals); got != tt.want {
-				t.Errorf("want %v, got %v", tt.want, got)
+			gotWei, err := controlInputMintBurn(tt.token, tt.to, tt.amount, tt.decimals)
+
+			if tt.wantWei == "" {
+				if err == nil {
+					t.Fatalf("expected a refusal, got %v wei", gotWei)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("unexpected refusal: %v", err)
+			}
+			if gotWei.String() != tt.wantWei {
+				t.Errorf("want %s wei, got %s", tt.wantWei, gotWei)
 			}
 		})
 	}

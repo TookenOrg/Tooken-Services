@@ -6,3 +6,6 @@
 
 # Dossier docs local (schemas / assets de presentation) - non versionne.
 /docs/
+
+# Carnet de bord local de la branche (plan de route + observations) - non versionne.
+/PROGRESS.md

@@ -2,9 +2,11 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/TookenOrg/tooken-services/internal/api/server"
+	blockchainService "github.com/TookenOrg/tooken-services/internal/blockchain/services"
 	"github.com/TookenOrg/tooken-services/pkg/logger"
 	"github.com/gin-gonic/gin"
 )
@@ -210,6 +212,23 @@ func (h *Handler) MintTokenAsync(gCtx *gin.Context) {
 	}
 
 	reqCtx := gCtx.Request.Context()
+
+	// Validate before answering 202: the work runs in a goroutine, so this is
+	// the only moment where the caller can still be told the request is wrong.
+	if err := h.blockchainSvc.ValidateMintBurnInput(reqCtx, req.TokenContractAddress, req.To, req.Amount); err != nil {
+		if errors.Is(err, blockchainService.ErrInvalidMintBurnInput) {
+			logger.LogWarn("Refused mint request: %s", err.Error())
+			gCtx.JSON(http.StatusBadRequest, server.MintTokenResponse{Message: err.Error()})
+			return
+		}
+
+		logger.LogError("Failed to validate the mint request: %s", err.Error())
+		gCtx.JSON(http.StatusInternalServerError, server.MintTokenResponse{
+			Message: "Unable to validate the request.",
+		})
+		return
+	}
+
 	ctx := context.WithoutCancel(reqCtx)
 
 	go func(ctx context.Context) {
@@ -237,6 +256,23 @@ func (h *Handler) BurnTokenAsync(gCtx *gin.Context) {
 	}
 
 	reqCtx := gCtx.Request.Context()
+
+	// Validate before answering 202: the work runs in a goroutine, so this is
+	// the only moment where the caller can still be told the request is wrong.
+	if err := h.blockchainSvc.ValidateMintBurnInput(reqCtx, req.TokenContractAddress, req.To, req.Amount); err != nil {
+		if errors.Is(err, blockchainService.ErrInvalidMintBurnInput) {
+			logger.LogWarn("Refused burn request: %s", err.Error())
+			gCtx.JSON(http.StatusBadRequest, server.BurnTokenResponse{Message: err.Error()})
+			return
+		}
+
+		logger.LogError("Failed to validate the burn request: %s", err.Error())
+		gCtx.JSON(http.StatusInternalServerError, server.BurnTokenResponse{
+			Message: "Unable to validate the request.",
+		})
+		return
+	}
+
 	ctx := context.WithoutCancel(reqCtx)
 
 	go func(ctx context.Context) {

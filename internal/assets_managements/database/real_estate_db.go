@@ -3,221 +3,75 @@ package database
 import (
 	"context"
 	"database/sql"
-	"fmt"
 
-	"github.com/TookenOrg/tooken-services/internal/api/server"
 	"github.com/TookenOrg/tooken-services/internal/globals"
 	"github.com/TookenOrg/tooken-services/pkg/logger"
 )
 
 // TODO: add user isFavorite
 // https://github.com/TookenOrg/Tooken-Services/issues/31
-const baseRealEstateQuery = `
-SELECT
-    q.*,
-    CASE
-        WHEN q.total_shares IS NULL OR q.total_shares = 0 THEN 0
-        ELSE ROUND(
-            (q.tokens_sold::numeric / q.total_shares::numeric) * 100,
-            2
-        )
-    END AS tokens_sold_percentage
-FROM (
-    SELECT 
-        re.id, 
-        re.title, 
-        re.description, 
-        re.imageurl, 
-        re.estate_type AS estate_type_id,
-        ret.name AS estate_type, 
-        re.active, 
-        re.created_at, 
-        re.contract_address,
 
-        res.lot_size, 
-        res.surface_area, 
-        res.bedroom_number, 
-        res.bathroom_number, 
-        res.pool_size, 
-        res.terrace_size,
-        res.built_year,
-
-        conf.total_shares, 
-        conf.price_per_share, 
-        conf.yield, 
-        conf.payment_frequency, 
-        conf.payment_frequency_type AS payment_frequency_type_id,
-        payt.name AS payment_frequency_type,
-
-        FLOOR(random() * 2001)::int AS tokens_sold
-
-    FROM ass.real_estate re
-    LEFT JOIN ass.real_estate_type ret 
-        ON re.estate_type = ret.id
-    LEFT JOIN ass.real_estate_specification res 
-        ON re.id = res.real_estate_id
-    LEFT JOIN ass.real_estate_shares_config conf 
-        ON re.id = conf.real_estate_id
-    LEFT JOIN ass.payment_frequency_type payt 
-        ON conf.payment_frequency_type = payt.id
-    %s
-) q
-`
-
-func scanRealEstate(scanner interface {
+type rowScanner interface {
 	Scan(dest ...any) error
-}) (server.RealEstate, error) {
-
-	var e server.RealEstate
-	e.Configuration = &server.RealEstateConfiguration{}
-	e.Specificiation = &server.RealEstateSpecification{}
-	e.Progression = &server.RealEstateProgression{}
-
-	var (
-		active       sql.NullBool
-		createdAt    sql.NullTime
-		contractAddr sql.NullString
-		estateTypeId sql.NullInt64
-		estateType   sql.NullString
-
-		lotSize, surfaceArea, poolSize, terraceSize,
-		pricePerShare, yield, tokensSoldPctg sql.NullFloat64
-
-		bedroomNumber, bathroomNumber, builtYear,
-		totalShares, paymentFrequency,
-		paymentFrequencyTypeId, tokensSold sql.NullInt64
-
-		paymentFrequencyName sql.NullString
-	)
-
-	err := scanner.Scan(
-		&e.Id,
-		&e.Title,
-		&e.Description,
-		&e.Imageurl,
-		&estateTypeId,
-		&estateType,
-		&active,
-		&createdAt,
-		&contractAddr,
-		&lotSize,
-		&surfaceArea,
-		&bedroomNumber,
-		&bathroomNumber,
-		&poolSize,
-		&terraceSize,
-		&builtYear,
-		&totalShares,
-		&pricePerShare,
-		&yield,
-		&paymentFrequency,
-		&paymentFrequencyTypeId,
-		&paymentFrequencyName,
-		&tokensSold,
-		&tokensSoldPctg,
-	)
-	if err != nil {
-		return e, err
-	}
-
-	// Assignations (exactement ton code, une seule fois)
-	if active.Valid {
-		e.Active = &active.Bool
-	}
-	if createdAt.Valid {
-		e.CreatedAt = &createdAt.Time
-	}
-	if contractAddr.Valid {
-		e.ContractAddress = &contractAddr.String
-	}
-	if estateTypeId.Valid {
-		v := int(estateTypeId.Int64)
-		e.EstateTypeId = &v
-	}
-	if estateType.Valid {
-		e.EstateType = &estateType.String
-	}
-
-	// Specification
-	if lotSize.Valid {
-		v := float32(lotSize.Float64)
-		e.Specificiation.LotSize = &v
-	}
-	if surfaceArea.Valid {
-		v := float32(surfaceArea.Float64)
-		e.Specificiation.SurfaceArea = &v
-	}
-	if bedroomNumber.Valid {
-		v := int(bedroomNumber.Int64)
-		e.Specificiation.BedroomNumber = &v
-	}
-	if bathroomNumber.Valid {
-		v := int(bathroomNumber.Int64)
-		e.Specificiation.BathroomNumber = &v
-	}
-	if poolSize.Valid {
-		v := float32(poolSize.Float64)
-		e.Specificiation.PoolSize = &v
-	}
-	if terraceSize.Valid {
-		v := float32(terraceSize.Float64)
-		e.Specificiation.TerraceSize = &v
-	}
-	if builtYear.Valid {
-		v := int(builtYear.Int64)
-		e.Specificiation.BuildYear = &v
-	}
-
-	// Configuration
-	if totalShares.Valid {
-		v := int(totalShares.Int64)
-		e.Configuration.TotalShares = &v
-	}
-	if pricePerShare.Valid {
-		v := float32(pricePerShare.Float64)
-		e.Configuration.PricePerShare = &v
-	}
-	if yield.Valid {
-		v := float32(yield.Float64)
-		e.Configuration.Yield = &v
-	}
-	if paymentFrequency.Valid {
-		v := int(paymentFrequency.Int64)
-		e.Configuration.PaymentFrequency = &v
-	}
-	if paymentFrequencyTypeId.Valid {
-		v := int(paymentFrequencyTypeId.Int64)
-		e.Configuration.PaymentFrequencyTypeId = &v
-	}
-	if paymentFrequencyName.Valid {
-		e.Configuration.PaymentFrequencyType = &paymentFrequencyName.String
-	}
-
-	// Progression
-	if tokensSold.Valid {
-		v := int(tokensSold.Int64)
-		e.Progression.TokensSold = &v
-	}
-	if tokensSoldPctg.Valid {
-		v := float32(tokensSoldPctg.Float64)
-		e.Progression.TokensSoldPctg = &v
-	}
-
-	return e, nil
 }
 
-func GetActiveRealEstates(ctx context.Context) ([]server.RealEstate, error) {
-	query := fmt.Sprintf(baseRealEstateQuery, "WHERE re.active = true")
+// scanRealEstate fills a DTO from the column table.
+//
+// The 1-1 sub-structs are allocated BEFORE the scan (the targets point into
+// them), then reset to nil when the join returned nothing. This is the only
+// place where the absence of a row is interpreted.
+func scanRealEstate(scanner rowScanner, cols []realEstateColumn) (RealEstateDTO, error) {
+	dto := RealEstateDTO{
+		Specification: &RealEstateSpecificationDTO{},
+		SharesConfig:  &RealEstateSharesConfigDTO{},
+		Location:      &RealEstateLocationDTO{},
+	}
 
-	rows, err := globals.DB.QueryContext(ctx, query)
+	if err := scanner.Scan(scanTargets(&dto, cols)...); err != nil {
+		return RealEstateDTO{}, err
+	}
+
+	if !dto.specificationPresent {
+		dto.Specification = nil
+	}
+	if !dto.sharesConfigPresent {
+		dto.SharesConfig = nil
+	}
+	if !dto.locationPresent {
+		dto.Location = nil
+	}
+
+	return dto, nil
+}
+
+// GetActiveRealEstates serves the list: no address, no issuer, no token, no
+// gallery. A single query, whatever the number of assets.
+//
+// The ORDER BY is not cosmetic. Without it PostgreSQL guarantees nothing: rows
+// come back in whatever order the plan happens to produce, which is physical
+// heap order for a sequential scan. Any UPDATE rewrites the row at the end of
+// the heap, so a single migration is enough to silently reshuffle the list —
+// and a parallel scan would do the same. It is also a prerequisite for the
+// pagination to come: without a total order, LIMIT/OFFSET can skip a row or
+// serve it twice.
+//
+// includeUnpublished widens the filter to the assets that are not published
+// yet, for a MANAGER or an ADMIN. Deleted assets stay out either way: they are
+// kept for the audit trail, not to be browsed.
+func GetRealEstates(ctx context.Context, includeUnpublished bool) ([]RealEstateDTO, error) {
+	cols := realEstateCoreColumns
+	query := buildRealEstateQuery(cols,
+		"WHERE re.deleted_at IS NULL AND (re.active = true OR $1)\nORDER BY re.id")
+
+	rows, err := globals.DB.QueryContext(ctx, query, includeUnpublished)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var estates []server.RealEstate
+	var estates []RealEstateDTO
 	for rows.Next() {
-		e, err := scanRealEstate(rows)
+		e, err := scanRealEstate(rows, cols)
 		if err != nil {
 			return nil, err
 		}
@@ -227,20 +81,159 @@ func GetActiveRealEstates(ctx context.Context) ([]server.RealEstate, error) {
 	return estates, rows.Err()
 }
 
-func GetActiveRealEstateById(ctx context.Context, id int) (server.RealEstate, error) {
-	query := fmt.Sprintf(
-		baseRealEstateQuery,
-		"WHERE re.id = $1 AND re.active = true",
-	)
+// GetActiveRealEstateById serves the detail: the full asset, address and
+// issuer included.
+//
+// The remaining 1-1 tables and the gallery are loaded by dedicated queries
+// rather than by extra LEFT JOINs. On a single record the cost is negligible,
+// and each DTO keeps the exact typing of its schema instead of being made
+// nullable by the join.
+//
+// includeUnpublished lets a MANAGER or an ADMIN open an asset that is not
+// published yet. For anyone else such an asset yields sql.ErrNoRows, so a draft
+// answers 404 exactly like an identifier that never existed: its existence is
+// not disclosed.
+func GetRealEstateById(ctx context.Context, id int, includeUnpublished bool) (RealEstateDTO, error) {
+	cols := realEstateCoreColumns
+	query := buildRealEstateQuery(cols,
+		"WHERE re.id = $1 AND re.deleted_at IS NULL AND (re.active = true OR $2)")
 
-	row := globals.DB.QueryRowContext(ctx, query, id)
+	row := globals.DB.QueryRowContext(ctx, query, id, includeUnpublished)
 
-	realEstates, err := scanRealEstate(row)
+	estate, err := scanRealEstate(row, cols)
 	if err != nil {
-		return server.RealEstate{}, err
+		return RealEstateDTO{}, err
+	}
+
+	if estate.Address, err = getRealEstateAddress(ctx, id); err != nil {
+		return RealEstateDTO{}, err
+	}
+	if estate.Issuer, err = getRealEstateIssuer(ctx, estate.IssuerId); err != nil {
+		return RealEstateDTO{}, err
+	}
+	if estate.Token, err = getRealEstateToken(ctx, estate.TokenId); err != nil {
+		return RealEstateDTO{}, err
+	}
+	if estate.Media, err = getRealEstateMedia(ctx, id); err != nil {
+		return RealEstateDTO{}, err
 	}
 
 	logger.LogDebug("Real Estate found!")
 
-	return realEstates, nil
+	return estate, nil
+}
+
+// getRealEstateAddress returns nil when the asset has no address recorded: a
+// draft record is a normal case, not an error.
+func getRealEstateAddress(ctx context.Context, realEstateID int) (*RealEstateAddressDTO, error) {
+	const query = `
+SELECT street, street_complement, postal_code, city, region,
+       country_code, latitude, longitude, created_at, updated_at
+FROM ass.real_estate_address
+WHERE real_estate_id = $1
+`
+
+	var a RealEstateAddressDTO
+	err := globals.DB.QueryRowContext(ctx, query, realEstateID).Scan(
+		&a.Street, &a.StreetComplement, &a.PostalCode, &a.City, &a.Region,
+		&a.CountryCode, &a.Latitude, &a.Longitude, &a.CreatedAt, &a.UpdatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	return &a, nil
+}
+
+// getRealEstateIssuer: issuer_id stays nullable as long as the asset is not
+// attached to any legal vehicle.
+func getRealEstateIssuer(ctx context.Context, issuerID *int) (*RealEstateIssuerDTO, error) {
+	if issuerID == nil {
+		return nil, nil
+	}
+
+	const query = `
+SELECT i.id, i.name, i.legal_form, i.registration_number,
+       i.country_code, i.lei_code, i.status_id, ist.code
+FROM ass.issuer i
+JOIN ass.issuer_status ist
+    ON ist.id = i.status_id
+WHERE i.id = $1
+`
+
+	var s RealEstateIssuerDTO
+	err := globals.DB.QueryRowContext(ctx, query, *issuerID).Scan(
+		&s.Id, &s.Name, &s.LegalForm, &s.RegistrationNumber,
+		&s.CountryCode, &s.LeiCode, &s.StatusId, &s.StatusCode,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	return &s, nil
+}
+
+// getRealEstateToken: a NULL token_id means "not tokenized yet"
+// (migration 000008).
+func getRealEstateToken(ctx context.Context, tokenID *int) (*RealEstateTokenDTO, error) {
+	if tokenID == nil {
+		return nil, nil
+	}
+
+	const query = `
+SELECT id, symbol, token_name, address, nb_decimal,
+       modular_compliance_addr, created_at
+FROM blk.token
+WHERE id = $1
+`
+
+	var t RealEstateTokenDTO
+	err := globals.DB.QueryRowContext(ctx, query, *tokenID).Scan(
+		&t.Id, &t.Symbol, &t.TokenName, &t.Address, &t.NbDecimal,
+		&t.ModularComplianceAddr, &t.CreatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	return &t, nil
+}
+
+// getRealEstateMedia returns the ordered gallery, cover first.
+func getRealEstateMedia(ctx context.Context, realEstateID int) ([]RealEstateMediaDTO, error) {
+	const query = `
+SELECT id, url, alt_text, media_type, position, is_cover, created_at
+FROM ass.real_estate_media
+WHERE real_estate_id = $1
+ORDER BY is_cover DESC, position, id
+`
+
+	rows, err := globals.DB.QueryContext(ctx, query, realEstateID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var media []RealEstateMediaDTO
+	for rows.Next() {
+		var m RealEstateMediaDTO
+		if err := rows.Scan(
+			&m.Id, &m.Url, &m.AltText, &m.MediaType,
+			&m.Position, &m.IsCover, &m.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		media = append(media, m)
+	}
+
+	return media, rows.Err()
 }
