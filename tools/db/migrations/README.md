@@ -133,6 +133,12 @@ state — this is verified (see below).
 | 000007 | New `ass.issuer` table + `real_estate.issuer_id` |
 | 000008 | `real_estate.token_id` → `blk.token(id)`, `contract_address` kept in sync by a trigger, `nb_decimal BETWEEN 0 AND 18` |
 | 000009 | `usr.users`: `role` and `kyc_status` |
+| 000010 | Reserved shares: `counts_as_reserved` per order status, replacing a random `tokens_sold` |
+| 000011 | Soft delete on `ass.real_estate` (`deleted_at` + cancelled status) |
+| 000012 | `ass.real_estate` realigned with the API contract |
+| 000013 | Identity sequences resynchronised after seeding with explicit ids |
+| 000014 | `ass.issuer.lei_code` unique (partial index, the LEI stays optional) |
+| 000015 | Referential integrity: the missing foreign keys on the detail tables and the order book, one detail row per asset |
 
 ## Compatibility with the code running in production
 
