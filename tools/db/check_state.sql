@@ -24,11 +24,31 @@ WITH probes(version, label, applied) AS (
     (8, 'real_estate_token_link',  EXISTS (
             SELECT 1 FROM pg_constraint WHERE conname = 'token_nb_decimal_ck')),
     (9, 'user_role_kyc',           EXISTS (
-            SELECT 1 FROM pg_constraint WHERE conname = 'users_role_ck'))
+            SELECT 1 FROM pg_constraint WHERE conname = 'users_role_ck')),
+    (10, 'order_reserved_shares',  EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'iss' AND table_name = 'issuance_order_statuses'
+              AND column_name = 'counts_as_reserved')),
+    (11, 'real_estate_soft_delete', EXISTS (
+            SELECT 1 FROM pg_constraint WHERE conname = 'real_estate_deleted_status_ck')),
+    (12, 'real_estate_contract_alignment', to_regclass('ass.real_estate_estate_type_idx') IS NOT NULL),
+    -- 000013 only calls setval(): it leaves no artifact, so it cannot be
+    -- probed. It is reported as applied when 000014 is, since migrations run
+    -- in order. When 000014 is absent the answer is 'unknown', which keeps it
+    -- out of the contiguous count below and makes it replay -- harmless, as
+    -- resynchronising a sequence to its own max id is idempotent.
+    (13, 'resync_identity_sequences', to_regclass('ass.issuer_lei_uk') IS NOT NULL),
+    (14, 'issuer_lei_unique',      to_regclass('ass.issuer_lei_uk') IS NOT NULL),
+    (15, 'referential_integrity',  EXISTS (
+            SELECT 1 FROM pg_constraint WHERE conname = 'fk_issuance_orders_asset'))
 )
 SELECT version,
        label,
-       CASE WHEN applied THEN 'applied' ELSE 'MISSING' END AS state
+       CASE
+           WHEN version = 13 AND NOT applied THEN 'unknown (no artifact)'
+           WHEN applied THEN 'applied'
+           ELSE 'MISSING'
+       END AS state
 FROM probes
 ORDER BY version;
 
@@ -47,7 +67,15 @@ FROM (
         (6, to_regclass('ass.real_estate_status')  IS NOT NULL),
         (7, to_regclass('ass.issuer')              IS NOT NULL),
         (8, EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'token_nb_decimal_ck')),
-        (9, EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'users_role_ck'))
+        (9, EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'users_role_ck')),
+        (10, EXISTS (SELECT 1 FROM information_schema.columns
+                     WHERE table_schema = 'iss' AND table_name = 'issuance_order_statuses'
+                       AND column_name = 'counts_as_reserved')),
+        (11, EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'real_estate_deleted_status_ck')),
+        (12, to_regclass('ass.real_estate_estate_type_idx') IS NOT NULL),
+        (13, to_regclass('ass.issuer_lei_uk') IS NOT NULL),
+        (14, to_regclass('ass.issuer_lei_uk') IS NOT NULL),
+        (15, EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_issuance_orders_asset'))
     )
     SELECT version FROM probes p
     WHERE NOT EXISTS (SELECT 1 FROM probes q WHERE q.version <= p.version AND NOT q.applied)
