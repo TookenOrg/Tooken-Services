@@ -118,39 +118,51 @@ func issuerStandsBehind(ctx context.Context, issuerID *int) (bool, error) {
 	return status == database.IssuerStatusActive, nil
 }
 
-// checkIssuerStandsBehind refuses to move a visible asset onto a vehicle that
-// is not active.
+// checkIssuerAttachment guards the two conditions a write must satisfy when it
+// points an asset at a vehicle.
 //
-// This closes the symmetry of the issuer guards: withdrawing a vehicle that
-// carries published assets was already refused, but nothing stopped a published
-// asset from being pointed at a vehicle already withdrawn — the same forbidden
-// state reached from the other side.
+// Both are keyed on a CHANGE of issuer, for the reason checkStillPublishable
+// already establishes: an asset attached to a vehicle that has since been
+// withdrawn must stay editable, or every patch would be refused — including the
+// one moving it to a vehicle that does stand behind it.
 //
-// Only a CHANGE of issuer is checked, for the same reason checkStillPublishable
-// compares before and after: an asset published under a vehicle that has since
-// been suspended must stay editable, or every patch would be refused —
-// including the one moving it to a vehicle that does stand behind it.
+// Two conditions, deliberately separate:
 //
-// That asset also stays visible, which is a deliberate gap: the invariant held
-// here is the one on ENTRY. Taking already published assets off the market when
-// their issuer is withdrawn is wanted, but not yet decided — see PROGRESS.md
-// §11.23 for what it would have to settle first (ongoing fundraisings, and
-// whether the effect is a read-time mask or a status change).
-func checkIssuerStandsBehind(ctx context.Context, statusID int, before, after database.RealEstateWriteDTO) error {
-	if !publicStatuses[statusID] {
+//   - dissolved is refused whatever the asset's status. Dissolution is not a
+//     suspension: the company has been liquidated and no longer exists, so even
+//     a draft attached to it describes shares of nothing, and it could never be
+//     published afterwards — a dead end offered as a valid choice.
+//   - merely not active is refused only for an asset investors can see. That is
+//     the mirror of the guard refusing to withdraw an issuer carrying published
+//     assets: the same forbidden state, reached from the other side.
+//
+// An asset that keeps its issuer, or that names none, costs no round trip: the
+// answer cannot depend on a record the write does not touch.
+//
+// A published asset whose issuer has since been withdrawn stays visible, which
+// is a deliberate gap: the invariant held here is the one on ENTRY. Taking such
+// assets off the market is wanted but not yet decided — see PROGRESS.md §11.23.
+func checkIssuerAttachment(ctx context.Context, statusID int, before, after database.RealEstateWriteDTO) error {
+	if samePtrInt(before.IssuerId, after.IssuerId) || after.IssuerId == nil {
 		return nil
 	}
 
-	if samePtrInt(before.IssuerId, after.IssuerId) {
-		return nil
-	}
-
-	standing, err := issuerStandsBehind(ctx, after.IssuerId)
+	status, err := database.GetIssuerStatus(ctx, *after.IssuerId)
 	if err != nil {
+		// The foreign key makes a dangling issuer_id impossible; if the row
+		// vanished anyway, the write itself fails on it and says so, which is a
+		// better message than one invented here.
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
 		return err
 	}
 
-	if !standing {
+	if status == database.IssuerStatusDissolved {
+		return conflict("this issuer is dissolved and can no longer carry an asset")
+	}
+
+	if publicStatuses[statusID] && status != database.IssuerStatusActive {
 		return conflict("a published asset cannot be moved onto an issuer that is not active")
 	}
 

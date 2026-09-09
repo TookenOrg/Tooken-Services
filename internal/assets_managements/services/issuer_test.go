@@ -36,6 +36,12 @@ func TestToIssuerWriteDTORejectsInvalidPayloads(t *testing.T) {
 			r.RegistrationNumber = strPtrT(strings.Repeat("B", 65))
 		}},
 		{"short lei", func(r *server.IssuerWriteRequest) { r.LeiCode = strPtrT("ABC123") }},
+		{"nineteen character lei", func(r *server.IssuerWriteRequest) {
+			r.LeiCode = strPtrT(strings.Repeat("A", 19))
+		}},
+		{"twenty one character lei", func(r *server.IssuerWriteRequest) {
+			r.LeiCode = strPtrT(strings.Repeat("A", 21))
+		}},
 		{"lei with punctuation", func(r *server.IssuerWriteRequest) {
 			r.LeiCode = strPtrT("2138001-2345678901A")
 		}},
@@ -493,5 +499,67 @@ func TestStoredIssuerWriteDTODoesNotValidate(t *testing.T) {
 	got := storedIssuerWriteDTO(legacy)
 	if got.CountryCode != "lu" || got.Name != "" || got.StatusId != database.IssuerStatusActive {
 		t.Fatalf("stored row must be mapped verbatim, got %+v", got)
+	}
+}
+
+// Every length test above probes the FAILING side only, which an off-by-one
+// would survive untouched: turning `>` into `>=` would reject the exact maximum
+// and every one of those cases would still pass. The accepted boundary is the
+// other half of the same assertion.
+func TestIssuerBoundaryValuesAreAccepted(t *testing.T) {
+	req := validIssuerRequest()
+	req.Name = strings.Repeat("é", maxIssuerNameLength)
+	req.LegalForm = strings.Repeat("a", maxIssuerLegalFormLength)
+	req.RegistrationNumber = strPtrT(strings.Repeat("B", maxIssuerRegistrationLength))
+	req.LeiCode = strPtrT("2138001234567890ABCD")
+
+	in, err := toIssuerWriteDTO(req)
+	if err != nil {
+		t.Fatalf("the exact maximum was refused: %v", err)
+	}
+	if n := len([]rune(in.Name)); n != maxIssuerNameLength {
+		t.Errorf("name = %d runes, want %d", n, maxIssuerNameLength)
+	}
+	if in.LeiCode == nil || len(*in.LeiCode) != 20 {
+		t.Errorf("a twenty character lei was not kept: %v", in.LeiCode)
+	}
+}
+
+// A row whose registration number was stored as an empty string rather than a
+// NULL must stay editable — the freeze trap of §11.24, reached the other way.
+//
+// The two sides of the comparison do not go through the same normalisation: the
+// stored row is mapped verbatim by storedIssuerWriteDTO, while the merged one
+// passes through trimmedPtr, which turns "" into nil. Testing the pointer alone
+// therefore reported a LOSS on a patch that had touched nothing, and refused
+// every subsequent patch — including the one supplying the real number.
+func TestBlankRegistrationNumberIsMissingNotLost(t *testing.T) {
+	stored := database.IssuerWriteDTO{
+		Name:               "SCI Dupont",
+		LegalForm:          "SCI",
+		CountryCode:        "LU",
+		RegistrationNumber: strPtrT("   "),
+		StatusId:           database.IssuerStatusActive,
+	}
+
+	missing := activeRequirements(stored)
+	if len(missing) != 1 || missing[0] != "registration_number" {
+		t.Fatalf("a blank number must count as missing, got %v", missing)
+	}
+
+	// after is what toIssuerWriteDTO produces from the same row: trimmed to nil.
+	after := stored
+	after.RegistrationNumber = nil
+
+	if err := checkIssuerStillIdentifiable(stored, after); err != nil {
+		t.Fatalf("a row that never had a number was reported as losing one: %v", err)
+	}
+
+	// The invariant still bites where something is actually lost.
+	identified := stored
+	identified.RegistrationNumber = strPtrT("B12345")
+
+	if err := checkIssuerStillIdentifiable(identified, after); !errors.Is(err, ErrIssuerConflict) {
+		t.Fatalf("a real loss must still be refused, got %v", err)
 	}
 }

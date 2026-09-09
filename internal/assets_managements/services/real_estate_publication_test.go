@@ -206,12 +206,17 @@ func TestSamePtrInt(t *testing.T) {
 	}
 }
 
-// checkIssuerStandsBehind must decide without reading the database in every
-// case where the answer cannot depend on the issuer's state. These tests run
-// without a connection on purpose: a query in any of these paths would panic
-// here, which is exactly the regression to catch — a round trip paid on every
-// patch of a draft, or on every patch that does not touch the issuer.
-func TestCheckIssuerStandsBehindSkipsTheQuery(t *testing.T) {
+// checkIssuerAttachment must decide without reading the database in every case
+// where the answer cannot depend on the issuer's state. These tests run without
+// a connection on purpose: a query in any of these paths would panic here,
+// which is exactly the regression to catch — a round trip paid on every patch
+// that does not move the asset onto another vehicle.
+//
+// A patch that DOES change the issuer now always queries, draft included: a
+// dissolved vehicle no longer exists, so attaching even an invisible asset to it
+// is refused. That path needs a database and is covered by the integration
+// suite, not here.
+func TestCheckIssuerAttachmentSkipsTheQuery(t *testing.T) {
 	withIssuer := func(id *int) database.RealEstateWriteDTO {
 		in := mustWriteDTO(t, completeRequest())
 		in.IssuerId = id
@@ -219,24 +224,24 @@ func TestCheckIssuerStandsBehindSkipsTheQuery(t *testing.T) {
 		return in
 	}
 
-	one, otherOne, two := 1, 1, 2
-
-	t.Run("a draft is not visible, so its issuer is not yet a promise", func(t *testing.T) {
-		if err := checkIssuerStandsBehind(t.Context(), database.StatusDraft, withIssuer(&one), withIssuer(&two)); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	})
+	one, otherOne := 1, 1
 
 	t.Run("an unchanged issuer is not re-judged", func(t *testing.T) {
 		// The value matters, not the pointer: applyPatch rebuilds the request,
 		// so the merged DTO never shares its pointers with the stored one.
-		if err := checkIssuerStandsBehind(t.Context(), database.StatusPublished, withIssuer(&one), withIssuer(&otherOne)); err != nil {
+		if err := checkIssuerAttachment(t.Context(), database.StatusPublished, withIssuer(&one), withIssuer(&otherOne)); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("an unchanged issuer on a draft is not re-judged either", func(t *testing.T) {
+		if err := checkIssuerAttachment(t.Context(), database.StatusDraft, withIssuer(&one), withIssuer(&otherOne)); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
 
 	t.Run("clearing the issuer is checkStillPublishable's business", func(t *testing.T) {
-		if err := checkIssuerStandsBehind(t.Context(), database.StatusPublished, withIssuer(&one), withIssuer(nil)); err != nil {
+		if err := checkIssuerAttachment(t.Context(), database.StatusPublished, withIssuer(&one), withIssuer(nil)); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})

@@ -70,10 +70,17 @@ var issuerStatusLabels = map[int]string{
 //     market reporting obligations or whose securities are admitted to trading,
 //     so demanding it would block vehicles placed privately — and it lapses
 //     every year, which would turn a renewal delay into an unusable issuer.
+//
+// A blank number counts as missing, not as present. The two sides of the
+// before/after comparison in checkIssuerStillIdentifiable do not go through the
+// same normalisation — the stored row is mapped verbatim while the merged one
+// passes through trimmedPtr, which turns "" into nil — so testing the pointer
+// alone reported a loss on a patch that had touched nothing. Judging the value
+// makes the two agree whatever the row holds.
 func activeRequirements(in database.IssuerWriteDTO) []string {
 	var missing []string
 
-	if in.RegistrationNumber == nil {
+	if in.RegistrationNumber == nil || strings.TrimSpace(*in.RegistrationNumber) == "" {
 		missing = append(missing, "registration_number")
 	}
 
@@ -144,6 +151,13 @@ func (s *Service) CreateIssuer(ctx context.Context, req server.IssuerWriteReques
 // As for an asset: the stored row is read, the patch is laid over it, and the
 // RESULT is validated as a whole. Validating only the fields that changed would
 // let a patch produce a state a creation would have refused.
+//
+// A dissolved issuer is refused outright. Finality was only enforced on the
+// status, so a patch that omitted status_id reached no guard at all and could
+// rewrite the name, the country or the registration number of a liquidated
+// vehicle — and clearing its LEI released a globally unique identifier back
+// into issuer_lei_uk while assets, orders and on-chain tokens still pointed at
+// the row. A terminal record is audit material; it is read, not edited.
 func (s *Service) PatchIssuer(ctx context.Context, id int, patch server.IssuerPatchRequest) (server.Issuer, error) {
 	state, err := database.GetIssuerGuardState(ctx, id)
 	if err != nil {
@@ -151,6 +165,11 @@ func (s *Service) PatchIssuer(ctx context.Context, id int, patch server.IssuerPa
 			return server.Issuer{}, ErrIssuerNotFound
 		}
 		return server.Issuer{}, err
+	}
+
+	if state.StatusId == database.IssuerStatusDissolved {
+		return server.Issuer{}, issuerConflict(
+			"a dissolved issuer is final and can no longer be modified")
 	}
 
 	current, err := database.GetIssuerById(ctx, id)
@@ -178,12 +197,40 @@ func (s *Service) PatchIssuer(ctx context.Context, id int, patch server.IssuerPa
 
 	if err := database.UpdateIssuer(ctx, id, in); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return server.Issuer{}, ErrIssuerNotFound
+			// The guard above read the state on another connection, so an asset
+			// may have been published in between; the write carries the same
+			// condition and declined. Only the refusal path pays the re-read.
+			return server.Issuer{}, explainIssuerWriteRefusal(ctx, id, in.StatusId)
 		}
 		return server.Issuer{}, translateIssuerWriteError(err)
 	}
 
 	return s.GetIssuerById(ctx, id)
+}
+
+// explainIssuerWriteRefusal turns a write that changed no row into the reason it
+// changed none.
+//
+// The guards travel inside the UPDATE so that nothing can slip between the check
+// and the write, and the price of that is Postgres reporting only "0 rows",
+// never why. Re-reading the state is what turns the count back into a message a
+// manager can act on.
+func explainIssuerWriteRefusal(ctx context.Context, id int, target int) error {
+	state, err := database.GetIssuerGuardState(ctx, id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrIssuerNotFound
+		}
+		return err
+	}
+
+	if target != database.IssuerStatusActive && state.PublishedCount > 0 {
+		return issuerConflict(
+			"this issuer carries %d published asset(s); unpublish them before setting it to %s",
+			state.PublishedCount, issuerStatusLabels[target])
+	}
+
+	return ErrIssuerNotFound
 }
 
 // DeleteIssuer dissolves the vehicle instead of removing it.
@@ -210,18 +257,53 @@ func (s *Service) DeleteIssuer(ctx context.Context, id int) error {
 
 	if state.AttachedCount > 0 {
 		return issuerConflict(
-			"this issuer still carries %d asset(s); detach or delete them first",
+			"this issuer still carries %d asset(s); reassign them to another issuer or delete them first",
 			state.AttachedCount)
 	}
 
 	if err := database.DissolveIssuer(ctx, id); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return explainIssuerDissolutionRefusal(ctx, id)
+		}
+		return err
+	}
+
+	return nil
+}
+
+// explainIssuerDissolutionRefusal reads why the dissolution wrote nothing.
+//
+// Three causes are indistinguishable from a row count: the issuer is gone, it
+// was already dissolved, or an asset was attached between the guard and the
+// write. Only the first is a 404 — and the second is not an error at all, which
+// the previous code got wrong: a double click answered "issuer not found" for a
+// vehicle it had just dissolved.
+func explainIssuerDissolutionRefusal(ctx context.Context, id int) error {
+	state, err := database.GetIssuerGuardState(ctx, id)
+	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrIssuerNotFound
 		}
 		return err
 	}
 
-	return nil
+	// Already dissolved: the post-condition holds, so the caller got what he
+	// asked for. This is read before the asset count on purpose — a row left
+	// dissolved WITH assets by older data must still answer 204 rather than
+	// demand a cleanup that would change nothing.
+	if state.StatusId == database.IssuerStatusDissolved {
+		return nil
+	}
+
+	if state.AttachedCount > 0 {
+		return issuerConflict(
+			"this issuer still carries %d asset(s); reassign them to another issuer or delete them first",
+			state.AttachedCount)
+	}
+
+	// Neither dissolved nor holding anything back: the row moved between the
+	// write and this read. Nothing useful is left to say.
+	return ErrIssuerNotFound
 }
 
 // checkIssuerCreatable refuses the states a creation must not produce.
@@ -306,7 +388,7 @@ func checkIssuerStatusChange(state database.IssuerGuardStateDTO, in database.Iss
 
 	if target == database.IssuerStatusDissolved && state.AttachedCount > 0 {
 		return issuerConflict(
-			"this issuer still carries %d asset(s); detach or delete them first",
+			"this issuer still carries %d asset(s); reassign them to another issuer or delete them first",
 			state.AttachedCount)
 	}
 

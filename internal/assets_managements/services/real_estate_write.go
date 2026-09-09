@@ -106,17 +106,31 @@ func (s *Service) CreateRealEstate(ctx context.Context, req server.RealEstateWri
 	// definition lives in one place.
 	status := initialStatus(in)
 
-	// A vehicle that is not active cannot carry an offer. Here the asset is
-	// held back as a draft rather than refused: nothing is wrong with what the
-	// manager sent, only with the state of another record he may not control,
-	// and refusing would lose the whole payload over it. Once the issuer is
-	// activated, POST /assets/{id}/publish puts the asset online.
-	if status == database.StatusPublished {
-		standing, err := issuerStandsBehind(ctx, in.IssuerId)
-		if err != nil {
+	// The vehicle is read once and answers two different questions.
+	//
+	// Dissolved is a refusal, whatever the asset's status: the company has been
+	// liquidated, so an asset attached to it would describe shares of nothing
+	// and could never be published. Storing that draft would only hand the
+	// manager a dead end.
+	//
+	// Any other non-active status merely holds the asset back as a draft.
+	// Nothing is wrong with what the manager sent, only with the state of
+	// another record he may not control, and refusing would lose the whole
+	// payload over it. Once the issuer is activated,
+	// POST /assets/real-estates/{id}/publish puts the asset online.
+	if in.IssuerId != nil {
+		issuerStatus, err := database.GetIssuerStatus(ctx, *in.IssuerId)
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			// The foreign key rejects it a moment later, with a message that
+			// names the constraint rather than guessing at intent.
+			status = database.StatusDraft
+		case err != nil:
 			return server.RealEstate{}, err
-		}
-		if !standing {
+		case issuerStatus == database.IssuerStatusDissolved:
+			return server.RealEstate{}, conflict(
+				"this issuer is dissolved and can no longer carry an asset")
+		case issuerStatus != database.IssuerStatusActive:
 			status = database.StatusDraft
 		}
 	}
@@ -185,7 +199,7 @@ func (s *Service) PatchRealEstate(ctx context.Context, id int, patch server.Real
 		return server.RealEstate{}, err
 	}
 
-	if err := checkIssuerStandsBehind(ctx, state.StatusId, was, in); err != nil {
+	if err := checkIssuerAttachment(ctx, state.StatusId, was, in); err != nil {
 		return server.RealEstate{}, err
 	}
 

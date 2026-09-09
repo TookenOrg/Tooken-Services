@@ -85,10 +85,17 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 	}
 
 	// An issuer is part of what a published offer must name, so the referential
-	// needs one before an asset can be born visible.
+	// needs one before an asset can be born visible — and it must be ACTIVE:
+	// CreateRealEstate silently falls back to draft behind a vehicle that is
+	// not yet standing, which would turn the assertion below into a false
+	// failure. DO UPDATE rather than DO NOTHING so a database left over from an
+	// earlier run is repaired instead of poisoning the case.
 	if _, err := db.Exec(`
-	    INSERT INTO ass.issuer (id, name, legal_form) VALUES (1, 'Tooken RE I', 'SA')
-	    ON CONFLICT (id) DO NOTHING`); err != nil {
+	    INSERT INTO ass.issuer (id, name, legal_form, registration_number, status_id)
+	    VALUES (1, 'Tooken RE I', 'SA', 'B999999', 2)
+	    ON CONFLICT (id) DO UPDATE
+	        SET registration_number = EXCLUDED.registration_number,
+	            status_id           = EXCLUDED.status_id`); err != nil {
 		t.Fatal(err)
 	}
 

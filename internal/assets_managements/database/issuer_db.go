@@ -206,7 +206,19 @@ RETURNING id
 // caller, exactly as an asset update does: one definition of what a stored
 // issuer looks like, whether it was created or patched.
 //
-// It reports sql.ErrNoRows when the issuer does not exist.
+// The withdrawal guard travels INSIDE the statement rather than being checked
+// before it. Read on one connection and written on another, it left a window in
+// which an asset could be published between the two, and the foreign key says
+// nothing about a status change — it is declared ON DELETE RESTRICT, not ON
+// UPDATE. Postgres evaluates the NOT EXISTS and the write as one statement, so
+// the window does not exist. A mutex would not do: the two requests may well be
+// served by two instances of the API.
+//
+// The condition is skipped when the target status is active, because becoming
+// active is never a withdrawal.
+//
+// It reports sql.ErrNoRows when nothing was written — the issuer is gone, or the
+// guard declined. The caller re-reads the state to tell the two apart.
 func UpdateIssuer(ctx context.Context, id int, in IssuerWriteDTO) error {
 	const query = `
 UPDATE ass.issuer
@@ -218,10 +230,18 @@ SET name = $2,
     status_id = $7,
     updated_at = now()
 WHERE id = $1
+  AND ($7::smallint = $8::smallint
+       OR NOT EXISTS (
+           SELECT 1
+           FROM ass.real_estate
+           WHERE issuer_id = $1
+             AND deleted_at IS NULL
+             AND active))
 `
 
 	res, err := globals.DB.ExecContext(ctx, query,
 		id, in.Name, in.LegalForm, in.RegistrationNumber, in.CountryCode, in.LeiCode, in.StatusId,
+		IssuerStatusActive,
 	)
 	if err != nil {
 		return fmt.Errorf("update issuer: %w", err)
@@ -237,14 +257,27 @@ WHERE id = $1
 // ON DELETE RESTRICT — a real DELETE could not even run once a single asset
 // referenced it, and would silently erase history if none did.
 //
-// Dissolving twice reports sql.ErrNoRows: the second call changes nothing, and
-// saying so is more useful than pretending it did.
+// As in UpdateIssuer, the "carries no asset" condition is part of the statement:
+// checking it first would leave a window in which an asset gets attached, and
+// the result would be an offer standing on a liquidated vehicle, unreachable by
+// the API afterwards.
+//
+// It reports sql.ErrNoRows when nothing was written. That covers three cases —
+// the row is gone, it was already dissolved, or an asset was attached in the
+// meantime — which only the caller can tell apart, and must: the second is a
+// success, not a 404.
 func DissolveIssuer(ctx context.Context, id int) error {
 	const query = `
 UPDATE ass.issuer
 SET status_id = $2,
     updated_at = now()
-WHERE id = $1 AND status_id <> $2
+WHERE id = $1
+  AND status_id <> $2
+  AND NOT EXISTS (
+      SELECT 1
+      FROM ass.real_estate
+      WHERE issuer_id = $1
+        AND deleted_at IS NULL)
 `
 
 	res, err := globals.DB.ExecContext(ctx, query, id, IssuerStatusDissolved)

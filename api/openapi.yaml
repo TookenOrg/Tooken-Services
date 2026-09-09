@@ -304,9 +304,14 @@ paths:
         asked for.
 
         Two things hold it back as a draft instead: a payload that lacks what an
-        investor relies on, and an issuer that is not active. Neither is an
+        investor relies on, and an issuer that is not yet active. Neither is an
         error — the asset is stored as sent and goes online through
         POST /assets/real-estates/{id}/publish once the gap is closed.
+
+        A DISSOLVED issuer is the exception: it is refused with 409 rather than
+        held back. Draft or not, an asset cannot be attached to a vehicle whose
+        liquidation is closed, because no later patch could ever make that
+        attachment publishable.
       operationId: createRealEstate
       security:
         - bearerAuth: []
@@ -337,6 +342,12 @@ paths:
                 $ref: "#/components/schemas/APIResponse"
         "403":
           description: Reserved to MANAGER and ADMIN
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "409":
+          description: The named issuer is dissolved
           content:
             application/json:
               schema:
@@ -411,9 +422,10 @@ paths:
         bought some would rewrite his ownership. Those attempts answer 409.
 
         Moving a published asset onto an issuer that is not active answers 409
-        as well. Only a change of issuer is checked, so an asset published under
-        a vehicle since suspended stays editable — including to move it onto one
-        that does stand behind it.
+        as well, and moving ANY asset — draft included — onto a dissolved issuer
+        answers 409 too: that vehicle no longer exists. Only a change of issuer
+        is checked, so an asset published under a vehicle since suspended stays
+        editable — including to move it onto one that does stand behind it.
       operationId: patchRealEstate
       security:
         - bearerAuth: []
@@ -709,6 +721,12 @@ paths:
         creation and an activation both refuse. Only a LOSS is refused — an
         issuer stored without a number stays fully editable, including to
         complete it.
+
+        A dissolved issuer is not editable at all: the liquidation is closed and
+        the legal person no longer exists, so there is nothing left to correct.
+        Any patch on it is refused with 409, including one that would only
+        change its name. Undoing a dissolution is not offered either — reviving
+        a company that was wound up is not a data-entry mistake.
       operationId: patchIssuer
       security:
         - bearerAuth: []
@@ -778,7 +796,12 @@ paths:
         moved to the dissolved status, which is final.
 
         An issuer that still carries assets cannot be dissolved: answer 409,
-        naming how many. Detach or delete them first.
+        naming how many. Reassign them to another issuer or delete them first —
+        an asset is not left without a vehicle, so detaching is not an option.
+
+        Dissolving an already dissolved issuer is not an error: it changes
+        nothing and still answers 204, so a retried or repeated call does not
+        surface as a failure.
       operationId: deleteIssuer
       security:
         - bearerAuth: []
