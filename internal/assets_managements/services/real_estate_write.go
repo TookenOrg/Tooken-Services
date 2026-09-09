@@ -104,7 +104,38 @@ func (s *Service) CreateRealEstate(ctx context.Context, req server.RealEstateWri
 	// A complete asset goes online immediately, an incomplete one waits as a
 	// draft. See publicationRequirements for what "complete" means and why the
 	// definition lives in one place.
-	id, err := database.CreateRealEstate(ctx, in, initialStatus(in))
+	status := initialStatus(in)
+
+	// The vehicle is read once and answers two different questions.
+	//
+	// Dissolved is a refusal, whatever the asset's status: the company has been
+	// liquidated, so an asset attached to it would describe shares of nothing
+	// and could never be published. Storing that draft would only hand the
+	// manager a dead end.
+	//
+	// Any other non-active status merely holds the asset back as a draft.
+	// Nothing is wrong with what the manager sent, only with the state of
+	// another record he may not control, and refusing would lose the whole
+	// payload over it. Once the issuer is activated,
+	// POST /assets/real-estates/{id}/publish puts the asset online.
+	if in.IssuerId != nil {
+		issuerStatus, err := database.GetIssuerStatus(ctx, *in.IssuerId)
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			// The foreign key rejects it a moment later, with a message that
+			// names the constraint rather than guessing at intent.
+			status = database.StatusDraft
+		case err != nil:
+			return server.RealEstate{}, err
+		case issuerStatus == database.IssuerStatusDissolved:
+			return server.RealEstate{}, conflict(
+				"this issuer is dissolved and can no longer carry an asset")
+		case issuerStatus != database.IssuerStatusActive:
+			status = database.StatusDraft
+		}
+	}
+
+	id, err := database.CreateRealEstate(ctx, in, status)
 	if err != nil {
 		return server.RealEstate{}, translateWriteError(err)
 	}
@@ -165,6 +196,10 @@ func (s *Service) PatchRealEstate(ctx context.Context, id int, patch server.Real
 	}
 
 	if err := checkStillPublishable(state.StatusId, was, in); err != nil {
+		return server.RealEstate{}, err
+	}
+
+	if err := checkIssuerAttachment(ctx, state.StatusId, was, in); err != nil {
 		return server.RealEstate{}, err
 	}
 

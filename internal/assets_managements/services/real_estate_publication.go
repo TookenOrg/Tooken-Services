@@ -29,6 +29,11 @@ import (
 //     naming it is the kind of shortcut a regulator asks about;
 //   - a description and a visual: a listing with neither is not browsable.
 //
+// Naming an issuer is not enough — it must also still stand behind the offer.
+// That condition is checked by issuerStandsBehind rather than here: it is not a
+// field the record is missing but the state of another record, and reading it
+// costs a round trip this pure function is called too often to afford.
+//
 // Surface is deliberately absent: it helps compare assets, it does not prevent
 // the offer from being understood, and demanding it would push a manager to
 // invent a number to get past the check.
@@ -85,6 +90,91 @@ func publicationRequirements(in database.RealEstateWriteDTO) []string {
 	}
 
 	return missing
+}
+
+// issuerStandsBehind reports whether the vehicle named by an asset is still
+// active, and therefore able to carry an offer.
+//
+// An asset with no issuer at all is not this function's business:
+// publicationRequirements already reports issuer_id as missing, and saying it
+// twice in two different words would only make the answer harder to act on.
+//
+// An issuer_id pointing at nothing is treated as "does not stand behind"
+// rather than as a failure: the foreign key makes it impossible, and if the row
+// vanished anyway, refusing to publish is the safe reading.
+func issuerStandsBehind(ctx context.Context, issuerID *int) (bool, error) {
+	if issuerID == nil {
+		return true, nil
+	}
+
+	status, err := database.GetIssuerStatus(ctx, *issuerID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+
+	return status == database.IssuerStatusActive, nil
+}
+
+// checkIssuerAttachment guards the two conditions a write must satisfy when it
+// points an asset at a vehicle.
+//
+// Both are keyed on a CHANGE of issuer, for the reason checkStillPublishable
+// already establishes: an asset attached to a vehicle that has since been
+// withdrawn must stay editable, or every patch would be refused — including the
+// one moving it to a vehicle that does stand behind it.
+//
+// Two conditions, deliberately separate:
+//
+//   - dissolved is refused whatever the asset's status. Dissolution is not a
+//     suspension: the company has been liquidated and no longer exists, so even
+//     a draft attached to it describes shares of nothing, and it could never be
+//     published afterwards — a dead end offered as a valid choice.
+//   - merely not active is refused only for an asset investors can see. That is
+//     the mirror of the guard refusing to withdraw an issuer carrying published
+//     assets: the same forbidden state, reached from the other side.
+//
+// An asset that keeps its issuer, or that names none, costs no round trip: the
+// answer cannot depend on a record the write does not touch.
+//
+// A published asset whose issuer has since been withdrawn stays visible, which
+// is a deliberate gap: the invariant held here is the one on ENTRY. Taking such
+// assets off the market is wanted but not yet decided — see PROGRESS.md §11.23.
+func checkIssuerAttachment(ctx context.Context, statusID int, before, after database.RealEstateWriteDTO) error {
+	if samePtrInt(before.IssuerId, after.IssuerId) || after.IssuerId == nil {
+		return nil
+	}
+
+	status, err := database.GetIssuerStatus(ctx, *after.IssuerId)
+	if err != nil {
+		// The foreign key makes a dangling issuer_id impossible; if the row
+		// vanished anyway, the write itself fails on it and says so, which is a
+		// better message than one invented here.
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return err
+	}
+
+	if status == database.IssuerStatusDissolved {
+		return conflict("this issuer is dissolved and can no longer carry an asset")
+	}
+
+	if publicStatuses[statusID] && status != database.IssuerStatusActive {
+		return conflict("a published asset cannot be moved onto an issuer that is not active")
+	}
+
+	return nil
+}
+
+func samePtrInt(a, b *int) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+
+	return *a == *b
 }
 
 func derefString(v *string) string {
@@ -194,6 +284,19 @@ func (s *Service) PublishRealEstate(ctx context.Context, id int) (server.RealEst
 		return server.RealEstate{}, conflict(
 			"this asset is not complete enough to be published, missing: %s",
 			strings.Join(missing, ", "))
+	}
+
+	// Naming a vehicle is not enough: it has to still stand behind the offer.
+	// Publishing under a suspended or dissolved issuer would show investors an
+	// offer nothing backs — the mirror image of the guard that refuses to
+	// withdraw an issuer carrying published assets.
+	standing, err := issuerStandsBehind(ctx, in.IssuerId)
+	if err != nil {
+		return server.RealEstate{}, err
+	}
+	if !standing {
+		return server.RealEstate{}, conflict(
+			"the issuer of this asset is not active; activate it before publishing")
 	}
 
 	// Publishing an already published asset changes nothing and is not an

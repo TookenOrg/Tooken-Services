@@ -69,7 +69,7 @@ func startServer() {
 	router.Use(cors.New(cors.Config{
 		AllowOrigins: getCorsOrigins(),
 		AllowMethods: []string{
-			"GET", "POST", "PUT", "DELETE", "OPTIONS",
+			"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS",
 		},
 		AllowHeaders: []string{
 			"Origin",
