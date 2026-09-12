@@ -23,11 +23,15 @@ type Handler struct {
 }
 
 func NewHandler() server.ServerInterface {
+
+	// Share the same blockchain service instance across all dependent services.
+	blockchainSvc := blockchainService.NewService()
+
 	return &Handler{
-		blockchainSvc: blockchainService.NewService(),
+		blockchainSvc: blockchainSvc,
 		paymentsSvc:   paymentsService.NewService(),
 		authSvc:       authService.NewService(),
-		realEstateSvc: assetsService.NewService(),
+		realEstateSvc: assetsService.NewService(blockchainSvc),
 		orderSvc:      ordersService.NewService(),
 		userSvc:       usersService.NewService(),
 	}
