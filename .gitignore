@@ -9,3 +9,13 @@
 
 # Carnet de bord local de la branche (plan de route + observations) - non versionne.
 /PROGRESS.md
+
+# Note de travail locale sur la tokenisation des biens - non versionnee.
+/TOKENISATION.md
+
+# Note de travail locale sur le schema blk (tables contrats) - non versionnee.
+/SCHEMA-BLK.md
+
+# Notes de travail locales sur la tokenisation (actions + revue) - non versionnees.
+/TOKENISATION-ACTION.md
+/TOKENISATION-REVIEW.md

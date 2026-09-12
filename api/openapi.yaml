@@ -916,6 +916,8 @@ paths:
         - initialize
       summary: Deploy all contracts implementations
       operationId: deployAllImplementationsAsync
+      security:
+        - bearerAuth: []
       responses:
         "202":
           description: Request sent
@@ -931,6 +933,8 @@ paths:
         - initialize
       summary: Deploy identity factory
       operationId: deployIdentityFactory
+      security:
+        - bearerAuth: []
       responses:
         "200":
           description: OK
@@ -952,6 +956,8 @@ paths:
         - initialize
       summary: Configure the Authority contract with the implementations addresses
       operationId: configureAuthority
+      security:
+        - bearerAuth: []
       responses:
         "200":
           description: OK
@@ -973,6 +979,8 @@ paths:
         - initialize
       summary: Deploy TREX factory
       operationId: DeployAndInitTrexFactoryAsync
+      security:
+        - bearerAuth: []
       responses:
         "202":
           description: Request sent
@@ -989,6 +997,8 @@ paths:
         - trex-suite
       summary: Deploy the TREX Suite contracts
       operationId: deployTrexSuiteAsync
+      security:
+        - bearerAuth: []
       responses:
         "202":
           description: Request sent
@@ -1001,7 +1011,7 @@ paths:
     get:
       tags:
         - Blockchain
-          - trex-suite
+        - trex-suite
       summary: Get deployed TREX Suite information
       operationId: getTrexSuiteInfos
       parameters:
@@ -1031,6 +1041,8 @@ paths:
         - identity
       summary: Create new Identity contract and add it to the registry
       operationId: createIdentity
+      security:
+        - bearerAuth: []
       requestBody:
         required: true
         content:
@@ -1053,6 +1065,8 @@ paths:
         - identity
       summary: Add a claim to an identity
       operationId: addClaimToIdentity
+      security:
+        - bearerAuth: []
       requestBody:
         required: true
         content:
@@ -1075,6 +1089,8 @@ paths:
         - token
       summary: Create a new Token
       operationId: createTokenContract
+      security:
+        - bearerAuth: []
       requestBody:
         required: true
         content:
@@ -1121,6 +1137,8 @@ paths:
         - token
       summary: Register the given amount for the userId in the sharetoken
       operationId: mintTokenAsync
+      security:
+        - bearerAuth: []
       requestBody:
         required: true
         content:
@@ -1159,6 +1177,8 @@ paths:
         - token
       summary: Withdraw the given amount for the userId in the sharetoken
       operationId: burnTokenAsync
+      security:
+        - bearerAuth: []
       requestBody:
         required: true
         content:
@@ -1612,10 +1632,12 @@ components:
         tokenName:
           type: string
           description: Name of the token
+          maxLength: 100
           example: "US0378331005"
         symbol:
           type: string
-          description: On-chain token symbol (max 50 characters)
+          description: On-chain token symbol
+          maxLength: 50
           example: "TOOK"
         nbDecimal:
           type: integer
@@ -1655,11 +1677,11 @@ components:
           type: string
           description: Name of token
           example: "Big House"
-          maxLength: 12
+          maxLength: 100
         symbol:
           type: string
           description: Symbol of token
-          maxLength: 12
+          maxLength: 50
         nbDecimal:
           type: integer
           format: int64

@@ -13,16 +13,43 @@ import (
 	"github.com/TookenOrg/tooken-services/internal/blockchain/globals"
 	"github.com/TookenOrg/tooken-services/internal/blockchain/utils"
 	"github.com/TookenOrg/tooken-services/pkg/logger"
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/go-openapi/swag"
 )
 
+// CreateToken deploys a token suite on behalf of an HTTP caller. The factory salt is
+// derived from the token name, which the idempotency check already keeps unique.
 func (s *Service) CreateToken(ctx context.Context, req server.CreateTokenRequest) (newToken server.TokenInfos, err error) {
+	_, newToken, err = s.CreateTokenWithSalt(ctx, req, req.TokenName)
+	return
+}
+
+// CreateTokenWithSalt is the complete form of CreateToken.
+//
+// It returns the blk.token identifier, which is exactly what ass.real_estate.token_id
+// needs in order to bind an asset to its token, and it takes the factory salt as an
+// explicit argument.
+//
+// The salt and the name are two different things. The name is what an investor reads;
+// the salt is what the factory hashes to derive the address of the suite. Passing the
+// name as the salt makes two assets that happen to share a title collide on-chain, and
+// the second deployment reverts. A caller tokenising an asset therefore passes a salt
+// derived from the identity of that asset, which also makes the deployment replayable:
+// the same asset always resolves to the same suite through TREXFactory.GetToken(salt).
+func (s *Service) CreateTokenWithSalt(ctx context.Context, req server.CreateTokenRequest, salt string) (tokenID int, newToken server.TokenInfos, err error) {
 
 	// 0 - Validate input (T-REX Token.init enforces decimals <= 18 on-chain)
 	if req.NbDecimal < 0 || req.NbDecimal > 18 {
 		err = errors.New("nbDecimal must be between 0 and 18")
+		return
+	}
+
+	// An empty salt would send every token to the same factory address, so the second
+	// deployment would revert on a salt already taken.
+	if salt == "" {
+		err = errors.New("deployment salt must not be empty")
 		return
 	}
 
@@ -77,7 +104,7 @@ func (s *Service) CreateToken(ctx context.Context, req server.CreateTokenRequest
 	claimDetails := defineClaimSuiteDetails(claimIssuerAddr)
 
 	// 5 - Deploy the token suite through the shared TREX factory
-	deployment, suiteTxHash, err := deployTokenSuiteViaFactory(ctx, factoryAddr, req.TokenName, tokenDetails, claimDetails)
+	deployment, suiteTxHash, err := deployTokenSuiteViaFactory(ctx, factoryAddr, salt, tokenDetails, claimDetails)
 	if err != nil {
 		return
 	}
@@ -111,7 +138,8 @@ func (s *Service) CreateToken(ctx context.Context, req server.CreateTokenRequest
 	// 8 - Persist the token. Mint/Burn resolve it by address from this row and idempotency
 	//     keys on token_name, so a lost write leaves an un-mintable token and breaks
 	//     retries (redeploy reverts on the reused factory salt) — treat a failure as fatal.
-	if _, err = database.InsertToken(ctx, req.Symbol, req.TokenName, tokenAddr.Hex(), req.NbDecimal, mcAddr.Hex()); err != nil {
+	//     The returned id is what binds an asset to its token.
+	if tokenID, err = database.InsertToken(ctx, req.Symbol, req.TokenName, tokenAddr.Hex(), req.NbDecimal, mcAddr.Hex()); err != nil {
 		return
 	}
 
@@ -174,6 +202,20 @@ func deployTokenSuiteViaFactory(ctx context.Context, factoryAddr common.Address,
 
 	factoryInstance, err := contracts.NewTREXFactory(factoryAddr, globals.EthClient)
 	if err != nil {
+		return
+	}
+
+	// A salt can only be spent once: the factory derives the suite address from it and
+	// reverts on the second use.
+	deployed, err := factoryInstance.GetToken(&bind.CallOpts{Context: ctx}, salt)
+	if err != nil {
+		err = fmt.Errorf("could not check whether salt %q is already spent: %w", salt, err)
+		return
+	}
+	if deployed != (common.Address{}) {
+		err = fmt.Errorf(
+			"deployment salt %q is already spent by token %s: the suite exists on-chain but is not recorded in blk.token",
+			salt, deployed.Hex())
 		return
 	}
 
