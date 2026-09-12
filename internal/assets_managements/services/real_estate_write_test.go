@@ -28,6 +28,7 @@ func validRequest() server.RealEstateWriteRequest {
 	return server.RealEstateWriteRequest{
 		Title:        "Villa Belair",
 		EstateTypeId: 1,
+		IssuerId:     1,
 		Address:      validAddress(),
 	}
 }
@@ -40,6 +41,8 @@ func TestToWriteDTORejectsInvalidPayloads(t *testing.T) {
 		req  func(*server.RealEstateWriteRequest)
 	}{
 		{"blank title", func(r *server.RealEstateWriteRequest) { r.Title = "   " }},
+		{"missing issuer", func(r *server.RealEstateWriteRequest) { r.IssuerId = 0 }},
+		{"negative issuer", func(r *server.RealEstateWriteRequest) { r.IssuerId = -1 }},
 		{"missing street", func(r *server.RealEstateWriteRequest) { r.Address.Street = " " }},
 		{"missing city", func(r *server.RealEstateWriteRequest) { r.Address.City = "" }},
 		{"three letter country", func(r *server.RealEstateWriteRequest) { r.Address.CountryCode = "LUX" }},
@@ -289,6 +292,35 @@ func TestAddressRequiredOnCreateOnly(t *testing.T) {
 	req.Address.City = "Luxembourg"
 	if _, err := toWriteDTO(req, writePatch); !errors.Is(err, ErrInvalidRealEstate) {
 		t.Errorf("a partial address must be refused even on a patch, got %v", err)
+	}
+}
+
+// The issuer is demanded on creation but inherited on a patch, and a zero must
+// never reach the column: the foreign key would reject it with a message about
+// a constraint the caller never mentioned.
+func TestIssuerRequiredOnCreateOnly(t *testing.T) {
+	req := validRequest()
+	req.IssuerId = 0
+
+	if _, err := toWriteDTO(req, writeCreate); !errors.Is(err, ErrInvalidRealEstate) {
+		t.Errorf("a create without an issuer must be refused, got %v", err)
+	}
+
+	in, err := toWriteDTO(req, writePatch)
+	if err != nil {
+		t.Fatalf("a patch without an issuer must be accepted, got %v", err)
+	}
+	if in.IssuerId != nil {
+		t.Errorf("no issuer should stay NULL, got %v", *in.IssuerId)
+	}
+
+	req.IssuerId = 7
+	in, err = toWriteDTO(req, writeCreate)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if in.IssuerId == nil || *in.IssuerId != 7 {
+		t.Errorf("the issuer must land unchanged, got %v", in.IssuerId)
 	}
 }
 

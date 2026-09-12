@@ -2047,6 +2047,7 @@ components:
         - title
         - address
         - estate_type_id
+        - issuer_id
       properties:
         title:
           type: string
@@ -2065,7 +2066,11 @@ components:
             NULL, so an asset without a type cannot be stored.
         issuer_id:
           type: integer
-          description: Identifier from ass.issuer, the legal vehicle issuing the shares
+          description: >
+            Identifier from ass.issuer, the legal vehicle issuing the shares.
+            Required: the token represents a stake in an issuer, never in the
+            walls themselves, and the column is NOT NULL since migration
+            000016.
         address:
           $ref: "#/components/schemas/RealEstateAddress"
         specification:

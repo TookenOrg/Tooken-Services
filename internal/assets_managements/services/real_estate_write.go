@@ -222,7 +222,6 @@ func toWriteRequest(dto database.RealEstateDTO) server.RealEstateWriteRequest {
 	req := server.RealEstateWriteRequest{
 		Description: dto.Description,
 		Imageurl:    dto.Imageurl,
-		IssuerId:    dto.IssuerId,
 	}
 
 	// The stored value cannot be NULL — the column is NOT NULL since migration
@@ -230,6 +229,12 @@ func toWriteRequest(dto database.RealEstateDTO) server.RealEstateWriteRequest {
 	// must not crash. It simply has to name a type, like a creation does.
 	if dto.EstateTypeId != nil {
 		req.EstateTypeId = *dto.EstateTypeId
+	}
+
+	// Same reading as estate_type above, for the same reason: NOT NULL since
+	// migration 000016, but a row stored before it may still carry nothing.
+	if dto.IssuerId != nil {
+		req.IssuerId = *dto.IssuerId
 	}
 
 	if dto.Title != nil {
@@ -346,7 +351,9 @@ func applyPatch(current server.RealEstateWriteRequest, patch server.RealEstatePa
 	if patch.EstateTypeId != nil {
 		current.EstateTypeId = *patch.EstateTypeId
 	}
-	setIfPresent(&current.IssuerId, patch.IssuerId)
+	if patch.IssuerId != nil {
+		current.IssuerId = *patch.IssuerId
+	}
 
 	if a := patch.Address; a != nil {
 		if a.Street != nil {
@@ -608,7 +615,16 @@ func toWriteDTO(req server.RealEstateWriteRequest, mode writeMode) (database.Rea
 		Description:  trimmedPtr(req.Description),
 		Imageurl:     trimmedPtr(req.Imageurl),
 		EstateTypeId: &req.EstateTypeId,
-		IssuerId:     req.IssuerId,
+		IssuerId:     nil,
+	}
+
+	// issuer_id travels as a plain int now that the contract demands it, so a
+	// zero means "not carried" rather than "issuer number zero". Leaving the
+	// pointer nil in that case keeps a patch on a pre-000016 row NULL instead
+	// of writing a 0 no vehicle answers to — the foreign key would reject it
+	// with a message about a constraint the caller never mentioned.
+	if req.IssuerId > 0 {
+		in.IssuerId = &req.IssuerId
 	}
 
 	if in.Title == "" {
@@ -628,6 +644,18 @@ func toWriteDTO(req server.RealEstateWriteRequest, mode writeMode) (database.Rea
 	// for the reason given on writeMode.
 	if mode == writeCreate && (in.EstateTypeId == nil || *in.EstateTypeId <= 0) {
 		return in, invalid("estate_type_id is required")
+	}
+
+	// issuer_id is NOT NULL in the table since migration 000016: a token
+	// represents a stake in an issuing vehicle, never in the walls themselves
+	// (decision A1), so an asset naming no issuer describes shares of nothing.
+	// Demanded here rather than left to the constraint, so the caller reads a
+	// 400 naming the field instead of the 500 a not_null_violation produces.
+	//
+	// Creation only, like estate_type_id above: a patch that does not carry
+	// issuer_id inherits the stored one, and setIfPresent cannot clear it.
+	if mode == writeCreate && (in.IssuerId == nil || *in.IssuerId <= 0) {
+		return in, invalid("issuer_id is required")
 	}
 
 	if mode == writeCreate || !isBlankAddress(req.Address) {
