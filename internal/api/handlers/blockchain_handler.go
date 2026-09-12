@@ -6,12 +6,18 @@ import (
 	"net/http"
 
 	"github.com/TookenOrg/tooken-services/internal/api/server"
+	authUtils "github.com/TookenOrg/tooken-services/internal/auth/utils"
 	blockchainService "github.com/TookenOrg/tooken-services/internal/blockchain/services"
+	"github.com/TookenOrg/tooken-services/internal/middleware"
 	"github.com/TookenOrg/tooken-services/pkg/logger"
 	"github.com/gin-gonic/gin"
 )
 
 func (h *Handler) DeployAllImplementationsAsync(gCtx *gin.Context) {
+
+	if !middleware.RequireRole(gCtx, authUtils.RoleManager, authUtils.RoleAdmin) {
+		return
+	}
 
 	go func() {
 		logger.LogInfo("🚀 Starting asynchronous deployment of all implementations")
@@ -30,6 +36,10 @@ func (h *Handler) DeployAllImplementationsAsync(gCtx *gin.Context) {
 }
 
 func (h *Handler) DeployIdentityFactory(gCtx *gin.Context) {
+
+	if !middleware.RequireRole(gCtx, authUtils.RoleManager, authUtils.RoleAdmin) {
+		return
+	}
 
 	logger.LogInfo("🚀 Starting deployment of Identity Factory")
 
@@ -51,6 +61,10 @@ func (h *Handler) DeployIdentityFactory(gCtx *gin.Context) {
 
 func (h *Handler) ConfigureAuthority(gCtx *gin.Context) {
 
+	if !middleware.RequireRole(gCtx, authUtils.RoleManager, authUtils.RoleAdmin) {
+		return
+	}
+
 	logger.LogInfo("🚀 Starting deployment of configure Authority")
 
 	txDetails, err := h.blockchainSvc.ConfigureAuthority(gCtx.Request.Context())
@@ -70,6 +84,9 @@ func (h *Handler) ConfigureAuthority(gCtx *gin.Context) {
 }
 
 func (h *Handler) DeployAndInitTrexFactoryAsync(gCtx *gin.Context) {
+	if !middleware.RequireRole(gCtx, authUtils.RoleManager, authUtils.RoleAdmin) {
+		return
+	}
 	go func() {
 		logger.LogInfo("🚀 Starting asynchronous deployment of TREX Factory")
 		err := h.blockchainSvc.DeployAndInitTrexFactory(context.Background())
@@ -86,6 +103,9 @@ func (h *Handler) DeployAndInitTrexFactoryAsync(gCtx *gin.Context) {
 }
 
 func (h *Handler) DeployTrexSuiteAsync(gCtx *gin.Context) {
+	if !middleware.RequireRole(gCtx, authUtils.RoleManager, authUtils.RoleAdmin) {
+		return
+	}
 	go func() {
 		logger.LogInfo("🚀 Starting asynchronous deployment of TREX Suite")
 		_, err := h.blockchainSvc.DeployTrexSuite(context.Background())
@@ -108,6 +128,9 @@ func (h *Handler) GetTrexSuiteInfos(gCtx *gin.Context, params server.GetTrexSuit
 }
 
 func (h *Handler) CreateIdentity(gCtx *gin.Context) {
+	if !middleware.RequireRole(gCtx, authUtils.RoleManager, authUtils.RoleAdmin) {
+		return
+	}
 
 	logger.LogInfo("🚀 Starting deployment of Identity")
 
@@ -136,6 +159,9 @@ func (h *Handler) CreateIdentity(gCtx *gin.Context) {
 }
 
 func (h *Handler) AddClaimToIdentity(gCtx *gin.Context) {
+	if !middleware.RequireRole(gCtx, authUtils.RoleManager, authUtils.RoleAdmin) {
+		return
+	}
 
 	logger.LogInfo("🚀 Starting adding claims to Identity")
 
@@ -164,6 +190,9 @@ func (h *Handler) AddClaimToIdentity(gCtx *gin.Context) {
 }
 
 func (h *Handler) CreateTokenContract(gCtx *gin.Context) {
+	if !middleware.RequireRole(gCtx, authUtils.RoleManager, authUtils.RoleAdmin) {
+		return
+	}
 
 	logger.LogInfo("🚀 Starting creation of Token Contract")
 
@@ -186,7 +215,7 @@ func (h *Handler) CreateTokenContract(gCtx *gin.Context) {
 
 	logger.LogInfo("🆗 Token Contract created successfully.")
 
-	gCtx.JSON(http.StatusOK, server.CreateTokenResponse{
+	gCtx.JSON(http.StatusCreated, server.CreateTokenResponse{
 		Message: "The Token Contract has been created successfully.",
 		Data:    &tokenInfos,
 	})
@@ -200,6 +229,9 @@ func (h *Handler) GetTokenInfos(gCtx *gin.Context, tokenAddress string) {
 }
 
 func (h *Handler) MintTokenAsync(gCtx *gin.Context) {
+	if !middleware.RequireRole(gCtx, authUtils.RoleManager, authUtils.RoleAdmin) {
+		return
+	}
 
 	logger.LogInfo("🚀 Starting mint on token")
 
@@ -245,6 +277,10 @@ func (h *Handler) MintTokenAsync(gCtx *gin.Context) {
 }
 
 func (h *Handler) BurnTokenAsync(gCtx *gin.Context) {
+	if !middleware.RequireRole(gCtx, authUtils.RoleManager, authUtils.RoleAdmin) {
+		return
+	}
+
 	logger.LogInfo("🚀 Starting burn on token")
 
 	var req server.BurnTokenRequest

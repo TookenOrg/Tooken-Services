@@ -172,8 +172,9 @@ paths:
       description: >
         Makes a draft visible to investors. Reserved to a MANAGER or an ADMIN.
 
-        An asset created with everything it needs is published straight away, so
-        this endpoint is only for the ones filled in over several steps.
+        Every asset goes through this endpoint. Creation always produces a
+        draft, so publishing is the only way online and is never a side effect
+        of a write.
 
         What is checked is the stored asset, not a payload: the decision is
         taken on the record as it stands, possibly long after it was written and
@@ -299,19 +300,22 @@ paths:
         an asset without its address or its share configuration would be a
         half-created record that no reader could use.
 
-        The asset is created published, therefore visible: a manager clicking
-        "create" expects to see the result on the site, not a draft nobody
-        asked for.
+        A new asset is ALWAYS a draft, however complete the payload is. It is
+        invisible to investors, and POST /assets/real-estates/{id}/publish is
+        the only way online.
 
-        Two things hold it back as a draft instead: a payload that lacks what an
-        investor relies on, and an issuer that is not yet active. Neither is an
-        error — the asset is stored as sent and goes online through
-        POST /assets/real-estates/{id}/publish once the gap is closed.
+        Creation and publication are deliberately kept apart. Putting an asset
+        in front of investors is an explicit act, not a side effect of filling
+        a form correctly, and it is the moment where the offer becomes real.
+        Completeness is therefore not judged here: a payload that lacks what an
+        investor relies on is stored as sent, and the missing fields are named
+        at publication.
 
-        A DISSOLVED issuer is the exception: it is refused with 409 rather than
-        held back. Draft or not, an asset cannot be attached to a vehicle whose
-        liquidation is closed, because no later patch could ever make that
-        attachment publishable.
+        A DISSOLVED issuer is the one refusal at this stage, with 409: the
+        company has been liquidated, so an asset attached to it would describe
+        shares of nothing, and no later patch could ever make that attachment
+        publishable. Any other issuer state is accepted here and re-checked at
+        publication.
       operationId: createRealEstate
       security:
         - bearerAuth: []

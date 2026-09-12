@@ -185,21 +185,6 @@ func derefString(v *string) string {
 	return *v
 }
 
-// initialStatus decides where a newly created asset starts.
-//
-// A manager who fills everything in one go gets his asset online immediately,
-// which is what "create this property" is expected to do. One who starts a
-// stub gets a draft: invisible to investors, editable, and publishable later.
-// Nothing incomplete ever reaches the public listing, and nothing complete
-// waits for a step the manager did not ask for.
-func initialStatus(in database.RealEstateWriteDTO) int {
-	if len(publicationRequirements(in)) > 0 {
-		return database.StatusDraft
-	}
-
-	return database.StatusPublished
-}
-
 // publicStatuses are the states in which investors can see the asset. Taken
 // from is_public of migration 000006; a CHECK cannot query the referential, and
 // neither can this code without a round trip on every write.
