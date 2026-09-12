@@ -13,7 +13,7 @@ import (
 func completeRequest() server.RealEstateWriteRequest {
 	req := validRequest()
 	req.Description = strPtrT("A browsable listing")
-	req.IssuerId = intPtrT(1)
+	req.IssuerId = 1
 	req.Media = &[]server.RealEstateMediaInput{{Url: "https://x/1.jpg"}}
 	req.Configuration = &server.RealEstateConfigurationInput{
 		TotalShares:   "1000",
@@ -48,7 +48,7 @@ func TestPublicationRequirements(t *testing.T) {
 		missing string
 	}{
 		{"complete", func(*server.RealEstateWriteRequest) {}, ""},
-		{"no issuer", func(r *server.RealEstateWriteRequest) { r.IssuerId = nil }, "issuer_id"},
+		{"no issuer", func(r *server.RealEstateWriteRequest) { r.IssuerId = 0 }, "issuer_id"},
 		{"no description", func(r *server.RealEstateWriteRequest) { r.Description = nil }, "description"},
 		{"blank description", func(r *server.RealEstateWriteRequest) { r.Description = strPtrT("   ") }, "description"},
 		{"no visual", func(r *server.RealEstateWriteRequest) { r.Media = nil }, "media"},

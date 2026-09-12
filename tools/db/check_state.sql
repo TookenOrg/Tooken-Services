@@ -1,8 +1,14 @@
--- Which migrations are actually applied?
+-- Where does this database really stand?
 --
--- Use this when migrations were applied by hand (copy/paste in a SQL client)
--- instead of through golang-migrate, to find out where the database really
--- stands before handing control over to the tool.
+-- Two things are reported here, both read-only:
+--
+--   1. which migrations are actually applied -- use this when migrations were
+--      applied by hand (copy/paste in a SQL client) instead of through
+--      golang-migrate, to find out where the database stands before handing
+--      control over to the tool;
+--   2. the invariants the schema cannot express, listed at the end of the
+--      file. They are enforced by the service layer; this is how we find out
+--      whether one of them has been broken.
 --
 --   psql "$DATABASE_URL" -f tools/db/check_state.sql
 --
@@ -40,7 +46,11 @@ WITH probes(version, label, applied) AS (
     (13, 'resync_identity_sequences', to_regclass('ass.issuer_lei_uk') IS NOT NULL),
     (14, 'issuer_lei_unique',      to_regclass('ass.issuer_lei_uk') IS NOT NULL),
     (15, 'referential_integrity',  EXISTS (
-            SELECT 1 FROM pg_constraint WHERE conname = 'fk_issuance_orders_asset'))
+            SELECT 1 FROM pg_constraint WHERE conname = 'fk_issuance_orders_asset')),
+    (16, 'real_estate_issuer_required', EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'ass' AND table_name = 'real_estate'
+              AND column_name = 'issuer_id' AND is_nullable = 'NO'))
 )
 SELECT version,
        label,
@@ -75,7 +85,10 @@ FROM (
         (12, to_regclass('ass.real_estate_estate_type_idx') IS NOT NULL),
         (13, to_regclass('ass.issuer_lei_uk') IS NOT NULL),
         (14, to_regclass('ass.issuer_lei_uk') IS NOT NULL),
-        (15, EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_issuance_orders_asset'))
+        (15, EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_issuance_orders_asset')),
+        (16, EXISTS (SELECT 1 FROM information_schema.columns
+                     WHERE table_schema = 'ass' AND table_name = 'real_estate'
+                       AND column_name = 'issuer_id' AND is_nullable = 'NO'))
     )
     SELECT version FROM probes p
     WHERE NOT EXISTS (SELECT 1 FROM probes q WHERE q.version <= p.version AND NOT q.applied)
@@ -102,5 +115,80 @@ BEGIN
         FOR v IN SELECT version, dirty FROM public.schema_migrations LOOP
             RAISE NOTICE 'schema_migrations: version=% dirty=%', v.version, v.dirty;
         END LOOP;
+    END IF;
+END $$;
+
+
+-- ---------------------------------------------------------------------------
+-- Invariants the schema cannot express
+-- ---------------------------------------------------------------------------
+--
+-- Invariant: a visible asset must stand behind an active issuer.
+--
+-- The rule is enforced in the service layer -- an issuer carrying published
+-- assets is refused any status other than 'active' (issuer.go,
+-- explainIssuerWriteRefusal). The database knows nothing about it, and cannot:
+-- a CHECK constraint only ever sees one row of one table, and this one spans
+-- ass.real_estate and ass.issuer.
+--
+-- A trigger could close the gap, and is deliberately not used. This schema
+-- already carries one on ass.real_estate.active, and that trigger is precisely
+-- why `active` drifted from real_estate_status.is_public (see the note above
+-- GetIssuerGuardState in issuer_db.go). Adding a third piece of invisible
+-- logic to guard against a case never observed would buy a guarantee at the
+-- price of the problem it guards against.
+--
+-- So the invariant stays in the code, and this block makes it observable.
+-- Silence (beyond the "holds" notice) means it holds. Any VIOLATION line means
+-- investors can see an offer whose vehicle is suspended or dissolved; fix it by
+-- unpublishing the asset or by putting the issuer back to 'active'.
+--
+-- "Visible" is read as re.active, not as real_estate_status.is_public: active
+-- is what the listing and detail queries filter on, and it is the same column
+-- the service counts when it refuses the status change. Checking the rule with
+-- anything else would report violations the rule never claimed to prevent.
+--
+-- Like every probe above, this must not fail on a half-migrated database: the
+-- whole point of the file is to be runnable when the state is unknown. Hence
+-- the guard -- a missing table here means the invariant does not exist yet.
+DO $$
+DECLARE
+    v         record;
+    violations int := 0;
+BEGIN
+    IF to_regclass('ass.real_estate') IS NULL
+       OR to_regclass('ass.issuer') IS NULL
+       OR to_regclass('ass.issuer_status') IS NULL
+       OR NOT EXISTS (SELECT 1 FROM information_schema.columns
+                      WHERE table_schema = 'ass' AND table_name = 'real_estate'
+                        AND column_name = 'deleted_at')
+    THEN
+        RAISE NOTICE 'issuer invariant: skipped - schema too old to carry it';
+        RETURN;
+    END IF;
+
+    FOR v IN
+        SELECT re.id AS real_estate_id,
+               re.title,
+               i.id   AS issuer_id,
+               i.name AS issuer_name,
+               ist.code AS issuer_status
+        FROM ass.real_estate re
+        JOIN ass.issuer i          ON i.id   = re.issuer_id
+        JOIN ass.issuer_status ist ON ist.id = i.status_id
+        WHERE re.deleted_at IS NULL
+          AND re.active
+          AND i.status_id <> 2      -- 2 = 'active', seeded by migration 000007
+        ORDER BY re.id
+    LOOP
+        violations := violations + 1;
+        RAISE NOTICE 'VIOLATION: real estate % (%) is visible under issuer % (%) in status ''%''',
+            v.real_estate_id, v.title, v.issuer_id, v.issuer_name, v.issuer_status;
+    END LOOP;
+
+    IF violations = 0 THEN
+        RAISE NOTICE 'issuer invariant: holds - every visible asset stands behind an active issuer';
+    ELSE
+        RAISE WARNING 'issuer invariant: % visible asset(s) stand behind a non-active issuer', violations;
     END IF;
 END $$;

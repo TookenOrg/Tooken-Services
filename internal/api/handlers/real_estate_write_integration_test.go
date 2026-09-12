@@ -68,6 +68,15 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 	    ON CONFLICT (id) DO NOTHING`); err != nil {
 		t.Fatal(err)
 	}
+	// issuer_id is NOT NULL since migration 000016, and every asset written
+	// below names vehicle 1. Seeded here for the same reason as the two
+	// referentials above: the suite must run from the migrations alone.
+	if _, err := db.Exec(`
+	    INSERT INTO ass.issuer (id, name, legal_form, country_code, status_id)
+	    VALUES (1, 'Tooken Securitisation SA', 'SA', 'LU', 1)
+	    ON CONFLICT (id) DO NOTHING`); err != nil {
+		t.Fatal(err)
+	}
 
 	mgr, _ := authUtils.GenerateJWT(1, "m@t.lu", authUtils.RoleManager)
 	usr, _ := authUtils.GenerateJWT(2, "u@t.lu", authUtils.RoleUser)
@@ -176,7 +185,13 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 			"unknown estate type":    `{"title":"x","estate_type_id":999,"address":{"street":"a","postal_code":"b","city":"c","country_code":"LU"}}`,
 			"empty title":            `{"title":"   ","address":{"street":"a","postal_code":"b","city":"c","country_code":"LU"}}`,
 			"no estate type":         `{"title":"x","address":{"street":"a","postal_code":"b","city":"c","country_code":"LU"}}`,
-			"title over 255":         `{"title":"` + strings.Repeat("A", 256) + `","estate_type_id":1,"address":{"street":"a","postal_code":"b","city":"c","country_code":"LU"}}`,
+			// A token represents a stake in an issuing vehicle (decision A1),
+			// so an asset naming none describes shares of nothing. NOT NULL in
+			// the table since 000016; refused here so the caller reads the
+			// field name rather than a constraint violation.
+			"no issuer":      `{"title":"x","estate_type_id":1,"address":{"street":"a","postal_code":"b","city":"c","country_code":"LU"}}`,
+			"unknown issuer": `{"title":"x","estate_type_id":1,"issuer_id":999999,"address":{"street":"a","postal_code":"b","city":"c","country_code":"LU"}}`,
+			"title over 255": `{"title":"` + strings.Repeat("A", 256) + `","estate_type_id":1,"address":{"street":"a","postal_code":"b","city":"c","country_code":"LU"}}`,
 		}
 		for name, p := range cases {
 			code, body := do("POST", "/assets/real-estates", mgr, p)
@@ -360,8 +375,8 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 	t.Run("guards on a tokenized asset", func(t *testing.T) {
 		tokenID := mustScanID(t, `INSERT INTO blk.token (address, token_name, symbol, nb_decimal)
 		    VALUES ('0x' || lpad(md5(random()::text), 40, '0'),'G','G',0) RETURNING id`)
-		assetID := mustScanID(t, `INSERT INTO ass.real_estate (title, estate_type, status_id, token_id)
-		    VALUES ('Tokenized guard', 1, 3, $1) RETURNING id`, tokenID)
+		assetID := mustScanID(t, `INSERT INTO ass.real_estate (title, estate_type, issuer_id, status_id, token_id)
+		    VALUES ('Tokenized guard', 1, 1, 3, $1) RETURNING id`, tokenID)
 		mustExec(t, `INSERT INTO ass.real_estate_shares_config (real_estate_id, total_shares, price_per_share) VALUES ($1, 1000, 10)`, assetID)
 
 		p := `{"configuration":{"total_shares":"500"}}`
@@ -428,8 +443,8 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 		// 500: the registry ends up pointing at a type that does not exist.
 		t.Run("an unknown estate type is refused by the database too", func(t *testing.T) {
 			var stored int
-			err := db.QueryRow(`INSERT INTO ass.real_estate (title, estate_type, status_id)
-			    VALUES ('Ghost type', 999999, 3) RETURNING id`).Scan(&stored)
+			err := db.QueryRow(`INSERT INTO ass.real_estate (title, estate_type, issuer_id, status_id)
+			    VALUES ('Ghost type', 999999, 1, 3) RETURNING id`).Scan(&stored)
 			if err == nil {
 				t.Errorf("row %d was stored with a type that does not exist", stored)
 			}
@@ -465,8 +480,8 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 	t.Run("a sequence left behind by explicit ids", func(t *testing.T) {
 		// Exactly the state a seeded table is in: rows carry ids 1..N while the
 		// sequence never moved, so the next generated id is one that exists.
-		mustExec(t, `INSERT INTO ass.real_estate (id, title, estate_type, status_id)
-		    VALUES (1, 'Seeded with its id', 1, 3)
+		mustExec(t, `INSERT INTO ass.real_estate (id, title, estate_type, issuer_id, status_id)
+		    VALUES (1, 'Seeded with its id', 1, 1, 3)
 		    ON CONFLICT (id) DO NOTHING`)
 		mustExec(t, `SELECT setval(pg_get_serial_sequence('ass.real_estate', 'id'), 1, false)`)
 
@@ -496,7 +511,7 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 	})
 
 	t.Run("draft is invisible to the public", func(t *testing.T) {
-		draftID := mustScanID(t, `INSERT INTO ass.real_estate (title, estate_type, status_id) VALUES ('Secret draft', 1, 1) RETURNING id`)
+		draftID := mustScanID(t, `INSERT INTO ass.real_estate (title, estate_type, issuer_id, status_id) VALUES ('Secret draft', 1, 1, 1) RETURNING id`)
 
 		code, _ := do("GET", "/assets/real-estates/"+itoa(draftID), "", "")
 		if code != http.StatusNotFound {
@@ -536,8 +551,8 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 	// creating it, and must name the currency like a create would.
 	t.Run("a patch creating a configuration must name the currency", func(t *testing.T) {
 		bareID := mustScanID(t, `
-		    INSERT INTO ass.real_estate (title, estate_type, status_id)
-		    VALUES ('No configuration yet', 1, 1) RETURNING id`)
+		    INSERT INTO ass.real_estate (title, estate_type, issuer_id, status_id)
+		    VALUES ('No configuration yet', 1, 1, 1) RETURNING id`)
 
 		code, body := do("PATCH", "/assets/real-estates/"+itoa(bareID), mgr,
 			`{"configuration":{"total_shares":"100","price_per_share":"5","payment_frequency":1,"payment_frequency_type_id":1}}`)
@@ -563,7 +578,7 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 	// visible only once it carries what an investor needs to decide, and the
 	// button that makes it visible says exactly what is missing when it cannot.
 	t.Run("publication", func(t *testing.T) {
-		stub := `{"title":"Half filled","estate_type_id":1,
+		stub := `{"title":"Half filled","estate_type_id":1,"issuer_id":1,
 		  "address":{"street":"a","postal_code":"b","city":"c","country_code":"LU"}}`
 
 		code, body := do("POST", "/assets/real-estates", mgr, stub)
@@ -595,8 +610,11 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 			if code != http.StatusConflict {
 				t.Fatalf("want 409 got %d: %s", code, body)
 			}
+			// issuer_id is absent from this list on purpose: since migration
+			// 000016 an asset cannot be created without one, so it can no
+			// longer be among the things a draft is still missing.
 			for _, field := range []string{
-				"issuer_id", "description", "media",
+				"description", "media",
 				"configuration.total_shares", "configuration.price_per_share",
 				"configuration.currency_code", "configuration.yield",
 				"configuration.payment_frequency", "configuration.payment_frequency_type_id",
@@ -671,8 +689,8 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 		// be refused, including the one completing it.
 		t.Run("an asset published incomplete can still be patched", func(t *testing.T) {
 			legacyID := mustScanID(t, `
-			    INSERT INTO ass.real_estate (title, estate_type, status_id)
-			    VALUES ('Legacy listing', 1, 3) RETURNING id`)
+			    INSERT INTO ass.real_estate (title, estate_type, issuer_id, status_id)
+			    VALUES ('Legacy listing', 1, 1, 3) RETURNING id`)
 
 			code, body := do("PATCH", "/assets/real-estates/"+itoa(legacyID), mgr,
 				`{"title":"Legacy listing renamed"}`)
@@ -683,8 +701,8 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 
 		t.Run("a deleted asset cannot be published", func(t *testing.T) {
 			goneID := mustScanID(t, `
-			    INSERT INTO ass.real_estate (title, estate_type, status_id, deleted_at)
-			    VALUES ('Gone', 1, 7, now()) RETURNING id`)
+			    INSERT INTO ass.real_estate (title, estate_type, issuer_id, status_id, deleted_at)
+			    VALUES ('Gone', 1, 1, 7, now()) RETURNING id`)
 
 			code, _ := do("POST", "/assets/real-estates/"+itoa(goneID)+"/publish", mgr, "")
 			if code != http.StatusNotFound {
