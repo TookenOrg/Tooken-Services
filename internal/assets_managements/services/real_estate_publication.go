@@ -13,11 +13,11 @@ import (
 // publicationRequirements is the single definition of a record complete enough
 // to be shown to an investor.
 //
-// It is deliberately one list, consulted from the three places that need it —
-// the creation, which derives the initial status from it; the publication,
-// which refuses without it; and the patch, which refuses to strip a published
-// asset of it. A second list would drift from this one, and the drift would
-// show up as an asset visible on the site that the tokenization then refuses.
+// It is deliberately one list, consulted from the two places that need it — the
+// publication, which refuses without it, and the patch, which refuses to strip
+// a published asset of it. A second list would drift from this one, and the
+// drift would show up as an asset visible on the site that the tokenization
+// then refuses.
 //
 // What it demands, and why:
 //
@@ -185,21 +185,6 @@ func derefString(v *string) string {
 	return *v
 }
 
-// initialStatus decides where a newly created asset starts.
-//
-// A manager who fills everything in one go gets his asset online immediately,
-// which is what "create this property" is expected to do. One who starts a
-// stub gets a draft: invisible to investors, editable, and publishable later.
-// Nothing incomplete ever reaches the public listing, and nothing complete
-// waits for a step the manager did not ask for.
-func initialStatus(in database.RealEstateWriteDTO) int {
-	if len(publicationRequirements(in)) > 0 {
-		return database.StatusDraft
-	}
-
-	return database.StatusPublished
-}
-
 // publicStatuses are the states in which investors can see the asset. Taken
 // from is_public of migration 000006; a CHECK cannot query the referential, and
 // neither can this code without a round trip on every write.
@@ -299,9 +284,16 @@ func (s *Service) PublishRealEstate(ctx context.Context, id int) (server.RealEst
 			"the issuer of this asset is not active; activate it before publishing")
 	}
 
+	// Deploy onchain first to avoid inconsistencies between the onchain state and the database.
+	// if the token deployment fails, we should not proceed with publishing in the database and real estate stays draft.
+	tokenID, err := s.tokenForPublication(ctx, id, in.Title, state.TokenId)
+	if err != nil {
+		return server.RealEstate{}, err
+	}
+
 	// Publishing an already published asset changes nothing and is not an
 	// error: two managers clicking the same button must not produce a failure.
-	if err := database.PublishRealEstate(ctx, id); err != nil {
+	if err := database.PublishRealEstate(ctx, id, tokenID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return server.RealEstate{}, ErrRealEstateNotFound
 		}

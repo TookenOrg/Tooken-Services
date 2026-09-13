@@ -102,16 +102,6 @@ func TestSurfaceIsNotRequiredToPublish(t *testing.T) {
 	}
 }
 
-func TestInitialStatus(t *testing.T) {
-	if got := initialStatus(mustWriteDTO(t, completeRequest())); got != database.StatusPublished {
-		t.Errorf("a complete asset does not go online: got status %d", got)
-	}
-
-	if got := initialStatus(mustWriteDTO(t, validRequest())); got != database.StatusDraft {
-		t.Errorf("a stub is not a draft: got status %d", got)
-	}
-}
-
 func TestCheckStillPublishable(t *testing.T) {
 	complete := mustWriteDTO(t, completeRequest())
 

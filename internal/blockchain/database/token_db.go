@@ -8,6 +8,7 @@ import (
 	"github.com/TookenOrg/tooken-services/internal/api/server"
 	"github.com/TookenOrg/tooken-services/internal/globals"
 	"github.com/TookenOrg/tooken-services/pkg/logger"
+	"github.com/ethereum/go-ethereum/common"
 )
 
 func GetTokenByName(ctx context.Context, tokenName string, empryResultAllowed bool) (token *server.TokenInfos, err error) {
@@ -42,6 +43,10 @@ func GetTokenByName(ctx context.Context, tokenName string, empryResultAllowed bo
 }
 
 func GetTokenByAddress(ctx context.Context, address string) (token *server.TokenInfos, err error) {
+	if !common.IsHexAddress(address) {
+		return nil, fmt.Errorf("not a valid ethereum address: %s", address)
+	}
+
 	query := `
         SELECT id, symbol, token_name,  address, nb_decimal, modular_compliance_addr, created_at
 		FROM blk.token
@@ -50,7 +55,7 @@ func GetTokenByAddress(ctx context.Context, address string) (token *server.Token
 
 	tokenRow := &server.TokenInfos{}
 
-	err = globals.DB.QueryRow(query, address).Scan(
+	err = globals.DB.QueryRow(query, common.HexToAddress(address).Hex()).Scan(
 		&tokenRow.Id,
 		&tokenRow.Symbol,
 		&tokenRow.TokenName,

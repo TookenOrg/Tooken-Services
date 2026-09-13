@@ -8,7 +8,13 @@ import (
 	"strconv"
 )
 
-var Log *slog.Logger
+// Log is usable before Init runs. It used to be a nil pointer until main called
+// Init, so any code that logged earlier - a spec parsed at startup, anything
+// exercised by a test - brought the process down with a nil dereference inside
+// slog rather than printing its message. A logging package is the last thing
+// that should be able to crash a program, so it starts on the standard library
+// default and Init swaps in the configured handler.
+var Log = slog.Default()
 
 func Init(isDevelopment bool) {
 	var handler slog.Handler

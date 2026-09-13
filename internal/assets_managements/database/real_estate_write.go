@@ -408,22 +408,34 @@ func inTransaction(ctx context.Context, fn func(*sql.Tx) error) (err error) {
 	return tx.Commit()
 }
 
-// PublishRealEstate moves an asset to the published status.
+// PublishRealEstate moves an asset to the published status and binds it to the
+// token that backs it.
+//
+// Both columns move in one UPDATE because they describe a single event. Writing
+// them separately would open a window in which the asset is already visible to
+// investors while it still carries no token.
 //
 // published_at is only set the first time: it records when investors were first
 // shown the asset, which unpublishing and republishing must not rewrite.
 // updated_at keeps tracking the last change, so nothing is lost.
-func PublishRealEstate(ctx context.Context, id int) error {
+//
+// token_id follows the same rule for a stronger reason. The token exists on
+// chain and investors hold it, so no off-chain write may point the asset at a
+// different one; COALESCE makes that impossible to express, whatever a caller
+// passes when republishing an asset that is already tokenised. Repointing an
+// asset, if it is ever needed, has to be a deliberate statement of its own.
+func PublishRealEstate(ctx context.Context, realEstateID, tokenID int) error {
 	const query = `
 UPDATE ass.real_estate
 SET status_id = $2,
+    token_id = COALESCE(token_id, $3),
     published_at = COALESCE(published_at, now()),
     updated_at = now()
 WHERE id = $1
   AND deleted_at IS NULL
 `
 
-	res, err := globals.DB.ExecContext(ctx, query, id, StatusPublished)
+	res, err := globals.DB.ExecContext(ctx, query, realEstateID, StatusPublished, tokenID)
 	if err != nil {
 		return err
 	}

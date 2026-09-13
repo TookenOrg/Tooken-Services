@@ -101,37 +101,32 @@ func (s *Service) CreateRealEstate(ctx context.Context, req server.RealEstateWri
 		return server.RealEstate{}, err
 	}
 
-	// A complete asset goes online immediately, an incomplete one waits as a
-	// draft. See publicationRequirements for what "complete" means and why the
-	// definition lives in one place.
-	status := initialStatus(in)
+	// A new asset is always a draft, however complete the payload is. Putting
+	// it in front of investors is an explicit act, so it belongs to
+	// PublishRealEstate alone and is never a side effect of a write.
+	status := database.StatusDraft
 
-	// The vehicle is read once and answers two different questions.
-	//
-	// Dissolved is a refusal, whatever the asset's status: the company has been
+	// Dissolved is the one refusal at this stage: the company has been
 	// liquidated, so an asset attached to it would describe shares of nothing
 	// and could never be published. Storing that draft would only hand the
 	// manager a dead end.
 	//
-	// Any other non-active status merely holds the asset back as a draft.
-	// Nothing is wrong with what the manager sent, only with the state of
-	// another record he may not control, and refusing would lose the whole
-	// payload over it. Once the issuer is activated,
-	// POST /assets/real-estates/{id}/publish puts the asset online.
+	// Every other issuer state is accepted, because it no longer decides
+	// anything here: the asset is a draft either way, and publication re-reads
+	// the issuer when it matters. Nothing is wrong with what the manager sent,
+	// only with the state of another record he may not control, and refusing
+	// would lose the whole payload over it.
 	if in.IssuerId != nil {
 		issuerStatus, err := database.GetIssuerStatus(ctx, *in.IssuerId)
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
 			// The foreign key rejects it a moment later, with a message that
 			// names the constraint rather than guessing at intent.
-			status = database.StatusDraft
 		case err != nil:
 			return server.RealEstate{}, err
 		case issuerStatus == database.IssuerStatusDissolved:
 			return server.RealEstate{}, conflict(
 				"this issuer is dissolved and can no longer carry an asset")
-		case issuerStatus != database.IssuerStatusActive:
-			status = database.StatusDraft
 		}
 	}
 
