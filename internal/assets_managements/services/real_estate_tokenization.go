@@ -1,10 +1,13 @@
 package services
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/TookenOrg/tooken-services/internal/api/server"
 )
 
 const tokenDecimals = 18
@@ -50,4 +53,33 @@ func defineSymbol(realEstateID int) string {
 
 func defineSalt(realEstateID int) string {
 	return fmt.Sprintf("re-%d", realEstateID)
+}
+
+// tokenForPublication returns the blk.token id the asset must be bound to,
+// deploying a T-REX suite only when it does not already carry one.
+//
+// An asset that already carries a token is handed back untouched. Republishing
+// must not spend a second salt: the binding it holds is the one investors own,
+// and the factory would refuse the deployment anyway.
+//
+// Deploying here, before the asset is written as published, is what makes a
+// chain failure harmless: the asset stays a draft, and no investor is ever
+// shown an offer backed by nothing.
+func (s *Service) tokenForPublication(ctx context.Context, realEstateID int, realEstateName string, existingTokenID *int) (int, error) {
+	if existingTokenID != nil {
+		return *existingTokenID, nil
+	}
+
+	req := server.CreateTokenRequest{
+		TokenName: defineTokenName(realEstateName, realEstateID),
+		Symbol:    defineSymbol(realEstateID),
+		NbDecimal: tokenDecimals,
+	}
+
+	tokenID, _, err := s.deployer.CreateTokenWithSalt(ctx, req, defineSalt(realEstateID))
+	if err != nil {
+		return 0, err
+	}
+
+	return tokenID, nil
 }

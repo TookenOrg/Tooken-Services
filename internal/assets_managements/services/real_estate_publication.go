@@ -13,11 +13,11 @@ import (
 // publicationRequirements is the single definition of a record complete enough
 // to be shown to an investor.
 //
-// It is deliberately one list, consulted from the three places that need it —
-// the creation, which derives the initial status from it; the publication,
-// which refuses without it; and the patch, which refuses to strip a published
-// asset of it. A second list would drift from this one, and the drift would
-// show up as an asset visible on the site that the tokenization then refuses.
+// It is deliberately one list, consulted from the two places that need it — the
+// publication, which refuses without it, and the patch, which refuses to strip
+// a published asset of it. A second list would drift from this one, and the
+// drift would show up as an asset visible on the site that the tokenization
+// then refuses.
 //
 // What it demands, and why:
 //
@@ -284,9 +284,16 @@ func (s *Service) PublishRealEstate(ctx context.Context, id int) (server.RealEst
 			"the issuer of this asset is not active; activate it before publishing")
 	}
 
+	// Deploy onchain first to avoid inconsistencies between the onchain state and the database.
+	// if the token deployment fails, we should not proceed with publishing in the database and real estate stays draft.
+	tokenID, err := s.tokenForPublication(ctx, id, in.Title, state.TokenId)
+	if err != nil {
+		return server.RealEstate{}, err
+	}
+
 	// Publishing an already published asset changes nothing and is not an
 	// error: two managers clicking the same button must not produce a failure.
-	if err := database.PublishRealEstate(ctx, id); err != nil {
+	if err := database.PublishRealEstate(ctx, id, tokenID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return server.RealEstate{}, ErrRealEstateNotFound
 		}

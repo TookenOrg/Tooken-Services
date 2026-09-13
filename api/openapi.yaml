@@ -170,7 +170,8 @@ paths:
         - Assets
       summary: Publish a real estate
       description: >
-        Makes a draft visible to investors. Reserved to a MANAGER or an ADMIN.
+        Makes a draft visible to investors, and deploys the token that backs it.
+        Reserved to a MANAGER or an ADMIN.
 
         Every asset goes through this endpoint. Creation always produces a
         draft, so publishing is the only way online and is never a side effect
@@ -187,9 +188,16 @@ paths:
         409 — the mirror of the rule that refuses to withdraw an issuer while it
         carries published assets.
 
-        Publishing an already published asset is not an error: it changes
-        nothing and returns the asset, so two managers clicking the same button
-        do not produce a failure.
+        Once those checks pass, an ERC-3643 suite is deployed for the asset and
+        the asset is bound to it. The two happen in that order on purpose: a
+        chain failure answers 500 and leaves the asset a draft, so investors are
+        never shown an offer that no token backs. The call therefore waits for
+        the deployment to be mined and is slower than a plain write.
+
+        Publishing an already published asset is not an error: it returns the
+        asset without deploying a second time, so two managers clicking the same
+        button do not produce a failure. The token an asset carries is bound
+        once and never repointed.
       operationId: publishRealEstate
       security:
         - bearerAuth: []
