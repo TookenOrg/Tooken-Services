@@ -1423,7 +1423,10 @@ components:
           example: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd"
         walletAddress:
           type: string
-          description: The wallet address of the investor
+          description: >
+            The investor's wallet address — the last 20 bytes of the keccak256 of the
+            public key, not the public key itself. The public key is never stored; when
+            it is needed it is recovered from a signature.
           example: "0x1234567890abcdef1234567890abcdef12345678"
         countryCode:
           type: integer

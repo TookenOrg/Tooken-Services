@@ -3,7 +3,6 @@ package services
 import (
 	"context"
 	"errors"
-	"fmt"
 	"math/big"
 
 	"github.com/TookenOrg/tooken-services/internal/api/server"
@@ -25,7 +24,7 @@ func (s *Service) CreateIdentity(ctx context.Context, identityReq server.CreateI
 	}
 
 	// 2 - Generate wallet
-	wallet, walletId, err := GenerateNewWallet(identityReq.UserId)
+	walletPubKey, walletId, err := GenerateNewWallet(identityReq.UserId)
 	if err != nil {
 		return
 	}
@@ -37,7 +36,7 @@ func (s *Service) CreateIdentity(ctx context.Context, identityReq server.CreateI
 	}
 
 	// 4 - Register identity + wallet into Identity registry
-	registerIdentityTxHashPtr, err := registerIdentity(ctx, wallet, proxyAddr, identityReq.CountryCode)
+	registerIdentityTxHashPtr, err := registerIdentity(ctx, walletPubKey, proxyAddr, identityReq.CountryCode)
 	if err != nil {
 		return
 	}
@@ -50,7 +49,7 @@ func (s *Service) CreateIdentity(ctx context.Context, identityReq server.CreateI
 
 	newIdentityResponse.CountryCode = identityReq.CountryCode
 	newIdentityResponse.UserId = identityReq.UserId
-	newIdentityResponse.WalletAddress = wallet.Hex()
+	newIdentityResponse.WalletAddress = walletPubKey.Hex()
 	newIdentityResponse.IdentityAddress = proxyAddr.Hex()
 	newIdentityResponse.TransactionHash = txProxy.Hash().Hex()
 
@@ -62,7 +61,7 @@ func isIdempotentIdentity(ctx context.Context, identityReq server.CreateIdentity
 	if err != nil {
 		return false
 	}
-	return existingWalletPtr != nil
+	return existingWalletPtr == nil
 }
 
 func GenerateNewWallet(userId int) (publicKey common.Address, walletId int64, err error) {
@@ -72,12 +71,11 @@ func GenerateNewWallet(userId int) (publicKey common.Address, walletId int64, er
 	if err != nil {
 		return
 	}
-	privateKeyClear := fmt.Sprintf("%x", crypto.FromECDSA(privateKeyecdsa))
 	publicKey = crypto.PubkeyToAddress(privateKeyecdsa.PublicKey)
 
 	logger.LogDebug("New wallet created: public key [%s]", publicKey)
 
-	walletId, err = database.InsertWallet(userId, publicKey.Hex(), "Main Wallet", privateKeyClear)
+	walletId, err = database.InsertWallet(userId, publicKey.Hex(), "Main Wallet")
 
 	return
 }

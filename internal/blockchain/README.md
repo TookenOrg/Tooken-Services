@@ -260,7 +260,7 @@ graph LR
 - Investor wallets are generated server-side (`GenerateNewWallet`) and stored in
   `blk.user_wallet`.
 - `EncryptAESGCM` exists for wallet keys but uses a hard-coded AES key (tracked in
-  issue #12) and the column `private_key_clear` is also persisted — see §8.
+  issue #12).
 
 ### 6.3 Address resolution
 
@@ -343,9 +343,6 @@ module or extending it.
   must still be seeded manually.
 - **`GetWalletByUserId` is mocked** (`wallet_db.go`) — returns `common.MaxAddress`,
   so `CreateIdentity`'s idempotency check never sees "no wallet".
-- **Key handling.** A single `PRIVATE_KEY` signs everything; generated wallet keys
-  are stored as `private_key_clear` (plaintext) and the AES helper uses a hard-coded
-  key (issue #12). Treat as pre-production.
 - **`SetGlobals`** (`services/globals.go`) is a stub and its call site in `main.go`
   is commented out, so the mutable address cache in `globals` is never warmed.
 - Several handlers (`GetTrexSuiteInfos`, `GetTokenInfos`) and DB readers
