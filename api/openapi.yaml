@@ -1670,13 +1670,16 @@ components:
         - id
         - address
         - token_name
-        - modularCompliance
         - symbol
         - nbDecimal
         - createdAt
       properties:
         id:
           type: integer
+        salt:
+          type: string
+          description: Deployment salt used for the token
+          example: "unique-salt-123"
         modularComplianceAddr:
           type: string
           description: Address of the modularCompliance contract
@@ -1694,9 +1697,11 @@ components:
           type: string
           description: Symbol of token
           maxLength: 50
+          example: "TOOK"
         nbDecimal:
           type: integer
           format: int64
+          example: 18
         createdAt:
           type: string
           format: date-time

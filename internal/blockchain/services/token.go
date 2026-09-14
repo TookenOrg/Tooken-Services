@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/big"
 	"time"
+	"unicode/utf8"
 
 	"github.com/TookenOrg/tooken-services/internal/api/server"
 	contracts "github.com/TookenOrg/tooken-services/internal/blockchain/contracts/bindings"
@@ -16,7 +17,7 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/go-openapi/swag"
+	"github.com/samber/lo"
 )
 
 // CreateToken deploys a token suite on behalf of an HTTP caller. The factory salt is
@@ -53,12 +54,15 @@ func (s *Service) CreateTokenWithSalt(ctx context.Context, req server.CreateToke
 		return
 	}
 
-	// blk.token: token_name is varchar(100), symbol is varchar(50).
-	if n := len(req.TokenName); n == 0 || n > 100 {
+	// blk.token: token_name is varchar(100), symbol is varchar(50). Postgres
+	// counts those in characters, not bytes — a 100-character accented name is
+	// 200 bytes and the column takes it — so the guard counts runes. len()
+	// would reject names the column accepts.
+	if n := utf8.RuneCountInString(req.TokenName); n == 0 || n > 100 {
 		err = errors.New("token name must be between 1 and 100 characters")
 		return
 	}
-	if n := len(req.Symbol); n == 0 || n > 50 {
+	if n := utf8.RuneCountInString(req.Symbol); n == 0 || n > 50 {
 		err = errors.New("token symbol must be between 1 and 50 characters")
 		return
 	}
@@ -139,7 +143,7 @@ func (s *Service) CreateTokenWithSalt(ctx context.Context, req server.CreateToke
 	//     keys on token_name, so a lost write leaves an un-mintable token and breaks
 	//     retries (redeploy reverts on the reused factory salt) — treat a failure as fatal.
 	//     The returned id is what binds an asset to its token.
-	if tokenID, err = database.InsertToken(ctx, req.Symbol, req.TokenName, tokenAddr.Hex(), req.NbDecimal, mcAddr.Hex()); err != nil {
+	if tokenID, err = database.InsertToken(ctx, req.Symbol, req.TokenName, salt, tokenAddr.Hex(), req.NbDecimal, mcAddr.Hex()); err != nil {
 		return
 	}
 
@@ -147,14 +151,19 @@ func (s *Service) CreateTokenWithSalt(ctx context.Context, req server.CreateToke
 	newToken = server.TokenInfos{
 		Symbol:                req.Symbol,
 		TokenName:             req.TokenName,
+		Salt:                  &salt,
 		Address:               tokenAddr.Hex(),
 		NbDecimal:             int64(req.NbDecimal),
 		OnbehalfTransactions:  &onbehalfTransactions,
 		CreatedAt:             time.Now(),
-		ModularComplianceAddr: swag.String(mcAddr.Hex()),
+		ModularComplianceAddr: lo.ToPtr(mcAddr.Hex()),
 	}
 
 	return
+}
+
+func (s *Service) GetTokenBySalt(ctx context.Context, salt string, emptyResultAllowed bool) (token *server.TokenInfos, err error) {
+	return database.GetTokenBySalt(ctx, salt, emptyResultAllowed)
 }
 
 // resolveSharedIRS returns the shared IdentityRegistryStorage address persisted as a

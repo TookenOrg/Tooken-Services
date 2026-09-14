@@ -31,4 +31,9 @@ type TokenDeployer interface {
 		req server.CreateTokenRequest,
 		salt string,
 	) (int, server.TokenInfos, error)
+	GetTokenBySalt(
+		ctx context.Context,
+		salt string,
+		emptyResultAllowed bool,
+	) (*server.TokenInfos, error)
 }

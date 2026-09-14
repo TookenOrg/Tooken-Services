@@ -17,8 +17,10 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -27,6 +29,7 @@ import (
 	"testing"
 
 	"github.com/TookenOrg/tooken-services/internal/api/server"
+	assetsService "github.com/TookenOrg/tooken-services/internal/assets_managements/services"
 	authUtils "github.com/TookenOrg/tooken-services/internal/auth/utils"
 	"github.com/TookenOrg/tooken-services/internal/globals"
 	"github.com/TookenOrg/tooken-services/internal/middleware"
@@ -34,6 +37,88 @@ import (
 	"github.com/gin-gonic/gin"
 	_ "github.com/lib/pq"
 )
+
+// fakeTokenDeployer stands in for the blockchain module, so the publication
+// path can be exercised without a chain, a private key or a deployed factory.
+// Without it the suite stops at "contract 'TREX_FACTORY' not found", and three
+// cases fail for a reason that has nothing to do with what they assert.
+//
+// It writes a real row rather than returning a number it made up:
+// real_estate_token_id_fkey points at blk.token(id), so an invented identifier
+// is refused by the database — and a fake that cannot be bound would prove
+// nothing about a path whose whole job is binding.
+//
+// The name and symbol come from the request untouched. defineTokenName builds
+// them from the asset identifier, so they are unique across runs on their own,
+// and token_name_unique (000019) stays satisfied without help.
+type fakeTokenDeployer struct {
+	db *sql.DB
+
+	calls   int
+	gotReq  server.CreateTokenRequest
+	gotSalt string
+	err     error
+}
+
+var _ assetsService.TokenDeployer = (*fakeTokenDeployer)(nil)
+
+func (f *fakeTokenDeployer) CreateTokenWithSalt(_ context.Context, req server.CreateTokenRequest, salt string) (int, server.TokenInfos, error) {
+	f.calls++
+	f.gotReq = req
+	f.gotSalt = salt
+
+	if f.err != nil {
+		return 0, server.TokenInfos{}, f.err
+	}
+
+	// token_addr_check demands ^0x[a-fA-F0-9]{40}$, and the address has to
+	// differ from one deployment to the next as it would on a chain.
+	//
+	// The salt is written because production writes it: InsertToken persists it,
+	// and it is what a replay resolves on. A fake that skipped it would make
+	// GetTokenBySalt below answer "nothing" forever, and the recovery path would
+	// never be exercised by this suite.
+	var (
+		id   int
+		addr string
+	)
+	if err := f.db.QueryRow(`
+	    INSERT INTO blk.token (address, token_name, symbol, nb_decimal, salt)
+	    VALUES ('0x' || lpad(md5(random()::text), 40, '0'), $1, $2, $3, $4)
+	    RETURNING id, address`,
+		req.TokenName, req.Symbol, req.NbDecimal, salt).Scan(&id, &addr); err != nil {
+		return 0, server.TokenInfos{}, err
+	}
+
+	return id, server.TokenInfos{
+		Id:        id,
+		Address:   addr,
+		TokenName: req.TokenName,
+		Symbol:    req.Symbol,
+		Salt:      &salt,
+		NbDecimal: int64(req.NbDecimal),
+	}, nil
+}
+
+// GetTokenBySalt runs the real query rather than returning a canned answer: this
+// fake stands in for the chain, not for the database, and everything it writes is
+// a real row. A missing salt is a normal outcome — a first publication — so it is
+// reported as "no token", not as an error.
+func (f *fakeTokenDeployer) GetTokenBySalt(_ context.Context, salt string, _ bool) (*server.TokenInfos, error) {
+	var (
+		id   int
+		addr string
+	)
+	err := f.db.QueryRow(`SELECT id, address FROM blk.token WHERE salt = $1`, salt).Scan(&id, &addr)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	return &server.TokenInfos{Id: id, Address: addr, Salt: &salt}, nil
+}
 
 func TestRealEstateWriteEndpoints(t *testing.T) {
 	dsn := os.Getenv("TEST_DATABASE_URL")
@@ -53,7 +138,18 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 	r := gin.New()
 	g := r.Group(globals.BaseURL)
 	g.Use(middleware.AutoAuthMiddleware())
-	server.RegisterHandlers(g, NewHandler())
+	// Everything is wired exactly as production wires it, then the one
+	// dependency that reaches a chain is swapped out. Building the whole
+	// Handler by hand would freeze today's field list into the test; taking the
+	// real one and replacing a single field keeps it honest the day another
+	// service is added.
+	//
+	// The test lives in package handlers, so no seam has to be opened in the
+	// production code to do this.
+	deployer := &fakeTokenDeployer{db: db}
+	h := NewHandler().(*Handler)
+	h.realEstateSvc = assetsService.NewService(deployer)
+	server.RegisterHandlers(g, h)
 
 	// The referential is empty in a freshly migrated database, and every write
 	// below points at type 1. Seeding it here keeps the suite runnable from the
@@ -68,6 +164,26 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 	    ON CONFLICT (id) DO NOTHING`); err != nil {
 		t.Fatal(err)
 	}
+	// iss.issuance_order_statuses is filled by nothing: 000010 already calls it
+	// "the existing reference table", so it predates the migration history. A
+	// database built from the migrations alone holds the table and none of its
+	// rows, and the first order written below fails on fk_issuance_orders_status.
+	//
+	// The codes and the counts_as_reserved flag are the ones 000010 documents:
+	// only CANCELLED and EXPIRED release the shares they hold. DO NOTHING so a
+	// baseline carrying the real production labels keeps them.
+	if _, err := db.Exec(`
+	    INSERT INTO iss.issuance_order_statuses (id, code, label, is_final, counts_as_reserved) VALUES
+	        (1, 'CREATED',           'Créée',               FALSE, TRUE),
+	        (2, 'RESERVED',          'Réservée',            FALSE, TRUE),
+	        (3, 'PAYMENT_PENDING',   'Paiement en attente', FALSE, TRUE),
+	        (4, 'PAYMENT_CONFIRMED', 'Paiement confirmé',   FALSE, TRUE),
+	        (5, 'COMPLETED',         'Complétée',           TRUE,  TRUE),
+	        (6, 'CANCELLED',         'Annulée',             TRUE,  FALSE),
+	        (7, 'EXPIRED',           'Expirée',             TRUE,  FALSE)
+	    ON CONFLICT (id) DO NOTHING`); err != nil {
+		t.Fatal(err)
+	}
 	// issuer_id is NOT NULL since migration 000016, and every asset written
 	// below names vehicle 1. Seeded here for the same reason as the two
 	// referentials above: the suite must run from the migrations alone.
@@ -75,6 +191,30 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 	    INSERT INTO ass.issuer (id, name, legal_form, country_code, status_id)
 	    VALUES (1, 'Tooken Securitisation SA', 'SA', 'LU', 1)
 	    ON CONFLICT (id) DO NOTHING`); err != nil {
+		t.Fatal(err)
+	}
+
+	// The two tokens below name users 1 and 2, and iss.issuance_orders carries a
+	// foreign key to usr.users. A token that names a user the database does not
+	// hold works until the first write that joins on him, and then fails naming
+	// a column rather than the missing row, so the users come first.
+	//
+	// DO NOTHING rather than DO UPDATE: the signup cases in this same package
+	// create their own users, and repairing rows they own would make one suite
+	// depend on the order the other ran in.
+	if _, err := db.Exec(`
+	    INSERT INTO usr.users (id, full_name, email, password, role) VALUES
+	        (1, 'Test Manager', 'm@t.lu', 'x', 'MANAGER'),
+	        (2, 'Test User',    'u@t.lu', 'x', 'USER')
+	    ON CONFLICT (id) DO NOTHING`); err != nil {
+		t.Fatal(err)
+	}
+	// Identifiers written by hand leave the sequence behind them, and the next
+	// signup would then ask for one that is already taken. Signup runs in this
+	// same package, so the sequence is pushed past whatever the table holds.
+	if _, err := db.Exec(`
+	    SELECT setval(pg_get_serial_sequence('usr.users', 'id'),
+	                  GREATEST((SELECT max(id) FROM usr.users), 1))`); err != nil {
 		t.Fatal(err)
 	}
 
@@ -144,8 +284,8 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 		var re map[string]any
 		json.Unmarshal([]byte(body), &re)
 		id = int(re["id"].(float64))
-		if re["active"] != true || re["status"] != "published" {
-			t.Errorf("asset not born visible: %v %v", re["active"], re["status"])
+		if re["active"] != false || re["status"] != "draft" {
+			t.Errorf("asset born visible: %v %v", re["active"], re["status"])
 		}
 		cfg := re["configuration"].(map[string]any)
 		if cfg["total_valuation"] != "299985" || cfg["price_per_share"] != "199.99" || cfg["currency_code"] != "EUR" {
@@ -153,6 +293,57 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 		}
 		if re["address"] == nil {
 			t.Errorf("manager should see the address")
+		}
+	})
+
+	// The asset was born a draft, which is the rule since the publication point.
+	// Everything below that reads it as an investor would — the public detail,
+	// the guards that only apply to a live offer — needs it published first, and
+	// publishing is what binds it to a token.
+	t.Run("manager publishes, and that is what mints the token", func(t *testing.T) {
+		before := deployer.calls
+
+		code, body := do("POST", "/assets/real-estates/"+itoa(id)+"/publish", mgr, "")
+		t.Logf("%d %s", code, body)
+		if code != http.StatusOK {
+			t.Fatalf("publish: want 200 got %d: %s", code, body)
+		}
+
+		var re map[string]any
+		json.Unmarshal([]byte(body), &re)
+		if re["active"] != true || re["status"] != "published" {
+			t.Errorf("publish left the asset invisible: %v %v", re["active"], re["status"])
+		}
+
+		// Publication must reach the chain exactly once, and with the identity
+		// the code derives from the asset — that naming is what makes a
+		// redeployment idempotent and what token_name_unique protects.
+		if got := deployer.calls - before; got != 1 {
+			t.Fatalf("deployer called %d time(s); want exactly 1", got)
+		}
+		if want := "Tooken Villa Belair #" + itoa(id); deployer.gotReq.TokenName != want {
+			t.Errorf("token name = %q; want %q", deployer.gotReq.TokenName, want)
+		}
+		if want := "TKN" + itoa(id); deployer.gotReq.Symbol != want {
+			t.Errorf("symbol = %q; want %q", deployer.gotReq.Symbol, want)
+		}
+		if want := "re-" + itoa(id); deployer.gotSalt != want {
+			t.Errorf("salt = %q; want %q", deployer.gotSalt, want)
+		}
+
+		// The asset carries the token the deployer wrote, and the trigger on
+		// token_id has derived the address the public will be shown.
+		var tokenID sql.NullInt64
+		var contractAddr sql.NullString
+		if err := db.QueryRow(`SELECT token_id, contract_address FROM ass.real_estate WHERE id = $1`, id).
+			Scan(&tokenID, &contractAddr); err != nil {
+			t.Fatalf("reading the published asset: %v", err)
+		}
+		if !tokenID.Valid {
+			t.Errorf("a published asset carries no token")
+		}
+		if !contractAddr.Valid {
+			t.Errorf("a published asset carries no contract address")
 		}
 	})
 
@@ -204,8 +395,13 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 
 	// The whole point of a PATCH: an editor that shows one section must not
 	// erase the sections it never displayed.
+	//
+	// The field being changed is imageurl rather than the title: the asset was
+	// tokenised by the publication above, and a deployed token freezes the title
+	// it was named after. What is under test here is the merge, and any editable
+	// field proves it just as well.
 	t.Run("patch keeps what it does not mention", func(t *testing.T) {
-		p := `{"title":"Villa Belair v2","configuration":{"price_per_share":"250"}}`
+		p := `{"imageurl":"https://x/cover-v2.jpg","configuration":{"price_per_share":"250"}}`
 		code, body := do("PATCH", "/assets/real-estates/"+itoa(id), mgr, p)
 		t.Logf("%d %s", code, body)
 		if code != 200 {
@@ -215,8 +411,11 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 		var re map[string]any
 		json.Unmarshal([]byte(body), &re)
 
-		if re["title"] != "Villa Belair v2" {
-			t.Errorf("title not applied: %v", re["title"])
+		if re["imageurl"] != "https://x/cover-v2.jpg" {
+			t.Errorf("imageurl not applied: %v", re["imageurl"])
+		}
+		if re["title"] != "Villa Belair" {
+			t.Errorf("title changed by a patch that never mentioned it: %v", re["title"])
 		}
 
 		cfg := re["configuration"].(map[string]any)
@@ -285,7 +484,7 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 		if spec != nil && spec["energy_class"] != nil {
 			t.Errorf("energy class not cleared: %v", spec["energy_class"])
 		}
-		if re["title"] != "Villa Belair v2" {
+		if re["title"] != "Villa Belair" {
 			t.Errorf("title lost: %v", re["title"])
 		}
 	})
@@ -334,21 +533,35 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 		}
 	})
 
+	// The asset built above is published and bound to a token now, and a
+	// tokenized asset cannot be deleted — that refusal is exercised on its own
+	// fixture in "guards on a tokenized asset". What this case is about is the
+	// ordinary lifecycle of an asset nothing depends on yet, so it works on a
+	// draft of its own.
+	var deletedID int
 	t.Run("delete then 404", func(t *testing.T) {
-		code, body := do("DELETE", "/assets/real-estates/"+itoa(id), mgr, "")
+		code, body := do("POST", "/assets/real-estates", mgr, payload)
+		if code != http.StatusCreated {
+			t.Fatalf("creating the asset to delete: want 201 got %d: %s", code, body)
+		}
+		var created map[string]any
+		json.Unmarshal([]byte(body), &created)
+		deletedID = int(created["id"].(float64))
+
+		code, body = do("DELETE", "/assets/real-estates/"+itoa(deletedID), mgr, "")
 		t.Logf("delete %d %s", code, body)
 		if code != http.StatusNoContent {
 			t.Fatalf("want 204 got %d", code)
 		}
-		code, _ = do("GET", "/assets/real-estates/"+itoa(id), mgr, "")
+		code, _ = do("GET", "/assets/real-estates/"+itoa(deletedID), mgr, "")
 		if code != http.StatusNotFound {
 			t.Errorf("deleted asset still readable by a manager: %d", code)
 		}
-		code, _ = do("DELETE", "/assets/real-estates/"+itoa(id), mgr, "")
+		code, _ = do("DELETE", "/assets/real-estates/"+itoa(deletedID), mgr, "")
 		if code != http.StatusNotFound {
 			t.Errorf("second delete: want 404 got %d", code)
 		}
-		code, _ = do("PATCH", "/assets/real-estates/"+itoa(id), mgr, payload)
+		code, _ = do("PATCH", "/assets/real-estates/"+itoa(deletedID), mgr, payload)
 		if code != http.StatusNotFound {
 			t.Errorf("patch of a deleted asset: want 404 got %d", code)
 		}
@@ -373,10 +586,25 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 	}
 
 	t.Run("guards on a tokenized asset", func(t *testing.T) {
+		// The asset comes first, then the token, then the binding — the order the
+		// publication path follows. It stays a draft until the token is bound,
+		// because 000021 refuses a published asset with nothing behind it; the
+		// binding and the publication therefore land in the same statement.
+		//
+		// defineTokenName builds "Tooken <title> #<id>" and defineSymbol builds
+		// "TKN<id>", both keyed on the asset identifier, so a fixture shaped the
+		// same way is unique for free and looks like what production writes.
+		//
+		// That matters here: token_name is the idempotency key of CreateToken,
+		// and blk.token carries token_name_unique to back it. A fixture with a
+		// fixed name collided on the second run against a constraint no migration
+		// creates.
+		assetID := mustScanID(t, `INSERT INTO ass.real_estate (title, estate_type, issuer_id, status_id)
+		    VALUES ('Tokenized guard', 1, 1, 1) RETURNING id`)
 		tokenID := mustScanID(t, `INSERT INTO blk.token (address, token_name, symbol, nb_decimal)
-		    VALUES ('0x' || lpad(md5(random()::text), 40, '0'),'G','G',0) RETURNING id`)
-		assetID := mustScanID(t, `INSERT INTO ass.real_estate (title, estate_type, issuer_id, status_id, token_id)
-		    VALUES ('Tokenized guard', 1, 1, 3, $1) RETURNING id`, tokenID)
+		    VALUES ('0x' || lpad(md5(random()::text), 40, '0'),
+		            'Tooken Tokenized guard #' || $1, 'TKN' || $1, 0) RETURNING id`, assetID)
+		mustExec(t, `UPDATE ass.real_estate SET token_id = $1, status_id = 3 WHERE id = $2`, tokenID, assetID)
 		mustExec(t, `INSERT INTO ass.real_estate_shares_config (real_estate_id, total_shares, price_per_share) VALUES ($1, 1000, 10)`, assetID)
 
 		p := `{"configuration":{"total_shares":"500"}}`
@@ -391,19 +619,44 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 		if code != http.StatusConflict {
 			t.Errorf("want 409 got %d", code)
 		}
+
+		// The title is what defineTokenName wrote into the deployed contract, so
+		// renaming the asset would make the site and the chain disagree about the
+		// same security.
+		code, body = do("PATCH", "/assets/real-estates/"+itoa(assetID), mgr, `{"title":"Renamed after deployment"}`)
+		t.Logf("rename tokenized -> %d %s", code, body)
+		if code != http.StatusConflict {
+			t.Errorf("renaming a tokenized asset: want 409 got %d: %s", code, body)
+		}
+
+		// Re-sending the stored title changes nothing, and a guard that reads the
+		// presence of the field rather than the result would refuse it — which is
+		// what a client sending the whole asset back would hit.
+		code, body = do("PATCH", "/assets/real-estates/"+itoa(assetID), mgr, `{"title":"  Tokenized guard  "}`)
+		t.Logf("same title on tokenized -> %d %s", code, body)
+		if code != http.StatusOK {
+			t.Errorf("re-sending the stored title: want 200 got %d: %s", code, body)
+		}
 	})
 
 	// A share already reserved by an order is a commitment: the asset can grow,
 	// but it cannot shrink under what investors were promised.
 	t.Run("total shares cannot fall under the reserved ones", func(t *testing.T) {
+		// A draft, and it has to stay one. The rule under test is the reserved
+		// branch of checkSharesConfigChange, which only runs when the asset is
+		// not tokenized: a token would refuse every change to total_shares,
+		// including the growth this test requires to be allowed. And since
+		// 000021, a published asset cannot be left without one.
 		assetID := mustScanID(t, `INSERT INTO ass.real_estate (title, description, imageurl, estate_type, issuer_id, status_id)
-		    VALUES ('Reserved guard', 'A guard', 'https://x/g.jpg', 1, 1, 3) RETURNING id`)
+		    VALUES ('Reserved guard', 'A guard', 'https://x/g.jpg', 1, 1, 1) RETURNING id`)
 		mustExec(t, `INSERT INTO ass.real_estate_shares_config (real_estate_id, total_shares, price_per_share, yield) VALUES ($1, 1000, 10, 4)`, assetID)
 		// status 2 = RESERVED, which carries counts_as_reserved. The reference is
 		// derived from the asset so the suite can run twice on the same database:
-		// order_ref is unique.
-		mustExec(t, `INSERT INTO iss.issuance_orders (asset_id, quantity, status_id, order_ref)
-		    VALUES ($1, 400, 2, $2)`, assetID, "ORD-RESERVED-"+itoa(assetID))
+		// order_reference is unique. user_id names the investor seeded at the top
+		// of the suite: the column is NOT NULL and points at usr.users, so an
+		// order without a buyer cannot be written.
+		mustExec(t, `INSERT INTO iss.issuance_orders (user_id, asset_id, quantity, status_id, order_reference)
+		    VALUES (2, $1, 400, 2, $2)`, assetID, "ORD-RESERVED-"+itoa(assetID))
 
 		base := `{"configuration":{"total_shares":"%s"}}`
 
@@ -424,7 +677,7 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 	// a 500, before migration 000012 aligned it with the contract.
 	t.Run("the shape the contract promises is the shape the table has", func(t *testing.T) {
 		t.Run("an asset without description or image is created", func(t *testing.T) {
-			p := `{"title":"Bare asset","estate_type_id":1,"address":{"street":"a","postal_code":"b","city":"c","country_code":"LU"}}`
+			p := `{"title":"Bare asset","estate_type_id":1, "issuer_id":1,"address":{"street":"a","postal_code":"b","city":"c","country_code":"LU"}}`
 			code, body := do("POST", "/assets/real-estates", mgr, p)
 			if code != http.StatusCreated {
 				t.Errorf("want 201 got %d: %s", code, body)
@@ -432,7 +685,7 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 		})
 
 		t.Run("a title of 200 characters is accepted", func(t *testing.T) {
-			p := `{"title":"` + strings.Repeat("A", 200) + `","estate_type_id":1,"address":{"street":"a","postal_code":"b","city":"c","country_code":"LU"}}`
+			p := `{"title":"` + strings.Repeat("A", 200) + `","estate_type_id":1, "issuer_id":1,"address":{"street":"a","postal_code":"b","city":"c","country_code":"LU"}}`
 			code, body := do("POST", "/assets/real-estates", mgr, p)
 			if code != http.StatusCreated {
 				t.Errorf("want 201 got %d: %s", code, body)
@@ -480,12 +733,14 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 	t.Run("a sequence left behind by explicit ids", func(t *testing.T) {
 		// Exactly the state a seeded table is in: rows carry ids 1..N while the
 		// sequence never moved, so the next generated id is one that exists.
+		// A draft, because what matters is the id, not the status — and a
+		// published row would need a token since 000021.
 		mustExec(t, `INSERT INTO ass.real_estate (id, title, estate_type, issuer_id, status_id)
-		    VALUES (1, 'Seeded with its id', 1, 1, 3)
+		    VALUES (1, 'Seeded with its id', 1, 1, 1)
 		    ON CONFLICT (id) DO NOTHING`)
 		mustExec(t, `SELECT setval(pg_get_serial_sequence('ass.real_estate', 'id'), 1, false)`)
 
-		payload := `{"title":"After the gap","estate_type_id":1,"address":{"street":"a","postal_code":"b","city":"c","country_code":"LU"}}`
+		payload := `{"title":"After the gap","estate_type_id":1, "issuer_id":1, "address":{"street":"a","postal_code":"b","city":"c","country_code":"LU"}}`
 
 		// The caller sent no id, so this must not come back as a 409 telling him
 		// a value of his is already taken.
@@ -540,7 +795,7 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 		var listed []map[string]any
 		json.Unmarshal([]byte(listMgr), &listed)
 		for _, e := range listed {
-			if n, ok := e["id"].(float64); ok && int(n) == id {
+			if n, ok := e["id"].(float64); ok && int(n) == deletedID {
 				t.Errorf("deleted asset still listed: %v", e)
 			}
 		}
@@ -605,7 +860,31 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 			}
 		})
 
+		// The counterpart of the freeze a token puts on the title: nothing is
+		// engraved yet, so a stub can be renamed as many times as its author
+		// wants. Without this, a guard that forgot to look at the token would
+		// lock the most ordinary edit there is.
+		t.Run("a draft can still be renamed", func(t *testing.T) {
+			code, body := do("PATCH", "/assets/real-estates/"+itoa(draftID), mgr, `{"title":"Half filled v2"}`)
+			if code != http.StatusOK {
+				t.Fatalf("renaming a draft: want 200 got %d: %s", code, body)
+			}
+
+			var re map[string]any
+			json.Unmarshal([]byte(body), &re)
+			if re["title"] != "Half filled v2" {
+				t.Errorf("rename not applied: %v", re["title"])
+			}
+
+			// Put the stub back under the name the rest of the block expects.
+			if code, body := do("PATCH", "/assets/real-estates/"+itoa(draftID), mgr, `{"title":"Half filled"}`); code != http.StatusOK {
+				t.Fatalf("restoring the title: want 200 got %d: %s", code, body)
+			}
+		})
+
 		t.Run("publishing names everything that is missing", func(t *testing.T) {
+			before := deployer.calls
+
 			code, body := do("POST", "/assets/real-estates/"+itoa(draftID)+"/publish", mgr, "")
 			if code != http.StatusConflict {
 				t.Fatalf("want 409 got %d: %s", code, body)
@@ -622,6 +901,14 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 				if !strings.Contains(body, field) {
 					t.Errorf("%s is required but not named: %s", field, body)
 				}
+			}
+
+			// The requirements are checked before anything is deployed. A
+			// refusal that had already reached the chain would leave a token
+			// behind that no asset points at, and would have cost gas to
+			// produce nothing.
+			if got := deployer.calls - before; got != 0 {
+				t.Errorf("a refused publication deployed %d token(s)", got)
 			}
 		})
 
@@ -673,6 +960,7 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 
 			// Two managers clicking the same button must not produce a failure,
 			// and the date of the first publication is the one that counts.
+			beforeRepublish := deployer.calls
 			code, body = do("POST", "/assets/real-estates/"+itoa(draftID)+"/publish", mgr, "")
 			if code != http.StatusOK {
 				t.Fatalf("republish: want 200 got %d: %s", code, body)
@@ -682,20 +970,34 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 			if again["published_at"] != published["published_at"] {
 				t.Errorf("publication date moved: %v then %v", published["published_at"], again["published_at"])
 			}
+			// And it must not deploy a second token: the asset already has one,
+			// so the chain is not touched again. Two tokens for one asset would
+			// split the holders of the same building across two registries.
+			if got := deployer.calls - beforeRepublish; got != 0 {
+				t.Errorf("republishing deployed %d extra token(s)", got)
+			}
 		})
 
-		// The correction that matters most: an asset published before these
-		// requirements existed must stay editable, otherwise every patch would
-		// be refused, including the one completing it.
-		t.Run("an asset published incomplete can still be patched", func(t *testing.T) {
-			legacyID := mustScanID(t, `
+		// This used to guard the opposite case: an asset published before these
+		// requirements existed had to stay editable, or no patch could ever
+		// complete it. 000021 removed that state instead — active now implies a
+		// token — so the situation it protected can no longer arise, and the
+		// rule that replaced it is what deserves a guard.
+		//
+		// It is checked through a direct UPDATE on purpose: the invariant lives
+		// in the schema, not in a service, so it must hold even for a writer
+		// that never goes through the API.
+		t.Run("a published asset cannot exist without a token", func(t *testing.T) {
+			draftID := mustScanID(t, `
 			    INSERT INTO ass.real_estate (title, estate_type, issuer_id, status_id)
-			    VALUES ('Legacy listing', 1, 1, 3) RETURNING id`)
+			    VALUES ('Nothing behind it', 1, 1, 1) RETURNING id`)
 
-			code, body := do("PATCH", "/assets/real-estates/"+itoa(legacyID), mgr,
-				`{"title":"Legacy listing renamed"}`)
-			if code != http.StatusOK {
-				t.Fatalf("want 200 got %d: %s", code, body)
+			_, err := db.Exec(`UPDATE ass.real_estate SET status_id = 3 WHERE id = $1`, draftID)
+			if err == nil {
+				t.Fatal("an asset went on sale with no token behind it: real_estate_active_requires_token_ck is not doing its job")
+			}
+			if !strings.Contains(err.Error(), "real_estate_active_requires_token_ck") {
+				t.Fatalf("want the invariant to reject the publication, got: %v", err)
 			}
 		})
 

@@ -194,6 +194,10 @@ func (s *Service) PatchRealEstate(ctx context.Context, id int, patch server.Real
 		return server.RealEstate{}, err
 	}
 
+	if err := checkTitleChange(state, was, in); err != nil {
+		return server.RealEstate{}, err
+	}
+
 	if err := checkIssuerAttachment(ctx, state.StatusId, was, in); err != nil {
 		return server.RealEstate{}, err
 	}
@@ -557,6 +561,27 @@ func translateWriteError(err error) error {
 	}
 
 	return err
+}
+
+// checkTitleChange refuses to rename an asset whose token is deployed.
+//
+// defineTokenName builds the on-chain name from the title, and that name is
+// written into a contract investors hold. A rename afterwards would leave the
+// site and the chain telling two different stories about the same security, and
+// the chain is the one that counts. Propagating it instead would mean sending a
+// transaction from an update path — latency, partial failures, and the mirror
+// desynchronisation — for a cosmetic gain.
+//
+// The comparison is on the merged result, not on the presence of the field in
+// the patch: a client that sends the whole asset back with an unchanged title
+// changes nothing and must not be refused. Both sides come from toWriteDTO, so
+// the values compared are already trimmed.
+func checkTitleChange(state database.RealEstateGuardStateDTO, was, in database.RealEstateWriteDTO) error {
+	if state.TokenId == nil || in.Title == was.Title {
+		return nil
+	}
+
+	return conflict("the title is fixed by the deployed token and cannot be changed")
 }
 
 // checkSharesConfigChange refuses the changes that would rewrite what an

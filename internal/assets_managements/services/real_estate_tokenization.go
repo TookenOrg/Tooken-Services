@@ -70,13 +70,22 @@ func (s *Service) tokenForPublication(ctx context.Context, realEstateID int, rea
 		return *existingTokenID, nil
 	}
 
+	salt := defineSalt(realEstateID)
+	token, err := s.deployer.GetTokenBySalt(ctx, salt, true)
+	if err != nil {
+		return 0, err
+	}
+	if token != nil {
+		return token.Id, nil
+	}
+
 	req := server.CreateTokenRequest{
 		TokenName: defineTokenName(realEstateName, realEstateID),
 		Symbol:    defineSymbol(realEstateID),
 		NbDecimal: tokenDecimals,
 	}
 
-	tokenID, _, err := s.deployer.CreateTokenWithSalt(ctx, req, defineSalt(realEstateID))
+	tokenID, _, err := s.deployer.CreateTokenWithSalt(ctx, req, salt)
 	if err != nil {
 		return 0, err
 	}
