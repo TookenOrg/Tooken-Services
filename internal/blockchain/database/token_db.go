@@ -11,9 +11,9 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 )
 
-func GetTokenByName(ctx context.Context, tokenName string, empryResultAllowed bool) (token *server.TokenInfos, err error) {
+func GetTokenByName(ctx context.Context, tokenName string, emptyResultAllowed bool) (token *server.TokenInfos, err error) {
 	query := `
-        SELECT id, symbol, token_name,  address, nb_decimal, modular_compliance_addr, created_at
+        SELECT id, symbol, token_name, salt, address, nb_decimal, modular_compliance_addr, created_at
 		FROM blk.token
         WHERE token_name = $1
     `
@@ -24,13 +24,14 @@ func GetTokenByName(ctx context.Context, tokenName string, empryResultAllowed bo
 		&tokenRow.Id,
 		&tokenRow.Symbol,
 		&tokenRow.TokenName,
+		&tokenRow.Salt,
 		&tokenRow.Address,
 		&tokenRow.NbDecimal,
 		&tokenRow.ModularComplianceAddr,
 		&tokenRow.CreatedAt,
 	)
 	if err != nil {
-		if empryResultAllowed && err == sql.ErrNoRows {
+		if emptyResultAllowed && err == sql.ErrNoRows {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to select token for tokenName %s: %w", tokenName, err)
@@ -42,13 +43,45 @@ func GetTokenByName(ctx context.Context, tokenName string, empryResultAllowed bo
 	return
 }
 
+func GetTokenBySalt(ctx context.Context, salt string, emptyResultAllowed bool) (token *server.TokenInfos, err error) {
+	query := `
+        SELECT id, symbol, token_name, salt, address, nb_decimal, modular_compliance_addr, created_at
+		FROM blk.token
+        WHERE salt = $1
+    `
+
+	tokenRow := &server.TokenInfos{}
+
+	err = globals.DB.QueryRow(query, salt).Scan(
+		&tokenRow.Id,
+		&tokenRow.Symbol,
+		&tokenRow.TokenName,
+		&tokenRow.Salt,
+		&tokenRow.Address,
+		&tokenRow.NbDecimal,
+		&tokenRow.ModularComplianceAddr,
+		&tokenRow.CreatedAt,
+	)
+	if err != nil {
+		if emptyResultAllowed && err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to select token for salt %s: %w", salt, err)
+	}
+
+	logger.LogDebug("Token found for salt %s: %s", salt, tokenRow.Address)
+
+	token = tokenRow
+	return
+}
+
 func GetTokenByAddress(ctx context.Context, address string) (token *server.TokenInfos, err error) {
 	if !common.IsHexAddress(address) {
 		return nil, fmt.Errorf("not a valid ethereum address: %s", address)
 	}
 
 	query := `
-        SELECT id, symbol, token_name,  address, nb_decimal, modular_compliance_addr, created_at
+        SELECT id, symbol, token_name, salt, address, nb_decimal, modular_compliance_addr, created_at
 		FROM blk.token
         WHERE address = $1
     `
@@ -59,6 +92,7 @@ func GetTokenByAddress(ctx context.Context, address string) (token *server.Token
 		&tokenRow.Id,
 		&tokenRow.Symbol,
 		&tokenRow.TokenName,
+		&tokenRow.Salt,
 		&tokenRow.Address,
 		&tokenRow.NbDecimal,
 		&tokenRow.ModularComplianceAddr,
@@ -77,11 +111,11 @@ func GetTokenByAddress(ctx context.Context, address string) (token *server.Token
 // InsertToken persists a newly created token. Columns are inferred from the SELECT
 // queries above (symbol, token_name, address, nb_decimal, modular_compliance_addr);
 // id and created_at are expected to default.
-func InsertToken(ctx context.Context, symbol, tokenName, address string, nbDecimal int, modularComplianceAddr string) (id int, err error) {
+func InsertToken(ctx context.Context, symbol, tokenName, salt, address string, nbDecimal int, modularComplianceAddr string) (id int, err error) {
 	query := `
         INSERT INTO blk.token
-            (symbol, token_name, address, nb_decimal, modular_compliance_addr)
-        VALUES ($1, $2, $3, $4, $5)
+            (symbol, token_name, salt, address, nb_decimal, modular_compliance_addr)
+        VALUES ($1, $2, $3, $4, $5, $6)
         RETURNING id
     `
 
@@ -89,7 +123,7 @@ func InsertToken(ctx context.Context, symbol, tokenName, address string, nbDecim
 	// value that is neither NULL nor a 0x-address — insert NULL instead of "".
 	mcAddr := sql.NullString{String: modularComplianceAddr, Valid: modularComplianceAddr != ""}
 
-	err = globals.DB.QueryRow(query, symbol, tokenName, address, nbDecimal, mcAddr).Scan(&id)
+	err = globals.DB.QueryRow(query, symbol, tokenName, salt, address, nbDecimal, mcAddr).Scan(&id)
 	if err != nil {
 		return 0, fmt.Errorf("failed to insert token %s: %w", tokenName, err)
 	}
