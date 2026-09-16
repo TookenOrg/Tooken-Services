@@ -31,7 +31,25 @@ import (
 //
 // The deployer is the platform manager: owner and agent of everything, and the
 // signer behind PRIVATE_KEY, exactly like the production `ethFrom`.
+const (
+	kycTopic    = int64(7)    // claim topic required to hold the token (KYC)
+	countryCode = uint16(250) // ISO-3166 numeric (France) for the investor
+)
+
+// keyHash returns the ERC-734 key id for an address: keccak256(abi.encode(addr)).
+func keyHash(addr common.Address) [32]byte {
+	return [32]byte(crypto.Keccak256Hash(common.LeftPadBytes(addr.Bytes(), 32)))
+}
+
+func failOnErr(t *testing.T, err error, what string) {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("%s: %v", what, err)
+	}
+}
+
 type trexFixture struct {
+	Ctx           context.Context
 	Client        *ethclient.Client
 	Auth          *bind.TransactOpts
 	Call          *bind.CallOpts
@@ -79,6 +97,7 @@ func newTREXFixture(ctx context.Context, t *testing.T) *trexFixture {
 	}
 
 	f := &trexFixture{
+		Ctx:      ctx,
 		Client:   client,
 		Auth:     auth,
 		Call:     &bind.CallOpts{Context: ctx},
@@ -179,30 +198,19 @@ type deployedSuite struct {
 
 // DeploySuite deploys one token suite through the factory. Pass the zero address as
 // irs to let the factory create a fresh storage; pass an existing one to share the
-// investor whitelist. Salts are unique per fixture: the factory reverts on reuse.
-func (f *trexFixture) DeploySuite(t *testing.T, name, symbol string, irs common.Address) *deployedSuite {
+// investor whitelist. A salt can only be spent once per factory.
+//
+// It goes through buildTokenDetails and defineClaimSuiteDetails — the very functions
+// CreateToken uses — so a change in the way production assembles a suite is reflected
+// here instead of quietly diverging from it.
+func (f *trexFixture) DeploySuite(t *testing.T, salt, name, symbol string, irs common.Address) *deployedSuite {
 	t.Helper()
 	f.suiteCounter++
-	salt := name
 
-	tx, err := f.Factory.DeployTREXSuite(f.Auth, salt,
-		contracts.ITREXFactoryTokenDetails{
-			Owner:              f.Deployer,
-			Name:               name,
-			Symbol:             symbol,
-			Decimals:           18,
-			Irs:                irs,
-			ONCHAINID:          common.Address{},
-			IrAgents:           []common.Address{f.Deployer},
-			TokenAgents:        []common.Address{f.Deployer},
-			ComplianceModules:  []common.Address{},
-			ComplianceSettings: [][]byte{},
-		},
-		contracts.ITREXFactoryClaimDetails{
-			ClaimTopics:  []*big.Int{big.NewInt(kycTopic)},
-			Issuers:      []common.Address{f.ClaimIssuer},
-			IssuerClaims: [][]*big.Int{{big.NewInt(kycTopic)}},
-		})
+	tokenDetails := buildTokenDetails(f.Deployer, name, symbol, 18, irs, []common.Address{})
+	claimDetails := defineClaimSuiteDetails(f.ClaimIssuer)
+
+	tx, err := f.Factory.DeployTREXSuite(f.Auth, salt, tokenDetails, claimDetails)
 	failOnErr(t, err, "DeployTREXSuite "+salt)
 	f.Mine(tx, "DeployTREXSuite "+salt)
 
@@ -222,7 +230,10 @@ func (f *trexFixture) DeploySuite(t *testing.T, name, symbol string, irs common.
 	irsInstance, err := contracts.NewIdentityRegistryStorage(irsAddr, f.Client)
 	failOnErr(t, err, "bind IRS "+salt)
 
-	// A token is paused on creation; nothing can be minted until it is unpaused.
+	// A token is paused on creation. Minting is NOT gated by the pause — verified by
+	// mutation: removing this call leaves every test green — but transfers are, so a
+	// paused token is not a realistic starting state. Unpausing here keeps the fixture
+	// honest for whatever a future test does, and changes no permissioning.
 	tx, err = token.Unpause(f.Auth)
 	failOnErr(t, err, "Unpause "+salt)
 	f.Mine(tx, "Unpause "+salt)

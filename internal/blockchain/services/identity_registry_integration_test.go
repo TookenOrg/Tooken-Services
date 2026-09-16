@@ -100,9 +100,9 @@ func TestRegisterIdentityIntegration(t *testing.T) {
 	t.Cleanup(func() { chainglobals.EthClient = previousClient })
 
 	// The suite the platform will be allowed to write into...
-	shared := fixture.DeploySuite(t, "RegisterIdentityShared", "TKRS", common.Address{})
+	shared := fixture.DeploySuite(t, "RegisterIdentityShared", "Tooken Shared", "TKRS", common.Address{})
 	// ...and one the platform is deliberately NOT an agent of, to prove the guard bites.
-	foreign := fixture.DeploySuite(t, "RegisterIdentityForeign", "TKRF", common.Address{})
+	foreign := fixture.DeploySuite(t, "RegisterIdentityForeign", "Tooken Foreign", "TKRF", common.Address{})
 
 	fixture.MakePlatformIRSAgent(t, shared)
 
@@ -239,7 +239,7 @@ func TestRegisterIdentityIntegration(t *testing.T) {
 	// ---- the promise of writing into the storage: the investor precedes the token
 
 	t.Run("a token created afterwards verifies the investor without re-registering", func(t *testing.T) {
-		later := fixture.DeploySuite(t, "RegisterIdentityLater", "TKRL", shared.IRSAddr)
+		later := fixture.DeploySuite(t, "RegisterIdentityLater", "Tooken Later", "TKRL", shared.IRSAddr)
 
 		verified, err := later.IR.IsVerified(fixture.Call, investor)
 		failOnErr(t, err, "IsVerified on the later token")
@@ -270,6 +270,6 @@ func TestRegisterIdentityIntegration(t *testing.T) {
 		}
 		// The assertion above states the rule; this one proves it bites. Without the
 		// hand-back, bindIdentityRegistry is onlyOwner and this call reverts.
-		fixture.DeploySuite(t, "RegisterIdentityAfterSetup", "TKRA", shared.IRSAddr)
+		fixture.DeploySuite(t, "RegisterIdentityAfterSetup", "Tooken After Setup", "TKRA", shared.IRSAddr)
 	})
 }
