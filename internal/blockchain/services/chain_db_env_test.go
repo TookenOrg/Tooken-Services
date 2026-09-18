@@ -209,6 +209,19 @@ func (e *chainDBEnv) SetImplementationRow(t *testing.T, name string, address com
 	}
 }
 
+// InsertTokenRow announces a deployed token in blk.token, which is how Mint and Burn
+// find its decimals before touching the chain.
+func (e *chainDBEnv) InsertTokenRow(t *testing.T, address common.Address, name, symbol string, decimals int) {
+	t.Helper()
+
+	if _, err := e.DB.Exec(`
+		INSERT INTO blk.token (symbol, token_name, salt, address, nb_decimal)
+		VALUES ($1, $2, $3, $4, $5)`,
+		symbol, name, "probe-"+symbol, address.Hex(), decimals); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // probeTxHash builds a recognisable and schema-valid transaction hash: the columns
 // CHECK for 0x followed by 64 hex characters, and several tables are UNIQUE on it, so
 // it has to look real and stay distinct per seed.
