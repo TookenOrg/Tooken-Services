@@ -272,8 +272,15 @@ of three lookups:
 | Table | Reader | Meaning |
 |---|---|---|
 | `blk.contract_implementation` | `GetImplementationContractByName` / `GetAllContractImplementations` | shared logic impls |
-| `blk.contract_role` | `GetContractRoleByName` | singletons by role (factory, claim issuer, module) |
-| `blk.contract_instance` | `GetContractInstanceByName` | concrete proxy instances |
+| `blk.contract_role` | `GetContractRoleByName` | singletons by role (factory, claim issuer, shared IRS, module) |
+| `blk.token` | `GetLatestTokenAddress` / `GetTokenBy…` | deployed tokens; the door to an `IdentityRegistry` |
+
+⚠️ **Per-instance addresses are not persisted.** An `IdentityRegistry` is read from
+its token on-chain (`token.identityRegistry()`), because `Token.setIdentityRegistry`
+makes it mutable: a stored copy would go stale in silence. The rule is *on-chain on
+the path that decides, in database for what is displayed*. `blk.contract_instance` was
+the fourth attempt at holding such an address off-chain and was removed with its
+reader (2026-09-18); see `PROGRESS.md` §27 and §32.
 
 `utils.FindContractByName` filters an in-memory `[]server.ContractDetails` slice.
 
@@ -337,16 +344,16 @@ module or extending it.
 - **Config tables only partially auto-populated.** Singleton roles (TREX factory,
   claim issuer, compliance module, shared IRS) are now persisted to
   `blk.contract_role` via `InsertContractRole` at their creation sites, and created
-  tokens to `blk.token` via `InsertToken`. However `blk.contract_implementation` and
-  `blk.contract_instance` inserts are still `TODO`/commented (e.g. the
-  `IDENTITY_REGISTRY` instance read by `CreateIdentity` is not written), so those rows
-  must still be seeded manually.
+  tokens to `blk.token` via `InsertToken`. `blk.contract_implementation` inserts are
+  still `TODO`/commented, so those rows must be seeded manually.
 - **`GetWalletByUserId` is mocked** (`wallet_db.go`) — returns `common.MaxAddress`,
   so `CreateIdentity`'s idempotency check never sees "no wallet".
-- **`SetGlobals`** (`services/globals.go`) is a stub and its call site in `main.go`
-  is commented out, so the mutable address cache in `globals` is never warmed.
-- Several handlers (`GetTrexSuiteInfos`, `GetTokenInfos`) and DB readers
-  (`GetTrexSuite`, `GetTREXFactoryAddress`) are stubs returning empty/`not implemented`.
+- ✅ **Removed on 2026-09-18** (`PROGRESS.md` §32.7): `SetGlobals` and its commented
+  call site in `main.go`, `globals.IdentityRegistry{,Address,Instance}`,
+  `GetContractInstanceByName`, `GetTrexSuite` and `GetTREXFactoryAddress`. All were
+  dead, and three of them were attempts at caching a registry address off-chain.
+- The handlers `GetTrexSuiteInfos` and `GetTokenInfos` are still stubs returning an
+  empty payload.
 - `contracts/bindings/*` are abigen-generated — regenerate from the Solidity
   sources, never hand-edit.
 

@@ -45,7 +45,7 @@ func DeployTransferRestrictModule(ctx context.Context, auth *bind.TransactOpts) 
 	}
 	logger.LogInfo("📬 Transfer Restriction Module deployed at address: %s", moduleAddr.Hex())
 
-	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "DEPLOY_TRANSFER_RESTRICT_MODULE", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "DEPLOY_TRANSFER_RESTRICT_MODULE", deployedTxDetails.ToAddressHex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
 	if err != nil {
 		return
 	}

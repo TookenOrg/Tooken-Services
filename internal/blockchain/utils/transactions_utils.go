@@ -10,6 +10,7 @@ import (
 	"github.com/TookenOrg/tooken-services/internal/blockchain/globals"
 	"github.com/TookenOrg/tooken-services/pkg/logger"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 )
@@ -48,9 +49,24 @@ func GenerateTransactOpts(ctx context.Context) (opts *bind.TransactOpts, err err
 }
 
 type txDetails struct {
-	Tx            *types.Transaction
-	BlockNumber   big.Int
-	ReceiptStatus uint64
+	Tx              *types.Transaction
+	BlockNumber     big.Int
+	ReceiptStatus   uint64
+	ContractAddress common.Address // set by the receipt when the transaction created a contract
+}
+
+// ToAddressHex is the address the transaction acted on: its recipient for a call, and
+// the address it created for a deployment.
+//
+// Transaction.To() is nil for a contract creation — that is how the protocol encodes
+// "no recipient" — so calling .Hex() on it panics on every deploy path. Persisting the
+// created address is also the more useful answer: an eth_transaction row pointing at
+// nothing says nothing.
+func (d txDetails) ToAddressHex() string {
+	if to := d.Tx.To(); to != nil {
+		return to.Hex()
+	}
+	return d.ContractAddress.Hex()
 }
 
 func WaitDeployedTransaction(ctx context.Context, tx *types.Transaction, shouldWaitContractReturn bool) (txDetails txDetails, err error) {
@@ -81,6 +97,7 @@ func WaitDeployedTransaction(ctx context.Context, tx *types.Transaction, shouldW
 	txDetails.Tx = tx
 	txDetails.BlockNumber = *receipt.BlockNumber
 	txDetails.ReceiptStatus = receipt.Status
+	txDetails.ContractAddress = receipt.ContractAddress
 
 	if !shouldWaitContractReturn {
 		return

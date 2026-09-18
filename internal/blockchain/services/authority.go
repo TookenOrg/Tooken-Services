@@ -51,7 +51,7 @@ func (s *Service) ConfigureAuthority(ctx context.Context) (server.TxHashName, er
 	logger.LogInfo("📬 Authority configured with TREX version %d.%d.%d successfully", version.Major, version.Minor, version.Patch)
 
 	// DBInsertEthTransaction
-	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "ADD_USE_TREX_VERSION", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "ADD_USE_TREX_VERSION", deployedTxDetails.ToAddressHex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
 	if err != nil {
 		return server.TxHashName{}, err
 	}

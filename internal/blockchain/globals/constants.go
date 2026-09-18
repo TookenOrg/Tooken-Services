@@ -1,7 +1,6 @@
 package globals
 
 import (
-	contracts "github.com/TookenOrg/tooken-services/internal/blockchain/contracts/bindings"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 )
@@ -23,7 +22,6 @@ const (
 
 const (
 	IdentityFactoryName = "IDENTITY_FACTORY"
-	IdentityRegistry    = "IDENTITY_REGISTRY"
 	ClaimIssuerName     = "CLAIM_ISSUER"
 	TrexFactoryName     = "TREX_FACTORY"
 	TrexSuiteName       = "TREX_SUITE"
@@ -40,5 +38,3 @@ const (
 
 var TrexFactoryAddress common.Address
 var ImplIdentityAuthorityAddress common.Address
-var IdentityRegistryAddress common.Address
-var IdentityRegistryInstance *contracts.IdentityRegistry

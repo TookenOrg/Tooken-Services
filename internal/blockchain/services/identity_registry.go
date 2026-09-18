@@ -15,17 +15,20 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 )
 
-// registerIdentity records the wallet -> ONCHAINID link in the shared
-// IdentityRegistryStorage: the single investor whitelist that every token reads
-// through its own IdentityRegistry.
+// registerIdentity records the wallet -> ONCHAINID link in the investor whitelist,
+// through the IdentityRegistry of a deployed token.
 //
-// It writes into the storage directly rather than calling
-// IdentityRegistry.registerIdentity, because an IdentityRegistry is a per-token facade
-// while a KYC is a platform-level fact. Going through one would make onboarding an
-// investor depend on a property being tokenised first, which the product does not
-// require. registerIdentity is itself a thin wrapper around addIdentityToStorage, so
-// both write the same data and isVerified reads it either way — only the emitted event
-// differs (IdentityStored instead of IdentityRegistered).
+// This is the path T-REX designed, and it needs no setup at all. When the factory
+// deploys a suite it calls IdentityRegistryStorage.bindIdentityRegistry, which makes
+// the new IdentityRegistry an agent of the storage; buildTokenDetails passes the
+// platform in IrAgents, which makes the platform an agent of that IdentityRegistry.
+// The authorisation chain therefore already exists end to end:
+//
+//	platform --agent of--> IdentityRegistry --agent of--> shared IdentityRegistryStorage
+//
+// Because every token created by the platform shares one storage, writing through any
+// IdentityRegistry bound to it registers the investor for *all* of them — which is
+// what lets a single KYC serve the whole platform.
 func registerIdentity(ctx context.Context, userWallet, identityAddress common.Address, countryCode int) (tx *types.Transaction, err error) {
 
 	// A country is stored on-chain as a uint16, and zero is a *valid* value there. A
@@ -35,7 +38,7 @@ func registerIdentity(ctx context.Context, userWallet, identityAddress common.Ad
 		return
 	}
 
-	irsInstance, err := resolveSharedIRSInstance(ctx)
+	irInstance, err := resolveIdentityRegistryInstance(ctx)
 	if err != nil {
 		return
 	}
@@ -45,8 +48,8 @@ func registerIdentity(ctx context.Context, userWallet, identityAddress common.Ad
 		return
 	}
 
-	logger.LogInfo("💌 Registration of new identity in the shared investor whitelist...")
-	tx, err = irsInstance.AddIdentityToStorage(auth, userWallet, identityAddress, uint16(countryCode))
+	logger.LogInfo("💌 Registration of new identity in the investor whitelist...")
+	tx, err = irInstance.RegisterIdentity(auth, userWallet, identityAddress, uint16(countryCode))
 	if err != nil {
 		return
 	}
@@ -57,7 +60,7 @@ func registerIdentity(ctx context.Context, userWallet, identityAddress common.Ad
 
 	logger.LogInfo("📬 Identity registred on transaction: %s", tx.Hash().Hex())
 
-	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "REGISTER_IDENTITY", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "REGISTER_IDENTITY", deployedTxDetails.ToAddressHex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
 	if err != nil {
 		return
 	}
@@ -65,39 +68,65 @@ func registerIdentity(ctx context.Context, userWallet, identityAddress common.Ad
 	return
 }
 
-// resolveSharedIRSInstance binds the shared IdentityRegistryStorage and checks the
-// platform is allowed to write into it.
+// resolveIdentityRegistryInstance picks an IdentityRegistry able to write into the
+// shared investor whitelist, and asks the whitelist itself which ones those are.
 //
-// The IRS address is a singleton persisted under SHARED_IRS in blk.contract_role —
-// unlike the per-token IdentityRegistry addresses, which are read from the chain.
-func resolveSharedIRSInstance(ctx context.Context) (irsInstance *contracts.IdentityRegistryStorage, err error) {
+// IdentityRegistryStorage.linkedIdentityRegistries() is the authoritative list: it is
+// filled by bindIdentityRegistry, the very call that also makes each registry an agent
+// of the storage. Reading it removes the need to guess — no token lookup, no heuristic
+// "most recent one", and no check that the registry writes into the right ledger,
+// since it was obtained *from* that ledger.
+//
+// Which registry is used does not matter: they all write the same row into the same
+// storage, so one KYC serves every token of the platform. What matters is that the
+// platform may write through it, and that is what the loop selects on.
+func resolveIdentityRegistryInstance(ctx context.Context) (irInstance *contracts.IdentityRegistry, err error) {
 
-	// resolveSharedIRS answers with the zero address when no IRS has been recorded yet.
-	// That is a legitimate answer when deploying the first token, never here: binding
-	// the zero address would let the registration fail far away from its cause.
-	irsAddress, err := resolveSharedIRS(ctx)
+	// resolveSharedIRS answers the zero address when nothing has been recorded yet.
+	// The shared storage is created with the first token suite, so this means the
+	// platform has no token at all.
+	sharedIRS, err := resolveSharedIRS(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if irsAddress == (common.Address{}) {
-		return nil, logger.LogError("no shared IdentityRegistryStorage recorded yet: deploy a token suite before registering investors")
+	if sharedIRS == (common.Address{}) {
+		return nil, logger.LogError("no shared IdentityRegistryStorage recorded under %s: deploy a token suite before registering investors", globals.SharedIdentityRegistryStorageName)
 	}
 
-	irsInstance, err = contracts.NewIdentityRegistryStorage(irsAddress, globals.EthClient)
+	irsInstance, err := contracts.NewIdentityRegistryStorage(sharedIRS, globals.EthClient)
 	if err != nil {
 		return nil, err
 	}
 
-	// addIdentityToStorage is agent-restricted. Asking first turns an opaque revert
-	// into a message that names the fix.
+	callOpts := &bind.CallOpts{Context: ctx}
+
+	linkedRegistries, err := irsInstance.LinkedIdentityRegistries(callOpts)
+	if err != nil {
+		return nil, logger.LogError("could not list the registries bound to the shared whitelist %s: %s", sharedIRS.Hex(), err.Error())
+	}
+	if len(linkedRegistries) == 0 {
+		return nil, logger.LogError("no IdentityRegistry is bound to the shared whitelist %s: deploy a token suite before registering investors", sharedIRS.Hex())
+	}
+
+	// registerIdentity is agent-restricted. buildTokenDetails puts the platform in
+	// IrAgents of every suite it creates, so a usable registry is the normal case —
+	// but a registry bound by someone else, or one the right was revoked on, must be
+	// skipped rather than reverted through.
 	platform := utils.GetEthFrom()
-	isAgent, err := irsInstance.IsAgent(&bind.CallOpts{Context: ctx}, platform)
-	if err != nil {
-		return nil, logger.LogError("could not check whether %s is an agent of the shared IRS %s: %s", platform.Hex(), irsAddress.Hex(), err.Error())
-	}
-	if !isAgent {
-		return nil, logger.LogError("%s is not an agent of the shared IRS %s: run the IRS agent setup first", platform.Hex(), irsAddress.Hex())
+	for _, irAddress := range linkedRegistries {
+		candidate, bindErr := contracts.NewIdentityRegistry(irAddress, globals.EthClient)
+		if bindErr != nil {
+			return nil, bindErr
+		}
+
+		isAgent, callErr := candidate.IsAgent(callOpts, platform)
+		if callErr != nil {
+			return nil, logger.LogError("could not check whether %s is an agent of the IdentityRegistry %s: %s", platform.Hex(), irAddress.Hex(), callErr.Error())
+		}
+		if isAgent {
+			return candidate, nil
+		}
 	}
 
-	return irsInstance, nil
+	return nil, logger.LogError("%s is an agent of none of the %d registries bound to the shared whitelist %s: no door to write the investor through", platform.Hex(), len(linkedRegistries), sharedIRS.Hex())
 }

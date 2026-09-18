@@ -8,7 +8,7 @@
 // test that reconstructs its context validates the blockchain, not the application.
 //
 // Everything here goes through registerIdentity — the real one, reading the real
-// blk.contract_role row, against a real chain.
+// blk.token and blk.contract_role rows, against a real chain.
 //
 // Requires both a node and a database:
 //
@@ -18,141 +18,139 @@ package services
 
 import (
 	"context"
-	"database/sql"
 	"math/big"
-	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
-	chainglobals "github.com/TookenOrg/tooken-services/internal/blockchain/globals"
-	appglobals "github.com/TookenOrg/tooken-services/internal/globals"
-	"github.com/TookenOrg/tooken-services/pkg/logger"
 	"github.com/ethereum/go-ethereum/common"
 	_ "github.com/lib/pq"
 )
 
-const registerProbeTxName = "REGISTER_IDENTITY"
-
 func TestRegisterIdentityIntegration(t *testing.T) {
-	dsn := os.Getenv("TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("TEST_DATABASE_URL is not set")
-	}
-	logger.Init(true)
-
-	db, err := sql.Open("postgres", dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	previousDB := appglobals.DB
-	appglobals.DB = db
-
-	// blk.contract_role is UNIQUE on contract_name, so the SHARED_IRS row has to be
-	// moved aside and put back rather than duplicated.
-	var savedTxHash, savedAddress sql.NullString
-	if err := db.QueryRow(
-		`SELECT tx_hash, address FROM blk.contract_role WHERE contract_name = $1`,
-		chainglobals.SharedIdentityRegistryStorageName,
-	).Scan(&savedTxHash, &savedAddress); err != nil && err != sql.ErrNoRows {
-		t.Fatal(err)
-	}
-
-	writtenTxHashes := []string{}
-	t.Cleanup(func() {
-		_, _ = db.Exec(`DELETE FROM blk.contract_role WHERE contract_name = $1`,
-			chainglobals.SharedIdentityRegistryStorageName)
-		if savedAddress.Valid {
-			_, _ = db.Exec(
-				`INSERT INTO blk.contract_role (tx_hash, address, contract_name) VALUES ($1, $2, $3)`,
-				savedTxHash.String, savedAddress.String, chainglobals.SharedIdentityRegistryStorageName)
-		}
-		for _, hash := range writtenTxHashes {
-			_, _ = db.Exec(`DELETE FROM blk.eth_transaction WHERE tx_hash = $1`, hash)
-		}
-		appglobals.DB = previousDB
-		db.Close()
-	})
-
-	setSharedIRSRow := func(t *testing.T, address common.Address) {
-		t.Helper()
-		if _, err := db.Exec(`DELETE FROM blk.contract_role WHERE contract_name = $1`,
-			chainglobals.SharedIdentityRegistryStorageName); err != nil {
-			t.Fatal(err)
-		}
-		if address == (common.Address{}) {
-			return
-		}
-		if _, err := db.Exec(
-			`INSERT INTO blk.contract_role (tx_hash, address, contract_name) VALUES ($1, $2, $3)`,
-			"0x"+strings.Repeat("11", 32), address.Hex(),
-			chainglobals.SharedIdentityRegistryStorageName); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second)
 	defer cancel()
 
-	fixture := newTREXFixture(ctx, t)
-	previousClient := chainglobals.EthClient
-	chainglobals.EthClient = fixture.Client
-	t.Cleanup(func() { chainglobals.EthClient = previousClient })
+	env := newChainDBEnv(ctx, t)
+	fixture := env.Fixture
 
-	// The suite the platform will be allowed to write into...
+	// The suite the platform created itself: its registry is bound to the storage,
+	// and the platform is one of its agents.
 	shared := fixture.DeploySuite(t, "RegisterIdentityShared", "Tooken Shared", "TKRS", common.Address{})
-	// ...and one the platform is deliberately NOT an agent of, to prove the guard bites.
-	foreign := fixture.DeploySuite(t, "RegisterIdentityForeign", "Tooken Foreign", "TKRF", common.Address{})
-
-	fixture.MakePlatformIRSAgent(t, shared)
+	env.SetSharedIRSRow(t, shared.IRSAddr)
 
 	investor, investorIdentityAddr, investorIdentity := fixture.NewInvestorIdentity(t)
 
-	// ---- the two ways the resolution must fail loudly ----------------------
+	// ---- 🔑 the claim of this design: T-REX already granted every right --------
 
-	t.Run("no shared IRS recorded is an explicit error", func(t *testing.T) {
-		setSharedIRSRow(t, common.Address{})
-
-		_, err := registerIdentity(ctx, investor, investorIdentityAddr, 250)
-		if err == nil {
-			t.Fatal("registering with no SHARED_IRS row must fail")
+	t.Run("the authorisation chain exists with no setup whatsoever", func(t *testing.T) {
+		// bindIdentityRegistry, called by the factory when the suite was deployed,
+		// made the IdentityRegistry an agent of the storage — and listed it.
+		linked, err := shared.IRS.LinkedIdentityRegistries(fixture.Call)
+		failOnErr(t, err, "IRS.linkedIdentityRegistries")
+		if len(linked) == 0 || linked[0] != shared.IRAddr {
+			t.Fatalf("the storage must list the registry bound to it, got %v", linked)
 		}
-		// resolveSharedIRS answers the zero address here; binding it would have failed
-		// far away from the cause, or silently.
-		if !strings.Contains(err.Error(), "no shared IdentityRegistryStorage") {
-			t.Fatalf("the error must name the missing IRS, got: %v", err)
+
+		irIsStorageAgent, err := shared.IRS.IsAgent(fixture.Call, shared.IRAddr)
+		failOnErr(t, err, "IRS.isAgent(IR)")
+		if !irIsStorageAgent {
+			t.Fatal("the IdentityRegistry must be an agent of its storage — T-REX binds it at deployment")
+		}
+
+		// buildTokenDetails passed the platform in IrAgents.
+		platformIsIRAgent, err := shared.IR.IsAgent(fixture.Call, fixture.Deployer)
+		failOnErr(t, err, "IR.isAgent(platform)")
+		if !platformIsIRAgent {
+			t.Fatal("the platform must be an agent of the IdentityRegistry — buildTokenDetails puts it in IrAgents")
+		}
+
+		// And the platform is deliberately NOT an agent of the storage. This is the
+		// assertion that keeps the implementation on the standard path: the day
+		// someone makes the platform write into the storage directly, this fails.
+		platformIsStorageAgent, err := shared.IRS.IsAgent(fixture.Call, fixture.Deployer)
+		failOnErr(t, err, "IRS.isAgent(platform)")
+		if platformIsStorageAgent {
+			t.Fatal("the platform must not be an agent of the storage: writing goes through the IdentityRegistry, as T-REX intends")
+		}
+
+		owner, err := shared.IRS.Owner(fixture.Call)
+		failOnErr(t, err, "IRS.owner")
+		if owner != fixture.FactoryAddr {
+			t.Fatalf("the factory must keep the storage ownership, got %s", owner.Hex())
 		}
 	})
 
-	t.Run("an IRS the platform cannot write into is an explicit error", func(t *testing.T) {
-		setSharedIRSRow(t, foreign.IRSAddr)
+	// ---- the three ways the resolution must fail loudly ------------------------
+
+	t.Run("no shared whitelist anchor is an explicit error", func(t *testing.T) {
+		env.SetSharedIRSRow(t, common.Address{}) // deletes the row
 
 		_, err := registerIdentity(ctx, investor, investorIdentityAddr, 250)
 		if err == nil {
-			t.Fatal("registering into an IRS the platform is not an agent of must fail")
+			t.Fatal("registering with no SHARED_IRS anchor must fail")
 		}
-		if !strings.Contains(err.Error(), "not an agent") {
-			t.Fatalf("the error must name the missing agent right, got: %v", err)
+		if !strings.Contains(err.Error(), "no shared IdentityRegistryStorage recorded") {
+			t.Fatalf("the error must name the missing anchor, got: %v", err)
+		}
+	})
+
+	t.Run("a whitelist with no registry bound to it is an explicit error", func(t *testing.T) {
+		// A storage deployed on its own, outside any suite: nothing has been bound to
+		// it, so there is no door at all. Without the guard the loop would simply find
+		// nothing and the failure would surface much later.
+		orphanIRS := fixture.NewStandaloneIRS(t)
+		env.SetSharedIRSRow(t, orphanIRS)
+
+		_, err := registerIdentity(ctx, investor, investorIdentityAddr, 250)
+		if err == nil {
+			t.Fatal("registering through a storage with no bound registry must fail")
+		}
+		if !strings.Contains(err.Error(), "no IdentityRegistry is bound") {
+			t.Fatalf("the error must say no registry is bound, got: %v", err)
+		}
+	})
+
+	t.Run("a whitelist whose registries refuse the platform is an explicit error", func(t *testing.T) {
+		// The platform is an agent of every registry it creates, so this cannot happen
+		// by accident — which is exactly why the guard would otherwise never be
+		// exercised, and would rot. Here the right is revoked on purpose, on a suite
+		// deployed with its own storage so it is the *only* door of that whitelist.
+		revoked := fixture.DeploySuite(t, "RegisterIdentityRevoked", "Tooken Revoked", "TKRV", common.Address{})
+		tx, err := revoked.IR.RemoveAgent(fixture.Auth, fixture.Deployer)
+		failOnErr(t, err, "IR.removeAgent(platform)")
+		fixture.Mine(tx, "IR.removeAgent")
+
+		env.SetSharedIRSRow(t, revoked.IRSAddr)
+
+		_, err = registerIdentity(ctx, investor, investorIdentityAddr, 250)
+		if err == nil {
+			t.Fatal("registering with no usable registry must fail")
+		}
+		// Without the guard the chain answers "AgentRole: caller does not have the
+		// Agent role", which names neither the registry nor the platform.
+		if !strings.Contains(err.Error(), "is an agent of none of the") {
+			t.Fatalf("the error must say no door accepts the platform, got: %v", err)
 		}
 
-		// And it must have failed *before* sending anything.
-		stored, err := foreign.IRS.StoredIdentity(fixture.Call, investor)
-		failOnErr(t, err, "foreign IRS.storedIdentity")
+		// And it must have failed before sending anything.
+		stored, err := revoked.IRS.StoredIdentity(fixture.Call, investor)
+		failOnErr(t, err, "IRS.storedIdentity after the refusal")
 		if stored != (common.Address{}) {
-			t.Fatalf("nothing must have been written to the foreign IRS, got %s", stored.Hex())
+			t.Fatalf("nothing must have been written, got %s", stored.Hex())
 		}
 	})
 
-	// ---- the happy path, through the production function -------------------
+	// ---- the happy path, through the production function -----------------------
 
-	setSharedIRSRow(t, shared.IRSAddr)
+	env.SetSharedIRSRow(t, shared.IRSAddr)
 
 	t.Run("registers the investor in the shared whitelist", func(t *testing.T) {
 		tx, err := registerIdentity(ctx, investor, investorIdentityAddr, 250)
 		if err != nil {
 			t.Fatalf("registerIdentity: %v", err)
 		}
-		writtenTxHashes = append(writtenTxHashes, tx.Hash().Hex())
 
 		stored, err := shared.IRS.StoredIdentity(fixture.Call, investor)
 		failOnErr(t, err, "IRS.storedIdentity")
@@ -168,9 +166,9 @@ func TestRegisterIdentityIntegration(t *testing.T) {
 
 		// The transaction must be traceable, like every other on-chain write.
 		var count int
-		if err := db.QueryRow(
+		if err := env.DB.QueryRow(
 			`SELECT count(*) FROM blk.eth_transaction WHERE tx_hash = $1 AND tx_name = $2`,
-			tx.Hash().Hex(), registerProbeTxName).Scan(&count); err != nil {
+			tx.Hash().Hex(), "REGISTER_IDENTITY").Scan(&count); err != nil {
 			t.Fatal(err)
 		}
 		if count != 1 {
@@ -236,7 +234,7 @@ func TestRegisterIdentityIntegration(t *testing.T) {
 		}
 	})
 
-	// ---- the promise of writing into the storage: the investor precedes the token
+	// ---- one whitelist, every token --------------------------------------------
 
 	t.Run("a token created afterwards verifies the investor without re-registering", func(t *testing.T) {
 		later := fixture.DeploySuite(t, "RegisterIdentityLater", "Tooken Later", "TKRL", shared.IRSAddr)
@@ -259,17 +257,57 @@ func TestRegisterIdentityIntegration(t *testing.T) {
 		}
 	})
 
-	// ---- the trap of the one-off setup -------------------------------------
+	t.Run("the door used is one the whitelist itself listed", func(t *testing.T) {
+		// Which registry is used must not matter — they all write into the same
+		// storage — but it must be one the storage knows about. A registry picked
+		// anywhere else could be bound to another ledger, and produce a ghost KYC.
+		later := fixture.DeploySuite(t, "RegisterIdentitySecondDoor", "Tooken Door", "TKRD", shared.IRSAddr)
 
-	t.Run("the factory can still deploy suites after the ownership round-trip", func(t *testing.T) {
+		second, secondIdentityAddr, secondIdentity := fixture.NewInvestorIdentity(t)
+
+		tx, err := registerIdentity(ctx, second, secondIdentityAddr, 442)
+		if err != nil {
+			t.Fatalf("registerIdentity: %v", err)
+		}
+
+		linked, err := shared.IRS.LinkedIdentityRegistries(fixture.Call)
+		failOnErr(t, err, "IRS.linkedIdentityRegistries")
+		to := tx.To()
+		if to == nil {
+			t.Fatal("a registration is a call, it must have a recipient")
+		}
+		if !slices.Contains(linked, *to) {
+			t.Fatalf("the registration went to %s, which the storage does not list: %v", to.Hex(), linked)
+		}
+		if later.IRAddr == shared.IRAddr {
+			t.Fatal("the second suite must have its own registry, otherwise this proves nothing")
+		}
+
+		// Written once, readable from the first token's registry too.
+		stored, err := shared.IRS.StoredIdentity(fixture.Call, second)
+		failOnErr(t, err, "IRS.storedIdentity for the second investor")
+		if stored != secondIdentityAddr {
+			t.Fatalf("stored identity: expected %s, got %s", secondIdentityAddr.Hex(), stored.Hex())
+		}
+
+		fixture.AddKYCClaim(t, secondIdentityAddr, secondIdentity)
+		verified, err := shared.IR.IsVerified(fixture.Call, second)
+		failOnErr(t, err, "IsVerified on the first token")
+		if !verified {
+			t.Fatal("an investor registered through one token must be verified on the others")
+		}
+	})
+
+	t.Run("the factory can still deploy suites", func(t *testing.T) {
+		// Registration touches no ownership, so this can never break — which is
+		// precisely the property the standard path buys. The assertion stays because
+		// an implementation that starts moving ownership around would fail it.
 		owner, err := shared.IRS.Owner(fixture.Call)
 		failOnErr(t, err, "IRS.owner")
 		if owner != fixture.FactoryAddr {
-			t.Fatalf("IRS ownership must be back with the factory: owner=%s factory=%s",
+			t.Fatalf("storage ownership must never leave the factory: owner=%s factory=%s",
 				owner.Hex(), fixture.FactoryAddr.Hex())
 		}
-		// The assertion above states the rule; this one proves it bites. Without the
-		// hand-back, bindIdentityRegistry is onlyOwner and this call reverts.
-		fixture.DeploySuite(t, "RegisterIdentityAfterSetup", "Tooken After Setup", "TKRA", shared.IRSAddr)
+		fixture.DeploySuite(t, "RegisterIdentityAfterAll", "Tooken After", "TKRA", shared.IRSAddr)
 	})
 }

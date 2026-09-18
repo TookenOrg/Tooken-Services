@@ -49,17 +49,18 @@ func failOnErr(t *testing.T, err error, what string) {
 }
 
 type trexFixture struct {
-	Ctx           context.Context
-	Client        *ethclient.Client
-	Auth          *bind.TransactOpts
-	Call          *bind.CallOpts
-	Deployer      common.Address
-	Factory       *contracts.TREXFactory
-	FactoryAddr   common.Address
-	ClaimIssuer   common.Address
-	Mine          func(tx *types.Transaction, what string)
-	suiteCounter  int
-	investorCount int
+	Ctx                  context.Context
+	Client               *ethclient.Client
+	Auth                 *bind.TransactOpts
+	Call                 *bind.CallOpts
+	Deployer             common.Address
+	Factory              *contracts.TREXFactory
+	FactoryAddr          common.Address
+	ClaimIssuer          common.Address
+	IdentityAuthorityRef common.Address // ONCHAINID ImplementationAuthority, what deployIdentityProxy needs
+	Mine                 func(tx *types.Transaction, what string)
+	suiteCounter         int
+	investorCount        int
 }
 
 // newTREXFixture dials the local node and deploys the whole T-REX infrastructure.
@@ -144,6 +145,7 @@ func newTREXFixture(ctx context.Context, t *testing.T) *trexFixture {
 	idFactoryAddr, tx, idFactory, err := contracts.DeployIdFactory(auth, client, idAuthority)
 	failOnErr(t, err, "deploy IdFactory")
 	f.Mine(tx, "IdFactory")
+	f.IdentityAuthorityRef = idAuthority
 
 	// ---- TREX ImplementationAuthority + registered version -----------------
 	trexAuthorityAddr, tx, trexAuthority, err := contracts.DeployTREXImplementationAuthority(auth, client, true, common.Address{}, common.Address{})
@@ -280,25 +282,25 @@ func (f *trexFixture) AddKYCClaim(t *testing.T, identityAddr common.Address, ide
 	f.Mine(tx, "AddClaim")
 }
 
-// MakePlatformIRSAgent runs the one-off setup that lets the platform write into the
-// shared IdentityRegistryStorage: the factory owns it, so ownership is recovered, the
-// agent added, and ownership handed straight back.
-//
-// The last step is not optional. bindIdentityRegistry is onlyOwner on the storage, so
-// a factory that no longer owns it can no longer deploy a suite reusing the shared
-// IRS — token creation would break to fix investor registration.
-func (f *trexFixture) MakePlatformIRSAgent(t *testing.T, suite *deployedSuite) {
+// NewStandaloneIRS deploys an IdentityRegistryStorage outside any suite: nothing is
+// bound to it, so it has no registry to write through. It exists to exercise the case
+// the factory can never produce — a whitelist with no door.
+func (f *trexFixture) NewStandaloneIRS(t *testing.T) common.Address {
 	t.Helper()
 
-	tx, err := f.Factory.RecoverContractOwnership(f.Auth, suite.IRSAddr, f.Deployer)
-	failOnErr(t, err, "RecoverContractOwnership(IRS)")
-	f.Mine(tx, "RecoverContractOwnership")
+	addr, tx, irs, err := contracts.DeployIdentityRegistryStorage(f.Auth, f.Client)
+	failOnErr(t, err, "deploy standalone IRS")
+	f.Mine(tx, "standalone IRS")
 
-	tx, err = suite.IRS.AddAgent(f.Auth, f.Deployer)
-	failOnErr(t, err, "IRS.AddAgent")
-	f.Mine(tx, "IRS.AddAgent")
+	tx, err = irs.Init(f.Auth)
+	failOnErr(t, err, "standalone IRS.init")
+	f.Mine(tx, "standalone IRS.init")
 
-	tx, err = suite.IRS.TransferOwnership(f.Auth, f.FactoryAddr)
-	failOnErr(t, err, "IRS.TransferOwnership back to the factory")
-	f.Mine(tx, "IRS.TransferOwnership")
+	return addr
 }
+
+// MakePlatformIRSAgent used to run a one-off ownership round-trip so the platform
+// could write straight into the shared IdentityRegistryStorage. It is gone: T-REX
+// already wires the authorisation chain, since bindIdentityRegistry makes every
+// IdentityRegistry an agent of the storage and buildTokenDetails makes the platform
+// an agent of every IdentityRegistry. Registration needs no setup at all.
