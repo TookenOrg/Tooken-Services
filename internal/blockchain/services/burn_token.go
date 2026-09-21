@@ -95,17 +95,6 @@ func (s *Service) ValidateBurnInput(ctx context.Context, tokenAddr, to string, h
 		return fmt.Errorf("%w: %s", ErrInvalidBurnInput, err)
 	}
 
-	// Asked before the 202 rather than left to the chain: burning to an unverified
-	// wallet reverts, and that revert would happen after the caller has been told the
-	// operation started.
-	isVerified, err := fetchIsVerifiedByTokenAddress(ctx, tokenAddr, to)
-	if err != nil {
-		return fmt.Errorf("could not check whether %s is verified for token %s: %w", to, tokenAddr, err)
-	}
-	if !isVerified {
-		return fmt.Errorf("%w: wallet address %q is not verified", ErrInvalidMintInput, to)
-	}
-
 	return nil
 }
 

@@ -37,6 +37,7 @@ import (
 const (
 	e2eInvestorUserID = 970001
 	e2eSecondUserID   = 970002
+	e2eRejectedUserID = 970003
 )
 
 func TestInvestorJourneyEndToEnd(t *testing.T) {
@@ -232,6 +233,37 @@ func TestInvestorJourneyEndToEnd(t *testing.T) {
 		if after := countIdentities(t, env, e2eInvestorUserID); after != identitiesBefore {
 			t.Fatalf("no second ONCHAINID must be created, identity rows went from %d to %d",
 				identitiesBefore, after)
+		}
+	})
+
+	// ---- when the database refuses the last step --------------------------------
+
+	t.Run("a failed InsertIdentity is reported, and the response stays empty", func(t *testing.T) {
+		// Steps 2 to 4 have already moved the chain — a wallet exists, an ONCHAINID is
+		// deployed, the investor is in the shared whitelist — when step 5 fails. The
+		// error must come out, and it must NOT come out next to a response that looks
+		// like a success: an IdentityInfos carrying a wallet and an ONCHAINID for an
+		// identity the database does not know is worse than no answer at all.
+		//
+		// The refusal is produced by the schema rather than by a mock, so the test
+		// exercises the real InsertIdentity against the real table.
+		if _, err := env.DB.Exec(
+			`ALTER TABLE blk.identity ADD CONSTRAINT identity_probe_reject CHECK (false) NOT VALID`); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			_, _ = env.DB.Exec(`ALTER TABLE blk.identity DROP CONSTRAINT IF EXISTS identity_probe_reject`)
+		})
+
+		created, err := svc.CreateIdentity(ctx, server.CreateIdentityRequest{
+			UserId:      e2eRejectedUserID,
+			CountryCode: 250,
+		})
+		if err == nil {
+			t.Fatal("a failed InsertIdentity must be reported")
+		}
+		if created != (server.IdentityInfos{}) {
+			t.Fatalf("a failed creation must not answer with a filled response, got %+v", created)
 		}
 	})
 
