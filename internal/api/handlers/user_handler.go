@@ -62,3 +62,39 @@ func (h *Handler) RemoveFavoritesRealEstateForUser(gCtx *gin.Context, userId, re
 		Message: "Favorite removed successfully.",
 	})
 }
+
+func (h *Handler) PostKycVerifications(gCtx *gin.Context) {
+
+	claims, exists := middleware.GetUserClaims(gCtx)
+	if !exists {
+		gCtx.JSON(http.StatusUnauthorized, logger.LogError("JWT not valid"))
+		return
+	}
+
+	userId := claims.UserID
+	logger.LogInfo("🚀 Starting creating a new KYC verification for user ID:%d", userId)
+
+	var req server.KycVerificationRequest
+	if err := gCtx.ShouldBindJSON(&req); err != nil {
+		gCtx.JSON(http.StatusBadRequest, err.Error())
+		return
+	}
+
+	err := h.userSvc.PostKycVerifications(gCtx.Request.Context(), userId, &req)
+	if err != nil {
+		switch {
+		case errors.Is(err, services.ErrMessageKycAlreadyExists):
+			gCtx.JSON(http.StatusConflict, err.Error())
+			return
+		case errors.Is(err, services.ErrMessageInvalidCountryCode), errors.Is(err, services.ErrMessageInvalidFullName):
+			gCtx.JSON(http.StatusBadRequest, err.Error())
+			return
+		}
+		gCtx.JSON(http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	gCtx.JSON(http.StatusCreated, server.APIResponse{
+		Message: "KYC verification submitted successfully.",
+	})
+}

@@ -15,6 +15,7 @@ tags:
   - name: Blockchain
   - name: Assets
   - name: User
+  - name: KYC
   - name: Issuance
   - name: Trading
   - name: Payments
@@ -110,6 +111,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/APIResponse"
 
+  # Users
   /users/me:
     get:
       operationId: GetCurrentUser
@@ -133,6 +135,53 @@ paths:
                 $ref: "#/components/schemas/APIResponse"
         "404":
           description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+
+  # KYC
+  /users/kyc/verifications:
+    post:
+      tags:
+        - KYC
+      summary: Create a new KYC verification
+      operationId: PostKycVerifications
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/KycVerificationRequest"
+      responses:
+        "201":
+          description: KYC verification created successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KycVerificationResponse"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "409":
+          description: Conflict, e.g., a request for a KYC verification that already exists
           content:
             application/json:
               schema:
@@ -2419,3 +2468,37 @@ components:
           format: date-time
         createdBy:
           type: integer
+
+    KycVerificationRequest:
+      type: object
+      required:
+        - declared_full_name
+        - declared_country_code
+      properties:
+        declared_full_name:
+          type: string
+          example: John Doe
+        declared_country_code:
+          type: string
+          description: ISO 3166-1 alpha-2 country code
+          example: US
+          minLength: 2
+          maxLength: 2
+          pattern: "^[A-Z]{2}$"
+
+    KycVerificationResponse:
+      allOf:
+        - $ref: "#/components/schemas/APIResponse"
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                verification_status:
+                  type: string
+                  description: Status of the KYC verification (e.g., pending, approved, rejected)
+                verification_message:
+                  type: string
+                  description: Additional message or reason for the verification status
+              required:
+                - verification_status
