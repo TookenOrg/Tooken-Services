@@ -27,6 +27,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	chainglobals "github.com/TookenOrg/tooken-services/internal/blockchain/globals"
 	appglobals "github.com/TookenOrg/tooken-services/internal/globals"
@@ -211,6 +212,28 @@ func scratchDSNs(dsn string) (adminDSN, scratchDSN string, err error) {
 	scratch.Path = "/" + scratchDatabaseName
 
 	return admin.String(), scratch.String(), nil
+}
+
+// NewUser inserts an investor and returns its id.
+//
+// blk.user_wallet and blk.identity carry a foreign key to usr.users since 000026:
+// an ONCHAINID can no longer be deployed for somebody who does not exist. Tests
+// therefore have to create their investor rather than invent an id — which is the
+// point, since production has to do the same.
+func (e *chainDBEnv) NewUser(t *testing.T) int {
+	t.Helper()
+
+	var id int
+	if err := e.DB.QueryRow(`
+		INSERT INTO usr.users (full_name, email, password)
+		VALUES ($1, $2, 'not-a-real-hash')
+		RETURNING id`,
+		"Test Investor",
+		fmt.Sprintf("investor-%d@test.local", time.Now().UnixNano()),
+	).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	return id
 }
 
 // SetContractRole makes a contract role point at an address, or removes it when given

@@ -59,16 +59,24 @@ ALTER TABLE usr.users ADD CONSTRAINT users_kyc_status_ck
 
 -- ── c) the trigger ──────────────────────────────────────────────────────────
 
+-- Scalar variables rather than usr.kyc_verification%ROWTYPE, deliberately.
+-- %ROWTYPE is resolved when the function body is compiled, so a function
+-- declared before its table cannot be created at all — and tools/db/baseline.sql
+-- is emitted with every function ahead of every table. A baseline that cannot be
+-- replayed is a schema nobody can rebuild, which is the one thing it exists for.
 CREATE OR REPLACE FUNCTION usr.kyc_verification_sync_user()
 RETURNS TRIGGER AS $$
 DECLARE
-    latest usr.kyc_verification%ROWTYPE;
-    target_user integer;
+    target_user     integer;
+    latest_status   text;
+    latest_expires  timestamptz;
+    latest_country  text;
 BEGIN
     -- On DELETE, OLD carries the user; on INSERT and UPDATE, NEW does.
     target_user := COALESCE(NEW.user_id, OLD.user_id);
 
-    SELECT * INTO latest
+    SELECT status, expires_at, declared_country_code
+    INTO latest_status, latest_expires, latest_country
     FROM usr.kyc_verification
     WHERE user_id = target_user
     ORDER BY submitted_at DESC, id DESC
@@ -88,7 +96,7 @@ BEGIN
     END IF;
 
     UPDATE usr.users
-    SET kyc_status = CASE latest.status
+    SET kyc_status = CASE latest_status
                          WHEN 'submitted' THEN 'pending'
                          WHEN 'approved'  THEN 'approved'
                          WHEN 'rejected'  THEN 'rejected'
@@ -97,8 +105,8 @@ BEGIN
         -- Only an approval carries an expiry and a country. Projecting them
         -- from a rejected or revoked row would leave a valid-looking date next
         -- to a status that grants nothing.
-        kyc_expires_at = CASE WHEN latest.status = 'approved' THEN latest.expires_at ELSE NULL END,
-        country_code   = CASE WHEN latest.status = 'approved' THEN latest.declared_country_code ELSE country_code END,
+        kyc_expires_at = CASE WHEN latest_status = 'approved' THEN latest_expires ELSE NULL END,
+        country_code   = CASE WHEN latest_status = 'approved' THEN latest_country ELSE country_code END,
         updated_at     = now()
     WHERE id = target_user;
 

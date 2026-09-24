@@ -33,6 +33,62 @@ CREATE OR REPLACE FUNCTION blk.update_updated_at_column() RETURNS trigger LANGUA
 RETURN NEW;
 END;
 $function$;
+CREATE OR REPLACE FUNCTION usr.kyc_verification_sync_user()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+DECLARE
+    target_user     integer;
+    latest_status   text;
+    latest_expires  timestamptz;
+    latest_country  text;
+BEGIN
+    -- On DELETE, OLD carries the user; on INSERT and UPDATE, NEW does.
+    target_user := COALESCE(NEW.user_id, OLD.user_id);
+
+    SELECT status, expires_at, declared_country_code
+    INTO latest_status, latest_expires, latest_country
+    FROM usr.kyc_verification
+    WHERE user_id = target_user
+    ORDER BY submitted_at DESC, id DESC
+    LIMIT 1;
+
+    IF NOT FOUND THEN
+        -- Every verification of this user is gone: the profile goes back to
+        -- never having submitted anything, rather than keeping a state no row
+        -- supports any more.
+        UPDATE usr.users
+        SET kyc_status     = 'none',
+            kyc_expires_at = NULL,
+            country_code   = NULL,
+            updated_at     = now()
+        WHERE id = target_user;
+        RETURN NULL;
+    END IF;
+
+    UPDATE usr.users
+    SET kyc_status = CASE latest_status
+                         WHEN 'submitted' THEN 'pending'
+                         WHEN 'approved'  THEN 'approved'
+                         WHEN 'rejected'  THEN 'rejected'
+                         WHEN 'revoked'   THEN 'revoked'
+                     END,
+        -- Only an approval carries an expiry and a country. Projecting them
+        -- from a rejected or revoked row would leave a valid-looking date next
+        -- to a status that grants nothing.
+        kyc_expires_at = CASE WHEN latest_status = 'approved' THEN latest_expires ELSE NULL END,
+        country_code   = CASE WHEN latest_status = 'approved' THEN latest_country ELSE country_code END,
+        updated_at     = now()
+    WHERE id = target_user;
+
+    -- kyc_verified_at is deliberately untouched: it dates the on-chain
+    -- confirmation, not the decision (D13). The existing CHECK
+    -- (kyc_status <> 'verified' OR kyc_verified_at IS NOT NULL) therefore stays
+    -- satisfied, because M2-4 writes both in a single UPDATE.
+
+    RETURN NULL;
+END;
+$function$;
 CREATE SEQUENCE IF NOT EXISTS ass.issuer_id_seq AS integer INCREMENT BY 1 MINVALUE 1 MAXVALUE 2147483647 START WITH 1 NO CYCLE;
 CREATE SEQUENCE IF NOT EXISTS ass.real_estate_media_id_seq AS integer INCREMENT BY 1 MINVALUE 1 MAXVALUE 2147483647 START WITH 1 NO CYCLE;
 CREATE SEQUENCE IF NOT EXISTS blk.contract_id_seq AS bigint INCREMENT BY 1 MINVALUE 1 MAXVALUE 9223372036854775807 START WITH 1 NO CYCLE;
@@ -225,7 +281,8 @@ CREATE TABLE IF NOT EXISTS blk.user_wallet (
     label character varying(50),
     is_active boolean DEFAULT true NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    custody text DEFAULT 'custodial'::text NOT NULL
 );
 CREATE TABLE IF NOT EXISTS iss.issuance_allocations (
     id bigint DEFAULT nextval('iss.issuance_allocations_id_seq'::regclass) NOT NULL,
@@ -258,6 +315,23 @@ CREATE TABLE IF NOT EXISTS rel.user_asset_favorite (
     real_estate_id bigint NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL
 );
+CREATE TABLE IF NOT EXISTS usr.kyc_verification (
+    id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+    user_id integer NOT NULL,
+    status text NOT NULL,
+    declared_full_name text,
+    declared_country_code text,
+    submitted_at timestamp with time zone DEFAULT now() NOT NULL,
+    decided_at timestamp with time zone,
+    decided_by integer,
+    rejection_reason text,
+    expires_at timestamp with time zone,
+    revoked_at timestamp with time zone,
+    revoked_by integer,
+    revocation_reason text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
 CREATE TABLE IF NOT EXISTS usr.users (
     id integer DEFAULT nextval('usr.users_id_seq'::regclass) NOT NULL,
     full_name character varying(255) NOT NULL,
@@ -269,7 +343,8 @@ CREATE TABLE IF NOT EXISTS usr.users (
     role text DEFAULT 'USER'::text NOT NULL,
     kyc_status text DEFAULT 'none'::text NOT NULL,
     kyc_verified_at timestamp with time zone,
-    kyc_expires_at timestamp with time zone
+    kyc_expires_at timestamp with time zone,
+    country_code text
 );
 ALTER TABLE ass.issuer
 ADD CONSTRAINT issuer_country_code_ck CHECK ((country_code ~ '^[A-Z]{2}$'::text));
@@ -530,6 +605,12 @@ ADD CONSTRAINT token_transaction_pkey PRIMARY KEY (id);
 ALTER TABLE blk.token_transaction
 ADD CONSTRAINT tx_hash_check CHECK (((tx_hash)::text ~ '^0x[a-fA-F0-9]{64}$'::text));
 ALTER TABLE blk.user_wallet
+ADD CONSTRAINT user_wallet_custody_ck CHECK (
+        (
+            custody = ANY (ARRAY ['custodial'::text, 'external'::text])
+        )
+    );
+ALTER TABLE blk.user_wallet
 ADD CONSTRAINT user_wallet_pkey PRIMARY KEY (id);
 ALTER TABLE blk.user_wallet
 ADD CONSTRAINT user_wallet_wallet_address_key UNIQUE (wallet_address);
@@ -551,6 +632,80 @@ ALTER TABLE rel.user_asset_favorite
 ADD CONSTRAINT uq_user_asset_favorite UNIQUE (user_id, real_estate_id);
 ALTER TABLE rel.user_asset_favorite
 ADD CONSTRAINT user_asset_favorite_pkey PRIMARY KEY (id);
+ALTER TABLE usr.kyc_verification
+ADD CONSTRAINT kyc_verification_approved_country_ck CHECK (
+        (
+            (status <> 'approved'::text)
+            OR (declared_country_code IS NOT NULL)
+        )
+    );
+ALTER TABLE usr.kyc_verification
+ADD CONSTRAINT kyc_verification_country_code_ck CHECK (
+        (
+            (declared_country_code IS NULL)
+            OR (declared_country_code ~ '^[A-Z]{2}$'::text)
+        )
+    );
+ALTER TABLE usr.kyc_verification
+ADD CONSTRAINT kyc_verification_decided_ck CHECK (
+        (
+            (status = 'submitted'::text)
+            OR (
+                (decided_at IS NOT NULL)
+                AND (decided_by IS NOT NULL)
+            )
+        )
+    );
+ALTER TABLE usr.kyc_verification
+ADD CONSTRAINT kyc_verification_expiry_ck CHECK (
+        (
+            (expires_at IS NULL)
+            OR (decided_at IS NULL)
+            OR (expires_at > decided_at)
+        )
+    );
+ALTER TABLE usr.kyc_verification
+ADD CONSTRAINT kyc_verification_pkey PRIMARY KEY (id);
+ALTER TABLE usr.kyc_verification
+ADD CONSTRAINT kyc_verification_rejection_reason_ck CHECK (
+        (
+            (status <> 'rejected'::text)
+            OR (rejection_reason IS NOT NULL)
+        )
+    );
+ALTER TABLE usr.kyc_verification
+ADD CONSTRAINT kyc_verification_revocation_ck CHECK (
+        (
+            (status <> 'revoked'::text)
+            OR (
+                (revoked_at IS NOT NULL)
+                AND (revoked_by IS NOT NULL)
+                AND (revocation_reason IS NOT NULL)
+            )
+        )
+    );
+ALTER TABLE usr.kyc_verification
+ADD CONSTRAINT kyc_verification_revoked_after_decision_ck CHECK (
+        (
+            (revoked_at IS NULL)
+            OR (decided_at IS NOT NULL)
+        )
+    );
+ALTER TABLE usr.kyc_verification
+ADD CONSTRAINT kyc_verification_status_ck CHECK (
+        (
+            status = ANY (
+                ARRAY ['submitted'::text, 'approved'::text, 'rejected'::text, 'revoked'::text]
+            )
+        )
+    );
+ALTER TABLE usr.users
+ADD CONSTRAINT users_country_code_ck CHECK (
+        (
+            (country_code IS NULL)
+            OR (country_code ~ '^[A-Z]{2}$'::text)
+        )
+    );
 ALTER TABLE usr.users
 ADD CONSTRAINT users_email_key UNIQUE (email);
 ALTER TABLE usr.users
@@ -565,7 +720,7 @@ ALTER TABLE usr.users
 ADD CONSTRAINT users_kyc_status_ck CHECK (
         (
             kyc_status = ANY (
-                ARRAY ['none'::text, 'pending'::text, 'verified'::text, 'rejected'::text, 'expired'::text]
+                ARRAY ['none'::text, 'pending'::text, 'approved'::text, 'verified'::text, 'rejected'::text, 'expired'::text, 'revoked'::text]
             )
         )
     );
@@ -613,9 +768,13 @@ ADD CONSTRAINT contract_instance_parent_contract_id_fkey FOREIGN KEY (parent_con
 ALTER TABLE blk.contract_instance
 ADD CONSTRAINT fk_contract_instance_chain FOREIGN KEY (chain_id) REFERENCES blk.chains(id);
 ALTER TABLE blk.identity
+ADD CONSTRAINT identity_user_id_fkey FOREIGN KEY (user_id) REFERENCES usr.users(id) ON DELETE RESTRICT;
+ALTER TABLE blk.identity
 ADD CONSTRAINT identity_wallet_id_fkey FOREIGN KEY (wallet_id) REFERENCES blk.user_wallet(id);
 ALTER TABLE blk.token_transaction
 ADD CONSTRAINT token_transaction_token_id_fkey FOREIGN KEY (token_id) REFERENCES blk.token(id) ON DELETE CASCADE;
+ALTER TABLE blk.user_wallet
+ADD CONSTRAINT user_wallet_user_id_fkey FOREIGN KEY (user_id) REFERENCES usr.users(id) ON DELETE RESTRICT;
 ALTER TABLE iss.issuance_allocations
 ADD CONSTRAINT fk_issuance_allocations_order FOREIGN KEY (issuance_order_id) REFERENCES iss.issuance_orders(id) ON DELETE CASCADE;
 ALTER TABLE iss.issuance_allocations
@@ -630,6 +789,12 @@ ALTER TABLE rel.user_asset_favorite
 ADD CONSTRAINT fk_fav_asset FOREIGN KEY (real_estate_id) REFERENCES ass.real_estate(id) ON DELETE CASCADE;
 ALTER TABLE rel.user_asset_favorite
 ADD CONSTRAINT fk_fav_user FOREIGN KEY (user_id) REFERENCES usr.users(id) ON DELETE CASCADE;
+ALTER TABLE usr.kyc_verification
+ADD CONSTRAINT kyc_verification_decided_by_fkey FOREIGN KEY (decided_by) REFERENCES usr.users(id) ON DELETE RESTRICT;
+ALTER TABLE usr.kyc_verification
+ADD CONSTRAINT kyc_verification_revoked_by_fkey FOREIGN KEY (revoked_by) REFERENCES usr.users(id) ON DELETE RESTRICT;
+ALTER TABLE usr.kyc_verification
+ADD CONSTRAINT kyc_verification_user_id_fkey FOREIGN KEY (user_id) REFERENCES usr.users(id) ON DELETE RESTRICT;
 CREATE UNIQUE INDEX issuer_lei_uk ON ass.issuer USING btree (lei_code)
 WHERE (lei_code IS NOT NULL);
 CREATE UNIQUE INDEX issuer_registration_uk ON ass.issuer USING btree (country_code, registration_number)
@@ -663,8 +828,13 @@ CREATE INDEX idx_tx_hash ON blk.contract_implementation USING btree (tx_hash);
 CREATE INDEX idx_user_wallet_user_id ON blk.user_wallet USING btree (user_id);
 CREATE UNIQUE INDEX token_salt_uk ON blk.token USING btree (salt)
 WHERE (salt IS NOT NULL);
+CREATE UNIQUE INDEX user_wallet_one_active_per_user_idx ON blk.user_wallet USING btree (user_id)
+WHERE is_active;
 CREATE INDEX issuance_orders_asset_status_idx ON iss.issuance_orders USING btree (asset_id, status_id);
 CREATE INDEX issuance_orders_user_idx ON iss.issuance_orders USING btree (user_id);
+CREATE UNIQUE INDEX kyc_verification_one_open_per_user_idx ON usr.kyc_verification USING btree (user_id)
+WHERE (status = 'submitted'::text);
+CREATE INDEX kyc_verification_user_submitted_idx ON usr.kyc_verification USING btree (user_id, submitted_at DESC);
 CREATE UNIQUE INDEX users_email_uk ON usr.users USING btree (lower((email)::text));
 CREATE INDEX users_role_kyc_idx ON usr.users USING btree (role, kyc_status);
 ALTER SEQUENCE ass.issuer_id_seq OWNED BY ass.issuer.id;
@@ -686,6 +856,12 @@ CREATE TRIGGER real_estate_sync_contract_address_trg BEFORE
 INSERT
     OR
 UPDATE OF token_id ON ass.real_estate FOR EACH ROW EXECUTE FUNCTION ass.real_estate_sync_contract_address();
+CREATE TRIGGER kyc_verification_sync_user_trg
+AFTER
+INSERT
+    OR DELETE
+    OR
+UPDATE ON usr.kyc_verification FOR EACH ROW EXECUTE FUNCTION usr.kyc_verification_sync_user();
 INSERT INTO ass.issuer_status (id, code, label, is_final)
 VALUES (1, 'draft', 'Brouillon', 'f') ON CONFLICT (id) DO NOTHING;
 INSERT INTO ass.issuer_status (id, code, label, is_final)
@@ -805,6 +981,13 @@ COMMENT ON COLUMN blk.contract_role.contract_name IS 'The role played, not the c
 COMMENT ON COLUMN blk.contract_role.tx_hash IS 'Not unique: one factory transaction deploys six contracts, so several roles legitimately share the transaction that created them.';
 COMMENT ON COLUMN blk.token.salt IS 'Salt handed to the T-REX factory at deployment. Built by defineSalt as "re-<asset id>" for a tokenised asset, and equal to token_name for the manual POST /contract/token path. It is what tokenForPublication resolves on before deploying, so that a deployment interrupted before the asset was bound can be adopted on replay instead of being deployed twice. Derived from a primary key, it is stable even when the title — and therefore token_name — changes. NULL means "not recorded", which is the case for every token created before this migration that carries no asset.';
 COMMENT ON COLUMN blk.token.token_name IS 'Visible name of the token, built as "Tooken <title> #<asset id>" by defineTokenName. Unique because it is the idempotency key CreateToken resolves on: two tokens sharing a name would let a replayed deployment bind an asset to the wrong contract address.';
+COMMENT ON COLUMN blk.user_wallet.custody IS 'custodial = generated by the platform (control is implied) | external = brought by the investor (a signed challenge is required before minting to it).';
 COMMENT ON COLUMN iss.issuance_order_statuses.counts_as_reserved IS 'Un ordre dans ce statut immobilise-t-il les parts commandees ? FALSE uniquement pour les etats qui les relachent (annulation, expiration, refus, echec). Tout nouveau statut doit fixer ce drapeau explicitement.';
+COMMENT ON TABLE usr.kyc_verification IS 'History of KYC decisions. The source of truth: usr.users.kyc_* is a projection of this table, maintained by trigger (000025).';
+COMMENT ON COLUMN usr.kyc_verification.declared_country_code IS 'ISO 3166-1 alpha-2, as declared and verified. Converted to numeric only when writing to the IdentityRegistry (M2-4).';
+COMMENT ON COLUMN usr.kyc_verification.declared_full_name IS 'Name as declared and verified at that moment. Deliberately duplicated from usr.users: a past verification must keep attesting what was actually checked (D11).';
+COMMENT ON COLUMN usr.kyc_verification.expires_at IS 'End of validity. An approved row past this date is no longer valid even though its status still says approved — always evaluate both.';
+COMMENT ON COLUMN usr.kyc_verification.status IS 'submitted | approved | rejected | revoked. Never "expired": an expiry is derived from expires_at, because nothing writes it.';
+COMMENT ON COLUMN usr.users.country_code IS 'Projection of the country of the latest approved KYC. Never written by hand, never modifiable by the user (D11). The on-chain copy lives in the shared IdentityRegistryStorage.';
 COMMENT ON CONSTRAINT real_estate_active_requires_token_ck ON ass.real_estate IS 'No asset can be on sale without a token behind it. Added NOT VALID by 000021 so the legacy rows would not block it, validated by 000022 once they were cleared — so it now holds for stored rows as well as new ones.';
 COMMENT ON CONSTRAINT fk_issuance_orders_asset ON iss.issuance_orders IS 'RESTRICT, not CASCADE: an order is a financial record and must survive the removal of the listing. Assets are retired with status_id = 7 and deleted_at, never with a DELETE.';

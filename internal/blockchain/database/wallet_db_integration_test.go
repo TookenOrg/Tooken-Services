@@ -24,6 +24,7 @@ package database
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -34,12 +35,17 @@ import (
 )
 
 // Probe rows live on user ids no fixture uses, and carry a label that makes
-// them recognisable and easy to remove. blk.user_wallet has no foreign key on
-// user_id, so these ids need not exist in usr.users.
+// them recognisable and easy to remove.
+//
+// Since 000026, blk.user_wallet references usr.users: these two ids must exist
+// before a wallet can point at them. They are created by openProbeDB and removed
+// with the rest — the foreign key is precisely what stops an ONCHAINID from being
+// deployed for somebody who is not there.
 const (
 	probeUser      = 900001
 	probeOtherUser = 900002
 	probeLabel     = "wallet-db-probe"
+	probeEmailHost = "@wallet-db-probe.local"
 )
 
 func openProbeDB(t *testing.T) *sql.DB {
@@ -58,19 +64,54 @@ func openProbeDB(t *testing.T) *sql.DB {
 	// Clean before as well as after: a suite interrupted mid-run must not make
 	// the next one fail. The repository expects two consecutive runs on a
 	// database that is never emptied to give the same result.
-	cleanProbeRows(t, db)
+	dropProbeRows(t, db)
+	createProbeUsers(t, db)
 	t.Cleanup(func() {
-		cleanProbeRows(t, db)
+		dropProbeRows(t, db)
 		db.Close()
 	})
 
 	return db
 }
 
+// cleanProbeRows removes every wallet this file wrote. It is called between
+// sub-tests, so the investors themselves stay: they are the fixture, not the
+// data under test.
 func cleanProbeRows(t *testing.T, db *sql.DB) {
 	t.Helper()
 	if _, err := db.Exec(`DELETE FROM blk.user_wallet WHERE label = $1`, probeLabel); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// dropProbeRows removes the wallets and then their owners — that order, because
+// the foreign key added by 000026 refuses the other one.
+//
+// It runs from the same cleanup that closes the connection rather than from one
+// of its own: t.Cleanup fires last-registered-first, so a separate cleanup
+// registered earlier would run *after* db.Close() and quietly do nothing,
+// leaving users behind for the next run to trip over.
+func dropProbeRows(t *testing.T, db *sql.DB) {
+	t.Helper()
+	cleanProbeRows(t, db)
+	if _, err := db.Exec(`DELETE FROM usr.users WHERE email LIKE '%' || $1`, probeEmailHost); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// createProbeUsers inserts the two investors the wallets point at, with explicit
+// ids so the rest of the file keeps naming them by constant.
+func createProbeUsers(t *testing.T, db *sql.DB) {
+	t.Helper()
+
+	for _, id := range []int{probeUser, probeOtherUser} {
+		if _, err := db.Exec(`
+			INSERT INTO usr.users (id, full_name, email, password)
+			VALUES ($1, $2, $3, 'not-a-real-hash')
+			ON CONFLICT (id) DO NOTHING`,
+			id, "Wallet probe", fmt.Sprintf("%d%s", id, probeEmailHost)); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 

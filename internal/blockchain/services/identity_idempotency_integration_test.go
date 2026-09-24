@@ -35,9 +35,12 @@ import (
 	_ "github.com/lib/pq"
 )
 
+// Since 000026, blk.user_wallet references usr.users: the investor these wallets
+// belong to has to exist. It is created below and removed with them.
 const (
 	idempotencyProbeUser  = 900011
 	idempotencyProbeLabel = "identity-idempotency-probe"
+	idempotencyProbeEmail = "900011@identity-idempotency-probe.local"
 )
 
 func TestIsIdempotentIdentity(t *testing.T) {
@@ -58,8 +61,20 @@ func TestIsIdempotentIdentity(t *testing.T) {
 			`DELETE FROM blk.user_wallet WHERE label = $1`, idempotencyProbeLabel); err != nil {
 			t.Fatal(err)
 		}
+		// After the wallets, never before: the foreign key would refuse it.
+		if _, err := db.Exec(
+			`DELETE FROM usr.users WHERE email = $1`, idempotencyProbeEmail); err != nil {
+			t.Fatal(err)
+		}
 	}
 	clean()
+	if _, err := db.Exec(`
+		INSERT INTO usr.users (id, full_name, email, password)
+		VALUES ($1, 'Idempotency probe', $2, 'not-a-real-hash')
+		ON CONFLICT (id) DO NOTHING`,
+		idempotencyProbeUser, idempotencyProbeEmail); err != nil {
+		t.Fatal(err)
+	}
 	t.Cleanup(func() {
 		clean()
 		db.Close()
