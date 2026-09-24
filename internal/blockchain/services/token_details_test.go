@@ -65,7 +65,7 @@ func TestDefineAuthorityVersion(t *testing.T) {
 	}
 }
 
-func TestControlInputMintBurn(t *testing.T) {
+func TestControlInputMint(t *testing.T) {
 	valid := "0x1111111111111111111111111111111111111111"
 	tests := []struct {
 		name     string
@@ -88,7 +88,7 @@ func TestControlInputMintBurn(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotWei, err := controlInputMintBurn(tt.token, tt.to, tt.amount, tt.decimals)
+			gotWei, err := controlInputMint(tt.token, tt.to, tt.amount, tt.decimals)
 
 			if tt.wantWei == "" {
 				if err == nil {

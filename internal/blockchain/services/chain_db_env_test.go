@@ -32,6 +32,7 @@ import (
 	appglobals "github.com/TookenOrg/tooken-services/internal/globals"
 	"github.com/TookenOrg/tooken-services/pkg/logger"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/ethclient"
 	_ "github.com/lib/pq"
 )
 
@@ -53,7 +54,13 @@ type chainDBEnv struct {
 	Fixture *trexFixture
 }
 
-func newChainDBEnv(ctx context.Context, t *testing.T) *chainDBEnv {
+// newBareChainDBEnv gives a private database built from the baseline and a client on
+// the local node — and nothing else.
+//
+// No contract is deployed, no row is seeded: the point is to let the *production*
+// initialisation routes do that work, which is the only way to prove they can. Use
+// newChainDBEnv instead when a test needs a T-REX infrastructure it did not build.
+func newBareChainDBEnv(ctx context.Context, t *testing.T) *chainDBEnv {
 	t.Helper()
 
 	dsn := os.Getenv("TEST_DATABASE_URL")
@@ -62,16 +69,16 @@ func newChainDBEnv(ctx context.Context, t *testing.T) *chainDBEnv {
 	}
 	logger.Init(true)
 
+	client := dialTestNode(ctx, t)
 	db := createScratchDatabase(t, dsn)
 
 	previousDB := appglobals.DB
 	appglobals.DB = db
-
-	// newTREXFixture skips the test when no node answers.
-	env := &chainDBEnv{DB: db, Fixture: newTREXFixture(ctx, t)}
-
 	previousClient := chainglobals.EthClient
-	chainglobals.EthClient = env.Fixture.Client
+	chainglobals.EthClient = client
+
+	// GenerateTransactOpts signs with this key, exactly like production does.
+	t.Setenv("PRIVATE_KEY", hardhatAccount0Key)
 
 	t.Cleanup(func() {
 		chainglobals.EthClient = previousClient
@@ -80,12 +87,50 @@ func newChainDBEnv(ctx context.Context, t *testing.T) *chainDBEnv {
 		dropScratchDatabase(t, dsn)
 	})
 
-	// The fixture deploys its own ONCHAINID authority and claim issuer; production
-	// looks them up by name, so they have to be announced in the database.
+	return &chainDBEnv{DB: db}
+}
+
+// newChainDBEnv adds a deployed T-REX infrastructure to the bare environment, and
+// announces in the database the two contracts production looks up by name.
+func newChainDBEnv(ctx context.Context, t *testing.T) *chainDBEnv {
+	t.Helper()
+
+	env := newBareChainDBEnv(ctx, t)
+	env.Fixture = newTREXFixture(ctx, t)
+
+	previousClient := chainglobals.EthClient
+	chainglobals.EthClient = env.Fixture.Client
+	t.Cleanup(func() { chainglobals.EthClient = previousClient })
+
 	env.SetImplementationRow(t, chainglobals.ImplIdentityAuthorityName, env.Fixture.IdentityAuthorityRef)
 	env.SetContractRole(t, chainglobals.ClaimIssuerName, env.Fixture.ClaimIssuer)
 
 	return env
+}
+
+// dialTestNode connects to the local EVM node, skipping the test — rather than
+// failing it — when none answers.
+//
+// It dials WebSocket by default because production does: SetupEthClient reads
+// WS_RPC_URL. The transport is not a detail — eth_subscribe does not exist over
+// HTTP, so a subscription bug looks like "notifications not supported" there and
+// like a silent timeout in production. Testing over the transport production uses is
+// what makes the difference visible.
+func dialTestNode(ctx context.Context, t *testing.T) *ethclient.Client {
+	t.Helper()
+
+	rpc := os.Getenv("ETH_TEST_RPC")
+	if rpc == "" {
+		rpc = "ws://127.0.0.1:8545"
+	}
+	client, err := ethclient.DialContext(ctx, rpc)
+	if err != nil {
+		t.Skipf("no local EVM node at %s: %v", rpc, err)
+	}
+	if _, err := client.ChainID(ctx); err != nil {
+		t.Skipf("local EVM node at %s not reachable: %v", rpc, err)
+	}
+	return client
 }
 
 // createScratchDatabase rebuilds this package's own database from the committed
@@ -205,6 +250,19 @@ func (e *chainDBEnv) SetImplementationRow(t *testing.T, name string, address com
 	if _, err := e.DB.Exec(
 		`INSERT INTO blk.contract_implementation (tx_hash, address, contract_name) VALUES ($1, $2, $3)`,
 		probeTxHash(name), address.Hex(), name); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// InsertTokenRow announces a deployed token in blk.token, which is how Mint and Burn
+// find its decimals before touching the chain.
+func (e *chainDBEnv) InsertTokenRow(t *testing.T, address common.Address, name, symbol string, decimals int) {
+	t.Helper()
+
+	if _, err := e.DB.Exec(`
+		INSERT INTO blk.token (symbol, token_name, salt, address, nb_decimal)
+		VALUES ($1, $2, $3, $4, $5)`,
+		symbol, name, "probe-"+symbol, address.Hex(), decimals); err != nil {
 		t.Fatal(err)
 	}
 }

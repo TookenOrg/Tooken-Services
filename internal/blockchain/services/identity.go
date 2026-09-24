@@ -41,8 +41,10 @@ func (s *Service) CreateIdentity(ctx context.Context, identityReq server.CreateI
 		return
 	}
 
-	logger.LogInfo("New Identity Created for userId [%d]", identityReq.UserId)
 	err = database.InsertIdentity(ctx, identityReq.UserId, walletId, proxyAddr.Hex(), txProxy.Hash().Hex())
+	if err != nil {
+		return
+	}
 
 	// log to remove after insert db
 	logger.LogDebug("%s, %s", txProxy.Hash().Hex(), registerIdentityTxHashPtr.Hash().Hex())
@@ -52,6 +54,8 @@ func (s *Service) CreateIdentity(ctx context.Context, identityReq server.CreateI
 	newIdentityResponse.WalletAddress = walletPubKey.Hex()
 	newIdentityResponse.IdentityAddress = proxyAddr.Hex()
 	newIdentityResponse.TransactionHash = txProxy.Hash().Hex()
+
+	logger.LogInfo("New Identity Created for userId [%d]", identityReq.UserId)
 
 	return
 }

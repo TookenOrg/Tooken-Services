@@ -9,15 +9,15 @@ var EthClient *ethclient.Client
 
 // Implementation contract names
 const (
-	ImplClaimsTopicRegistryName   = "CLAIMS_TOPIC_REGISTRY"
-	ImplTrustedIssuerRegistryName = "TRUSTED_ISSUER_REGISTRY"
-	ImplIdentityRegistryStorage   = "IDENTITY_REGISTRY_STORAGE"
-	ImplIdentityRegistryName      = "IDENTITY_REGISTRY"
-	ImplModularComplianceName     = "MODULAR_COMPLIANCE"
-	ImplTokenName                 = "TOKEN"
-	ImplIdentityName              = "IDENTITY"
-	ImplIdentityAuthorityName     = "IDENTITY_AUTHORITY"
-	ImplTrexAuthorityName         = "TREX_AUTHORITY"
+	ImplClaimsTopicRegistryName     = "CLAIMS_TOPIC_REGISTRY"
+	ImplTrustedIssuerRegistryName   = "TRUSTED_ISSUER_REGISTRY"
+	ImplIdentityRegistryStorageName = "IDENTITY_REGISTRY_STORAGE"
+	ImplIdentityRegistryName        = "IDENTITY_REGISTRY"
+	ImplModularComplianceName       = "MODULAR_COMPLIANCE"
+	ImplTokenName                   = "TOKEN"
+	ImplIdentityName                = "IDENTITY"
+	ImplIdentityAuthorityName       = "IDENTITY_AUTHORITY"
+	ImplTrexAuthorityName           = "TREX_AUTHORITY"
 )
 
 const (

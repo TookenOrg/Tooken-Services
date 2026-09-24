@@ -111,7 +111,7 @@ func configureITREXAuthority(ctx context.Context) (contracts.ITREXImplementation
 	}
 	identityRegistryAddr := *identityRegistryPtr
 
-	identityRegistryStoragePtr := utils.FindContractByName(allContractsImplementations, globals.ImplIdentityRegistryStorage)
+	identityRegistryStoragePtr := utils.FindContractByName(allContractsImplementations, globals.ImplIdentityRegistryStorageName)
 	if identityRegistryStoragePtr == nil {
 		return contracts.ITREXImplementationAuthorityTREXContracts{}, fmt.Errorf("identity registry storage implementation address not found")
 	}

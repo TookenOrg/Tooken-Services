@@ -132,26 +132,50 @@ func WaitDeployedTransaction(ctx context.Context, tx *types.Transaction, shouldW
 	return txDetails, fmt.Errorf("contract at address %s not active after %d attempts", contractAddress.Hex(), maxRetries)
 }
 
-func WaitTREXSuiteDeployment(ctx context.Context, trexFactoryInstance *contracts.TREXFactory, salt string) (*contracts.TREXFactoryTREXSuiteDeployed, error) {
+// WaitTREXSuiteDeployment returns the TREXSuiteDeployed event emitted by a suite
+// deployment transaction.
+//
+// It waits for the receipt, then reads the logs of the block that transaction landed
+// in. The earlier version subscribed with WatchTREXSuiteDeployed instead, which only
+// ever reports *future* logs: between sending the transaction and subscribing, the
+// node may already have mined it, and the event was then missed for good — two
+// minutes of waiting followed by a timeout, for a deployment that had succeeded.
+//
+// The receipt is what makes this reliable: it proves the transaction is mined and
+// says in which block, so the log cannot be missed whatever the pace of the chain.
+func WaitTREXSuiteDeployment(ctx context.Context, trexFactoryInstance *contracts.TREXFactory, tx *types.Transaction, salt string) (*contracts.TREXFactoryTREXSuiteDeployed, error) {
 
 	logger.LogInfo("⏳ Waiting for TREX Suite deployment to be completed...")
 
-	eventChan := make(chan *contracts.TREXFactoryTREXSuiteDeployed)
-
-	sub, err := trexFactoryInstance.WatchTREXSuiteDeployed(&bind.WatchOpts{Context: ctx}, eventChan, nil, []string{salt})
+	txDetails, err := WaitDeployedTransaction(ctx, tx, false)
 	if err != nil {
-		return nil, fmt.Errorf("failed to subscribe to TREX Suite deployment events: %v", err)
+		return nil, err
 	}
-	defer sub.Unsubscribe()
 
-	for {
-		select {
-		case event := <-eventChan:
-			return event, nil
-		case err := <-sub.Err():
-			return nil, fmt.Errorf("error while waiting for TREX Suite deployment event: %v", err)
-		case <-time.After(2 * time.Minute):
-			return nil, fmt.Errorf("timeout while waiting for TREX Suite deployment event")
-		}
+	// A single block: the one the receipt names. Leaving End at nil would scan up to
+	// the head of the chain for a log we already know the location of.
+	blockNumber := txDetails.BlockNumber.Uint64()
+
+	iterator, err := trexFactoryInstance.FilterTREXSuiteDeployed(
+		&bind.FilterOpts{Start: blockNumber, End: &blockNumber, Context: ctx},
+		nil,
+		[]string{salt},
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the TREX Suite deployment logs of block %d: %w", blockNumber, err)
 	}
+	defer iterator.Close()
+
+	if !iterator.Next() {
+		if err := iterator.Error(); err != nil {
+			return nil, fmt.Errorf("failed to read the TREX Suite deployment logs of block %d: %w", blockNumber, err)
+		}
+		// The transaction succeeded but emitted nothing for this salt. Saying so beats
+		// answering a zero-valued event that the caller would dereference.
+		return nil, fmt.Errorf("no TREX Suite deployment event for salt %q in block %d", salt, blockNumber)
+	}
+
+	logger.LogInfo("📬 TREX Suite deployed in block %d", blockNumber)
+
+	return iterator.Event, nil
 }

@@ -130,3 +130,24 @@ func resolveIdentityRegistryInstance(ctx context.Context) (irInstance *contracts
 
 	return nil, logger.LogError("%s is an agent of none of the %d registries bound to the shared whitelist %s: no door to write the investor through", platform.Hex(), len(linkedRegistries), sharedIRS.Hex())
 }
+
+func fetchIsVerifiedByTokenAddress(ctx context.Context, tokenAddr, walletAddrToCheck string) (bool, error) {
+	tokenInstance, err := contracts.NewToken(common.HexToAddress(tokenAddr), globals.EthClient)
+	if err != nil {
+		return false, err
+	}
+	irAddr, err := tokenInstance.IdentityRegistry(&bind.CallOpts{Context: ctx})
+	if err != nil {
+		return false, err
+	}
+	irInstance, err := contracts.NewIdentityRegistry(irAddr, globals.EthClient)
+	if err != nil {
+		return false, err
+	}
+
+	isVerified, err := irInstance.IsVerified(&bind.CallOpts{Context: ctx}, common.HexToAddress(walletAddrToCheck))
+	if err != nil {
+		return false, err
+	}
+	return isVerified, nil
+}

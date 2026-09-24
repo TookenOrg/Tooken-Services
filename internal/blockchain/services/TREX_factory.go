@@ -277,7 +277,7 @@ func deployTrexSuite(ctx context.Context, tokenDetails contracts.ITREXFactoryTok
 	if err != nil {
 		return
 	}
-	deploymentDetails, err := utils.WaitTREXSuiteDeployment(ctx, trexFactoryInstance, salt)
+	deploymentDetails, err := utils.WaitTREXSuiteDeployment(ctx, trexFactoryInstance, txDeploySuite, salt)
 	if err != nil {
 		return
 	}
