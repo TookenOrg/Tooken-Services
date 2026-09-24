@@ -9,6 +9,19 @@ import (
 	"github.com/TookenOrg/tooken-services/internal/globals"
 )
 
+const contractVersion = 1
+
+func InsertContractImplementation(ctx context.Context, txHash, address, contractName string) error {
+	query := `
+        INSERT INTO blk.contract_implementation (tx_hash, address, contract_name, version, created_at)
+        VALUES ($1, $2, $3, $4, NOW())`
+
+	_, err := globals.DB.ExecContext(ctx, query, txHash, address, contractName, contractVersion)
+	if err != nil {
+		return fmt.Errorf("insert failed: %w", err)
+	}
+	return nil
+}
 func GetAllContractImplementations(ctx context.Context) (contractsDetails []server.ContractDetails, err error) {
 	query := `
         SELECT id, tx_hash, address, contract_name, created_at 

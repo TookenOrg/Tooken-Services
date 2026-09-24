@@ -234,7 +234,7 @@ func deployTokenSuiteViaFactory(ctx context.Context, factoryAddr common.Address,
 		return
 	}
 
-	deployment, err = utils.WaitTREXSuiteDeployment(ctx, factoryInstance, salt)
+	deployment, err = utils.WaitTREXSuiteDeployment(ctx, factoryInstance, tx, salt)
 	if err != nil {
 		return
 	}
