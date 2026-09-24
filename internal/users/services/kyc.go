@@ -9,9 +9,11 @@ import (
 	"github.com/TookenOrg/tooken-services/internal/api/server"
 	"github.com/TookenOrg/tooken-services/internal/users/database"
 	"github.com/TookenOrg/tooken-services/internal/utils"
+	"github.com/samber/lo"
 )
 
 var (
+	ErrKycVerificationNotFound   = errors.New("KYC verification not found")
 	ErrMessageKycAlreadyExists   = errors.New("a KYC verification with status 'submitted' already exists for this user")
 	ErrMessageInvalidCountryCode = errors.New("invalid country code")
 	ErrMessageInvalidFullName    = errors.New("invalid full name")
@@ -37,11 +39,11 @@ func (s *Service) PostKycVerifications(ctx context.Context, userId int, request 
 	}
 
 	// 2 - Get Kyc verification to check if one already exists for the user with status "submitted"
-	kycVerification, err := database.GetKycVerificationByUserIDAndStatus(ctx, userId, database.StatusSubmitted)
+	kycVerifications, err := database.GetKycVerificationByUserIDAndStatus(ctx, &userId, lo.ToPtr(database.StatusSubmitted))
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return
 	}
-	if kycVerification != nil {
+	if len(kycVerifications) > 0 {
 		return ErrMessageKycAlreadyExists
 	}
 
@@ -52,4 +54,8 @@ func (s *Service) PostKycVerifications(ctx context.Context, userId int, request 
 	}
 
 	return nil
+}
+
+func (s *Service) GetListKycVerifications(ctx context.Context, userId *int, status *string) (kycVerifications []server.KycVerification, err error) {
+	return database.GetKycVerificationByUserIDAndStatus(ctx, userId, status)
 }

@@ -192,7 +192,52 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/APIResponse"
-
+    get:
+      tags:
+        - KYC
+      summary: Get the list of KYC verifications
+      operationId: GetListKycVerifications
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum:
+              - submitted
+              - approved
+        - name: userId
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/KycVerification"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
   # Asset
   /assets/real-estates/active:
     get:
@@ -2468,6 +2513,43 @@ components:
           format: date-time
         createdBy:
           type: integer
+
+    KycVerification:
+      type: object
+      required:
+        - id
+        - user_id
+        - status
+        - declared_full_name
+        - declared_country_code
+        - created_at
+        - updated_at
+        - email
+      properties:
+        id:
+          type: integer
+        user_id:
+          type: integer
+        status:
+          type: string
+        declared_full_name:
+          type: string
+        declared_country_code:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        verification_status:
+          type: string
+          description: Status of the KYC verification (e.g., pending, approved, rejected)
+        verification_message:
+          type: string
+          description: Additional message or reason for the verification status
+        email:
+          type: string
 
     KycVerificationRequest:
       type: object

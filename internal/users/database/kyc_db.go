@@ -14,16 +14,6 @@ const (
 	StatusSubmitted = "submitted"
 )
 
-type KycVerificationDTO struct {
-	Id                  int
-	UserId              int
-	Status              string
-	DeclaredFullName    string
-	DeclaredCountryCode string
-	CreatedAt           time.Time
-	UpdatedAt           time.Time
-}
-
 func InsertKycVerification(ctx context.Context, userId int, request *server.KycVerificationRequest) (id int, createdAt time.Time, err error) {
 	query := `
 		INSERT INTO usr.kyc_verification (
@@ -51,25 +41,41 @@ func InsertKycVerification(ctx context.Context, userId int, request *server.KycV
 	return id, createdAt, nil
 }
 
-func GetKycVerificationByUserIDAndStatus(ctx context.Context, userId int, status string) (kycVerification *KycVerificationDTO, err error) {
+func GetKycVerificationByUserIDAndStatus(ctx context.Context, userId *int, status *string) (kycVerification []server.KycVerification, err error) {
+	// A nil filter becomes NULL and is ignored.
 	query := `
-		SELECT id, user_id, status, declared_full_name, declared_country_code, created_at, updated_at
-		FROM usr.kyc_verification
-		WHERE user_id = $1 AND status = $2
-		LIMIT 1;
+		SELECT k.id, k.user_id, k.status, k.declared_full_name, k.declared_country_code, k.created_at, k.updated_at, u.email
+		FROM usr.kyc_verification k
+		JOIN usr.users u ON u.id = k.user_id
+		WHERE ($1::integer IS NULL OR k.user_id = $1)
+		  AND ($2::text IS NULL OR k.status = $2);
 	`
-	kycVerification = &KycVerificationDTO{}
-	err = globals.DB.QueryRowContext(ctx, query, userId, status).Scan(
-		&kycVerification.Id,
-		&kycVerification.UserId,
-		&kycVerification.Status,
-		&kycVerification.DeclaredFullName,
-		&kycVerification.DeclaredCountryCode,
-		&kycVerification.CreatedAt,
-		&kycVerification.UpdatedAt,
-	)
+	kycVerification = []server.KycVerification{}
+	rows, err := globals.DB.QueryContext(ctx, query, userId, status)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get kyc verification: %w", err)
 	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var kv server.KycVerification
+		if err := rows.Scan(
+			&kv.Id,
+			&kv.UserId,
+			&kv.Status,
+			&kv.DeclaredFullName,
+			&kv.DeclaredCountryCode,
+			&kv.CreatedAt,
+			&kv.UpdatedAt,
+			&kv.Email,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan kyc verification: %w", err)
+		}
+		kycVerification = append(kycVerification, kv)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate kyc verification rows: %w", err)
+	}
+
 	return kycVerification, nil
 }

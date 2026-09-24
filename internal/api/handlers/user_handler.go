@@ -5,10 +5,12 @@ import (
 	"net/http"
 
 	"github.com/TookenOrg/tooken-services/internal/api/server"
+	authUtils "github.com/TookenOrg/tooken-services/internal/auth/utils"
 	"github.com/TookenOrg/tooken-services/internal/middleware"
 	"github.com/TookenOrg/tooken-services/internal/users/services"
 	"github.com/TookenOrg/tooken-services/pkg/logger"
 	"github.com/gin-gonic/gin"
+	"github.com/samber/lo"
 )
 
 func (h *Handler) GetCurrentUser(gCtx *gin.Context) {
@@ -97,4 +99,33 @@ func (h *Handler) PostKycVerifications(gCtx *gin.Context) {
 	gCtx.JSON(http.StatusCreated, server.APIResponse{
 		Message: "KYC verification submitted successfully.",
 	})
+}
+
+func (h *Handler) GetListKycVerifications(gCtx *gin.Context, params server.GetListKycVerificationsParams) {
+
+	claims, exists := middleware.GetUserClaims(gCtx)
+	if !exists {
+		gCtx.JSON(http.StatusUnauthorized, logger.LogError("JWT not valid"))
+		return
+	}
+
+	if claims.Role != authUtils.RoleAdmin {
+		gCtx.JSON(http.StatusForbidden, logger.LogError("Forbidden"))
+		return
+	}
+
+	logger.LogInfo("🚀 Starting getting the list of KYC verifications")
+
+	var statusStr *string
+	if params.Status != nil {
+		statusStr = lo.ToPtr(string(*params.Status))
+	}
+
+	kycVerification, err := h.userSvc.GetListKycVerifications(gCtx.Request.Context(), params.UserId, statusStr)
+	if err != nil {
+		gCtx.JSON(http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	gCtx.JSON(http.StatusOK, kycVerification)
 }
