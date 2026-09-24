@@ -110,20 +110,14 @@ paths:
               schema:
                 $ref: "#/components/schemas/APIResponse"
 
-  /user/{userId}:
+  /users/me:
     get:
-      operationId: GetUserById
-      parameters:
-        - name: userId
-          in: path
-          description: User ID
-          required: true
-          schema:
-            type: integer
-            format: int64
-      summary: GetUserById
+      operationId: GetCurrentUser
+      summary: Get the currently authenticated user
       tags:
-        - user
+        - User
+      security:
+        - bearerAuth: []
       responses:
         "200":
           description: User found
@@ -131,8 +125,24 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/User"
-        "400":
-          description: Invalid request
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "404":
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
 
   # Asset
   /assets/real-estates/active:
@@ -1368,6 +1378,31 @@ components:
             having to decode the token.
           enum: [USER, MANAGER, ADMIN]
           example: USER
+        country_code:
+          type: string
+          nullable: true
+          pattern: "^[A-Z]{2}$"
+          description: >
+            ISO 3166-1 alpha-2, copied from the latest approved KYC. Null until
+            a KYC has been approved. Read-only: the user cannot change it.
+          example: LU
+        kyc_status:
+          type: string
+          description: The KYC status of the user
+          enum: [none, pending, approved, verified, rejected, expired, revoked]
+          example: none
+        kyc_verified_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: The date when the KYC was verified
+          example: "2026-01-15T12:00:00Z"
+        kyc_expires_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: The date when the KYC expired
+          example: "2026-01-20T12:00:00Z"
 
     InitializeIdentityFactoryResponse:
       allOf:
@@ -1393,7 +1428,7 @@ components:
       properties:
         countryCode:
           type: integer
-          description: The country code of the investor
+          description: ISO 3166-1 numeric, as stored on chain by the IdentityRegistry (uint16)
           example: 442
         userId:
           type: integer

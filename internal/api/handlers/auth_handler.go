@@ -82,9 +82,3 @@ func (h *Handler) PostAuthSignIn(gCtx *gin.Context) {
 		},
 	})
 }
-
-func (h *Handler) GetUserById(gCtx *gin.Context, userId int64) {
-	gCtx.JSON(http.StatusBadRequest, server.APIResponse{
-		Message: "Not implemented.",
-	})
-}

@@ -1,12 +1,37 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/TookenOrg/tooken-services/internal/api/server"
+	"github.com/TookenOrg/tooken-services/internal/middleware"
+	"github.com/TookenOrg/tooken-services/internal/users/services"
 	"github.com/TookenOrg/tooken-services/pkg/logger"
 	"github.com/gin-gonic/gin"
 )
+
+func (h *Handler) GetCurrentUser(gCtx *gin.Context) {
+
+	claims, exists := middleware.GetUserClaims(gCtx)
+	if !exists {
+		gCtx.JSON(http.StatusUnauthorized, logger.LogError("JWT not valid"))
+		return
+	}
+
+	logger.LogInfo("🚀 Starting getting the current user")
+
+	user, err := h.userSvc.GetUserByID(gCtx.Request.Context(), claims.UserID)
+	if err != nil {
+		if errors.Is(err, services.ErrUserNotFound) {
+			gCtx.JSON(http.StatusNotFound, err.Error())
+			return
+		}
+		gCtx.JSON(http.StatusInternalServerError, err.Error())
+		return
+	}
+	gCtx.JSON(http.StatusOK, user)
+}
 
 func (h *Handler) AddFavoritesRealEstateForUser(gCtx *gin.Context, userId, realEstateId int) {
 
