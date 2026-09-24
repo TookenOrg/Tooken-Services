@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"math/big"
 
 	"github.com/TookenOrg/tooken-services/internal/api/server"
@@ -14,6 +15,23 @@ import (
 )
 
 func (s *Service) DeployIdentityFactory(ctx context.Context) (details server.ContractDetails, err error) {
+
+	// check if Identity Factory is already deployed
+	existingIdentityFactory, err := database.GetContractRoleByName(ctx, globals.IdentityFactoryName)
+	if err != nil {
+		if errors.Is(err, database.ErrContractRoleNotFound) {
+			logger.LogInfo("Identity Factory not found, deploying a new one...")
+		} else {
+			return server.ContractDetails{}, err
+		}
+	}
+	if existingIdentityFactory.Address != "" {
+		logger.LogInfo("Identity Factory already deployed at address: %s", existingIdentityFactory.Address)
+		return server.ContractDetails{
+			Address: existingIdentityFactory.Address,
+			Name:    globals.IdentityFactoryName,
+		}, nil
+	}
 
 	// Get Identity Authority Implementation
 	implementationIdentityAuthorityDetails, err := database.GetImplementationContractByName(ctx, globals.ImplIdentityAuthorityName)
@@ -32,9 +50,6 @@ func (s *Service) DeployIdentityFactory(ctx context.Context) (details server.Con
 		Address: identityFactory.Hex(),
 		Name:    globals.IdentityFactoryName,
 	}
-
-	// TODO: Store deployed contract details in the database
-
 	return
 }
 
@@ -56,7 +71,12 @@ func deployIdentityFactory(ctx context.Context, implementationAuthorityAddrCommo
 	}
 	logger.LogInfo("📬 Identity Factory deployed at address: %s", idAddr.Hex())
 
-	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "IDENTITY_FACTORY", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "IDENTITY_FACTORY", deployedTxDetails.ToAddressHex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	if err != nil {
+		return
+	}
+
+	_, err = database.InsertContractRole(ctx, deployedTxDetails.Tx.Hash().Hex(), idAddr.Hex(), globals.IdentityFactoryName)
 	if err != nil {
 		return
 	}

@@ -11,6 +11,7 @@ on:
       - "feature/**"
       - "hotfix/**"
       - "fix/**"
+      - "[0-9]*-**"
   pull_request:
     branches: ["main", "develop"]
 

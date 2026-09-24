@@ -3,7 +3,6 @@ package services
 import (
 	"context"
 	"errors"
-	"fmt"
 	"math/big"
 
 	"github.com/TookenOrg/tooken-services/internal/api/server"
@@ -25,7 +24,7 @@ func (s *Service) CreateIdentity(ctx context.Context, identityReq server.CreateI
 	}
 
 	// 2 - Generate wallet
-	wallet, walletId, err := GenerateNewWallet(identityReq.UserId)
+	walletPubKey, walletId, err := GenerateNewWallet(identityReq.UserId)
 	if err != nil {
 		return
 	}
@@ -37,22 +36,26 @@ func (s *Service) CreateIdentity(ctx context.Context, identityReq server.CreateI
 	}
 
 	// 4 - Register identity + wallet into Identity registry
-	registerIdentityTxHashPtr, err := registerIdentity(ctx, wallet, proxyAddr, identityReq.CountryCode)
+	registerIdentityTxHashPtr, err := registerIdentity(ctx, walletPubKey, proxyAddr, identityReq.CountryCode)
 	if err != nil {
 		return
 	}
 
-	logger.LogInfo("New Identity Created for userId [%d]", identityReq.UserId)
 	err = database.InsertIdentity(ctx, identityReq.UserId, walletId, proxyAddr.Hex(), txProxy.Hash().Hex())
+	if err != nil {
+		return
+	}
 
 	// log to remove after insert db
 	logger.LogDebug("%s, %s", txProxy.Hash().Hex(), registerIdentityTxHashPtr.Hash().Hex())
 
 	newIdentityResponse.CountryCode = identityReq.CountryCode
 	newIdentityResponse.UserId = identityReq.UserId
-	newIdentityResponse.WalletAddress = wallet.Hex()
+	newIdentityResponse.WalletAddress = walletPubKey.Hex()
 	newIdentityResponse.IdentityAddress = proxyAddr.Hex()
 	newIdentityResponse.TransactionHash = txProxy.Hash().Hex()
+
+	logger.LogInfo("New Identity Created for userId [%d]", identityReq.UserId)
 
 	return
 }
@@ -62,7 +65,7 @@ func isIdempotentIdentity(ctx context.Context, identityReq server.CreateIdentity
 	if err != nil {
 		return false
 	}
-	return existingWalletPtr != nil
+	return existingWalletPtr == nil
 }
 
 func GenerateNewWallet(userId int) (publicKey common.Address, walletId int64, err error) {
@@ -72,12 +75,11 @@ func GenerateNewWallet(userId int) (publicKey common.Address, walletId int64, er
 	if err != nil {
 		return
 	}
-	privateKeyClear := fmt.Sprintf("%x", crypto.FromECDSA(privateKeyecdsa))
 	publicKey = crypto.PubkeyToAddress(privateKeyecdsa.PublicKey)
 
 	logger.LogDebug("New wallet created: public key [%s]", publicKey)
 
-	walletId, err = database.InsertWallet(userId, publicKey.Hex(), "Main Wallet", privateKeyClear)
+	walletId, err = database.InsertWallet(userId, publicKey.Hex(), "Main Wallet")
 
 	return
 }
@@ -110,7 +112,7 @@ func deployIdentityProxy(ctx context.Context) (proxyAddr common.Address, tx *typ
 
 	logger.LogInfo("📬 Identity Proxy deployed at address: %s", proxyAddr.Hex())
 
-	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "IDENTITY_PROXY", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "IDENTITY_PROXY", deployedTxDetails.ToAddressHex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
 	if err != nil {
 		return
 	}

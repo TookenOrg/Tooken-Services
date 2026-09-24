@@ -1,3 +1,25 @@
+-- Extract a replayable schema baseline from a live database.
+--
+-- ⚠️  RUN THIS WHOLE FILE, NOT JUST THE QUERY.
+--
+-- The SET below is part of the extraction, not a preference. pg_get_expr,
+-- pg_get_constraintdef and pg_get_indexdef render object names relatively to
+-- the extracting session's search_path: anything reachable through it comes out
+-- unqualified. Extracting from the Aiven console, whose search_path carries the
+-- business schemas, produced REFERENCES token(id) and nextval('token_id_seq')
+-- — eleven names that resolve to nothing on a fresh database.
+--
+-- An empty search_path forces every name to be qualified at the source, which
+-- is the only place the problem can be fixed. Compensating afterwards with a
+-- search_path header in the output only re-resolves those bare names by luck:
+-- two schemas holding a table of the same name would silently bind to the
+-- wrong one.
+--
+-- Everything this script reads is schema-qualified already, so emptying the
+-- path costs nothing. pg_catalog stays implicitly searchable, which is why the
+-- ::regclass casts below still work.
+SET search_path = '';
+
 WITH ns AS (
     SELECT oid, nspname
     FROM pg_namespace
@@ -7,22 +29,13 @@ WITH ns AS (
       AND nspname <> 'cron'
 ), parts AS (
 
-    -- A self-contained header, and it is not a nicety.
-    --
-    -- pg_get_expr, pg_get_constraintdef and pg_get_indexdef render object names
-    -- relative to the extracting session's search_path: anything reachable
-    -- through it comes out unqualified. Extracting from a console whose
-    -- search_path contains 'blk' yields nextval('token_id_seq') and
-    -- REFERENCES token(id), which resolve to nothing on a fresh database.
-    --
-    -- Rather than qualify them after the fact, the script carries the same
-    -- search_path it was born with, so the bare names resolve again on replay.
-    -- Extracting with SET search_path = '' makes every name qualified and
-    -- renders this line harmless, which is the better habit.
+    -- The replayed file gets an empty search_path too, and that is a safety
+    -- net rather than a formality: every name the extraction emits is
+    -- qualified, so any bare name left in the output is a bug in this script.
+    -- With no path to fall back on, such a name fails loudly on replay instead
+    -- of quietly binding to whichever schema happens to come first.
     SELECT 0 AS ord, '' AS o2, '' AS o3,
-           format('SET search_path = %s, public;',
-                  (SELECT string_agg(quote_ident(nspname), ', ' ORDER BY nspname)
-                   FROM ns)) AS ddl
+           'SET search_path = '''';' AS ddl
 
     UNION ALL
 
@@ -201,6 +214,38 @@ WITH ns AS (
 
     UNION ALL
 
+    -- The two lookup tables below were missing from this script until a test
+    -- tried to create an asset on a database rebuilt from the baseline:
+    --
+    --   pq: insert or update on table "real_estate" violates foreign key
+    --       constraint "real_estate_estate_type_fkey"
+    --
+    -- Nothing had caught it because real_estate_write_integration_test.go seeds
+    -- both tables itself before its fixtures. The suite therefore stayed green
+    -- on a baseline that could not, on its own, hold a single asset — the
+    -- fixture was hiding the hole rather than revealing it.
+    --
+    -- Which is the reason they belong here and not in a fixture: a reference
+    -- table an asset cannot exist without is part of the schema, not part of a
+    -- test's setup.
+    SELECT 12, 'ass', 'real_estate_type',
+           string_agg(
+               format('INSERT INTO ass.real_estate_type (id, name, active) VALUES (%s, %L, %L) ON CONFLICT (id) DO NOTHING;',
+                      s.id, s.name, s.active),
+               E'\n' ORDER BY s.id)
+    FROM ass.real_estate_type s
+
+    UNION ALL
+
+    SELECT 12, 'ass', 'payment_frequency_type',
+           string_agg(
+               format('INSERT INTO ass.payment_frequency_type (id, name) VALUES (%s, %L) ON CONFLICT (id) DO NOTHING;',
+                      s.id, s.name),
+               E'\n' ORDER BY s.id)
+    FROM ass.payment_frequency_type s
+
+    UNION ALL
+
     -- This one is worse than the two above: no migration creates it either.
     -- 000010 already speaks of "the existing reference table", so it predates
     -- the migration history entirely. A database built from the migrations
@@ -212,6 +257,57 @@ WITH ns AS (
                       s.id, s.code, s.label, s.is_final, s.counts_as_reserved),
                E'\n' ORDER BY s.id)
     FROM iss.issuance_order_statuses s
+
+    UNION ALL
+
+    -- Sequences, put back where the rows above left them.
+    --
+    -- The reference tables above are inserted with explicit ids, which does not
+    -- move the sequence behind the column. A database rebuilt from this
+    -- baseline therefore holds seven statuses and a sequence still sitting at
+    -- 1, and the next insert dies on "duplicate key value violates unique
+    -- constraint". That failure has already been paid for once, in the commit
+    -- that resynchronised the identity sequences.
+    --
+    -- The value is computed on replay, not frozen here, so it follows whatever
+    -- the INSERTs above actually wrote. is_called = false means "hand out this
+    -- number next", which keeps id 1 available on a table that is empty rather
+    -- than skipping it.
+    --
+    -- ⚠️  THE SEQUENCE NAME IS RESOLVED ON REPLAY, NOT HERE
+    --   Writing the name this script sees was wrong, and it broke the moment a
+    --   table whose sequence does not follow the default naming was added:
+    --   ass.real_estate_type carries ass.estate_type_id_seq in production — a
+    --   name left over from before the table was renamed — while a database
+    --   rebuilt from the CREATE TABLE above gets ass.real_estate_type_id_seq.
+    --   Replaying the frozen name gave:
+    --
+    --     ERROR: relation "ass.estate_type_id_seq" does not exist
+    --
+    --   and, with ON_ERROR_STOP, everything after that point was lost.
+    --
+    --   pg_get_serial_sequence is therefore emitted as-is and evaluated by the
+    --   target, which is the only database that knows how its own sequences are
+    --   named. A baseline must not carry the source's naming accidents.
+    --
+    -- WHY THERE IS NO LONGER A WHERE CLAUSE
+    --   It used to skip tables that had no sequence on the source. That is the
+    --   wrong side to ask: setval is strict, so a table without one on the
+    --   target makes pg_get_serial_sequence return NULL and the whole call
+    --   returns NULL, quietly and without error. The target decides, as it
+    --   should.
+    --
+    -- The list must stay in step with the reference tables exported above: a
+    -- table seeded with explicit ids and left out here is a duplicate key
+    -- waiting for the first insert after a rebuild.
+    SELECT 12.5, split_part(t.tbl, '.', 1), split_part(t.tbl, '.', 2),
+           format('SELECT setval(pg_get_serial_sequence(%L, ''id''), (SELECT COALESCE(max(id), 0) + 1 FROM %s), false);',
+                  t.tbl, t.tbl)
+    FROM (VALUES ('ass.issuer_status'),
+                 ('ass.real_estate_status'),
+                 ('ass.real_estate_type'),
+                 ('ass.payment_frequency_type'),
+                 ('iss.issuance_order_statuses')) AS t(tbl)
 
     UNION ALL
 

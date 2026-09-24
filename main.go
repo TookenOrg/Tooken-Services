@@ -51,10 +51,7 @@ func main() {
 		log.Fatalf("Error on Setup blockchain: %s", err.Error())
 	}
 
-	// services.SetGlobals()
-
 	startServer()
-
 }
 
 func startServer() {

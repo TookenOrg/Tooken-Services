@@ -247,8 +247,8 @@ func (h *Handler) MintTokenAsync(gCtx *gin.Context) {
 
 	// Validate before answering 202: the work runs in a goroutine, so this is
 	// the only moment where the caller can still be told the request is wrong.
-	if err := h.blockchainSvc.ValidateMintBurnInput(reqCtx, req.TokenContractAddress, req.To, req.Amount); err != nil {
-		if errors.Is(err, blockchainService.ErrInvalidMintBurnInput) {
+	if err := h.blockchainSvc.ValidateMintInput(reqCtx, req.TokenContractAddress, req.To, req.Amount); err != nil {
+		if errors.Is(err, blockchainService.ErrInvalidMintInput) {
 			logger.LogWarn("Refused mint request: %s", err.Error())
 			gCtx.JSON(http.StatusBadRequest, server.MintTokenResponse{Message: err.Error()})
 			return
@@ -295,8 +295,8 @@ func (h *Handler) BurnTokenAsync(gCtx *gin.Context) {
 
 	// Validate before answering 202: the work runs in a goroutine, so this is
 	// the only moment where the caller can still be told the request is wrong.
-	if err := h.blockchainSvc.ValidateMintBurnInput(reqCtx, req.TokenContractAddress, req.To, req.Amount); err != nil {
-		if errors.Is(err, blockchainService.ErrInvalidMintBurnInput) {
+	if err := h.blockchainSvc.ValidateBurnInput(reqCtx, req.TokenContractAddress, req.To, req.Amount); err != nil {
+		if errors.Is(err, blockchainService.ErrInvalidBurnInput) {
 			logger.LogWarn("Refused burn request: %s", err.Error())
 			gCtx.JSON(http.StatusBadRequest, server.BurnTokenResponse{Message: err.Error()})
 			return

@@ -234,7 +234,7 @@ func deployTokenSuiteViaFactory(ctx context.Context, factoryAddr common.Address,
 		return
 	}
 
-	deployment, err = utils.WaitTREXSuiteDeployment(ctx, factoryInstance, salt)
+	deployment, err = utils.WaitTREXSuiteDeployment(ctx, factoryInstance, tx, salt)
 	if err != nil {
 		return
 	}
@@ -284,7 +284,7 @@ func unpauseToken(ctx context.Context, tokenInstance contracts.Token) (tx *types
 	}
 	logger.LogInfo("📬 Token unpaused on transaction: %s", tx.Hash().Hex())
 
-	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "UNPAUSE_TOKEN", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "UNPAUSE_TOKEN", deployedTxDetails.ToAddressHex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
 	if err != nil {
 		return
 	}

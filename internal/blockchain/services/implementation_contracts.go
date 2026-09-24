@@ -42,7 +42,7 @@ func (s *Service) DeployAllImplementations(ctx context.Context) (deployedContrac
 	}
 	deployedContracts = append(deployedContracts, server.ContractDetails{
 		Address: irsAddr.Hex(),
-		Name:    globals.ImplIdentityRegistryStorage,
+		Name:    globals.ImplIdentityRegistryStorageName,
 	})
 
 	// 4. Deploy IdentityRegistry Implementation
@@ -132,9 +132,14 @@ func deployClaimTopicsRegistryImplementation(ctx context.Context) (ctrAddr commo
 		return
 	}
 
-	logger.LogInfo("📬 ClaimTopicsRegistry Implementation deployed at address: %s", ctrAddr.Hex())
+	logger.LogInfo("📬 ClaimsTopicsRegistry Implementation deployed at address: %s", ctrAddr.Hex())
 
-	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "IMPLEMENTATION_CLAIM_TOPIC_REGISTRY", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "IMPLEMENTATION_CLAIM_TOPIC_REGISTRY", deployedTxDetails.ToAddressHex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	if err != nil {
+		return
+	}
+
+	err = database.InsertContractImplementation(ctx, deployedTxDetails.Tx.Hash().Hex(), ctrAddr.Hex(), globals.ImplClaimsTopicRegistryName)
 	if err != nil {
 		return
 	}
@@ -159,10 +164,16 @@ func deployTrustedIssuersRegistryImplementation(ctx context.Context) (tirAddr co
 
 	logger.LogInfo("📬 TrustedIssuerRegistry Implementation deployed at address: %s", tirAddr.Hex())
 
-	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "IMPLEMENTATION_TRUSTED_ISSUERS_REGISTRY", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "IMPLEMENTATION_TRUSTED_ISSUER_REGISTRY", deployedTxDetails.ToAddressHex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
 	if err != nil {
 		return
 	}
+
+	err = database.InsertContractImplementation(ctx, deployedTxDetails.Tx.Hash().Hex(), tirAddr.Hex(), globals.ImplTrustedIssuerRegistryName)
+	if err != nil {
+		return
+	}
+
 	return
 }
 
@@ -183,7 +194,12 @@ func deployIdentityRegistryStorageImplementation(ctx context.Context) (irsAddr c
 
 	logger.LogInfo("📬 IdentityRegistryStorage Implementation deployed at address: %s", irsAddr.Hex())
 
-	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "IMPLEMENTATION_IDENTITY_REGISTRY_STORAGE", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "IMPLEMENTATION_IDENTITY_REGISTRY_STORAGE", deployedTxDetails.ToAddressHex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	if err != nil {
+		return
+	}
+
+	err = database.InsertContractImplementation(ctx, deployedTxDetails.Tx.Hash().Hex(), irsAddr.Hex(), globals.ImplIdentityRegistryStorageName)
 	if err != nil {
 		return
 	}
@@ -207,7 +223,12 @@ func deployIdentityRegistryImplementation(ctx context.Context) (irAddr common.Ad
 
 	logger.LogInfo("📬 IdentityRegistry Implementation deployed at address: %s", irAddr.Hex())
 
-	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "IMPLEMENTATION_IDENTITY_REGISTRY", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "IMPLEMENTATION_IDENTITY_REGISTRY", deployedTxDetails.ToAddressHex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	if err != nil {
+		return
+	}
+
+	err = database.InsertContractImplementation(ctx, deployedTxDetails.Tx.Hash().Hex(), irAddr.Hex(), globals.ImplIdentityRegistryName)
 	if err != nil {
 		return
 	}
@@ -231,7 +252,12 @@ func deployModularComplianceImplementation(ctx context.Context) (mcAddr common.A
 
 	logger.LogInfo("📬 ModularCompliance Implementation deployed at address: %s", mcAddr.Hex())
 
-	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "IMPLEMENTATION_MODULAR_COMPLIANCE", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "IMPLEMENTATION_MODULAR_COMPLIANCE", deployedTxDetails.ToAddressHex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	if err != nil {
+		return
+	}
+
+	err = database.InsertContractImplementation(ctx, deployedTxDetails.Tx.Hash().Hex(), mcAddr.Hex(), globals.ImplModularComplianceName)
 	if err != nil {
 		return
 	}
@@ -255,7 +281,11 @@ func deployTokenImplementation(ctx context.Context) (tokenAddr common.Address, e
 
 	logger.LogInfo("📬 Token Implementation deployed at address: %s", tokenAddr.Hex())
 
-	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "IMPLEMENTATION_TOKEN", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "IMPLEMENTATION_TOKEN", deployedTxDetails.ToAddressHex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	if err != nil {
+		return
+	}
+	err = database.InsertContractImplementation(ctx, deployedTxDetails.Tx.Hash().Hex(), tokenAddr.Hex(), globals.ImplTokenName)
 	if err != nil {
 		return
 	}
@@ -279,7 +309,12 @@ func deployIdentityImplementation(ctx context.Context) (identityAddr common.Addr
 
 	logger.LogInfo("📬 Identity Implementation deployed at address: %s", identityAddr.Hex())
 
-	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "IMPLEMENTATION_IDENTITY", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "IMPLEMENTATION_IDENTITY", deployedTxDetails.ToAddressHex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	if err != nil {
+		return
+	}
+
+	err = database.InsertContractImplementation(ctx, deployedTxDetails.Tx.Hash().Hex(), identityAddr.Hex(), globals.ImplIdentityName)
 	if err != nil {
 		return
 	}
@@ -303,7 +338,11 @@ func deployIdentityAuthorityImplementation(ctx context.Context, identity common.
 
 	logger.LogInfo("📬 IdentityAuthority Implementation deployed at address: %s", identityAuthAddr.Hex())
 
-	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "IMPLEMENTATION_IDENTITY_AUTHORITY", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "IMPLEMENTATION_IDENTITY_AUTHORITY", deployedTxDetails.ToAddressHex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	if err != nil {
+		return
+	}
+	err = database.InsertContractImplementation(ctx, deployedTxDetails.Tx.Hash().Hex(), identityAuthAddr.Hex(), globals.ImplIdentityAuthorityName)
 	if err != nil {
 		return
 	}
@@ -333,7 +372,11 @@ func deployTREXImplementationAuthority(ctx context.Context) (authorityAddr commo
 
 	logger.LogInfo("📬 TREXImplementationAuthority Implementation deployed at address: %s", authorityAddr.Hex())
 
-	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "IMPLEMENTATION_TREX_AUTHORITY", deployedTxDetails.Tx.To().Hex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	err = database.InsertEthTransaction(ctx, deployedTxDetails.Tx.Hash().Hex(), "IMPLEMENTATION_TREX_AUTHORITY", deployedTxDetails.ToAddressHex(), deployedTxDetails.BlockNumber.Int64(), big.Int{})
+	if err != nil {
+		return
+	}
+	err = database.InsertContractImplementation(ctx, deployedTxDetails.Tx.Hash().Hex(), authorityAddr.Hex(), globals.ImplTrexAuthorityName)
 	if err != nil {
 		return
 	}
