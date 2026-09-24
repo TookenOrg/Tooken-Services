@@ -32,14 +32,6 @@ import (
 	_ "github.com/lib/pq"
 )
 
-// Investor ids no fixture uses. blk.user_wallet and blk.identity carry no foreign key
-// on user_id, so no usr.users row is needed.
-const (
-	e2eInvestorUserID = 970001
-	e2eSecondUserID   = 970002
-	e2eRejectedUserID = 970003
-)
-
 func TestInvestorJourneyEndToEnd(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second)
 	defer cancel()
@@ -47,6 +39,13 @@ func TestInvestorJourneyEndToEnd(t *testing.T) {
 	env := newChainDBEnv(ctx, t)
 	fixture := env.Fixture
 	svc := NewService()
+
+	// Real users, not invented ids: blk.user_wallet references usr.users since
+	// 000026, so an investor has to exist before an identity can be deployed for
+	// them. Production is under the same constraint.
+	e2eInvestorUserID := env.NewUser(t)
+	e2eSecondUserID := env.NewUser(t)
+	e2eRejectedUserID := env.NewUser(t)
 
 	suite := fixture.DeploySuite(t, "E2EJourney", "Tooken E2E", "TKE2E", common.Address{})
 	env.SetSharedIRSRow(t, suite.IRSAddr)
