@@ -13,6 +13,7 @@ import (
 const (
 	StatusSubmitted = "submitted"
 	StatusApproved  = "approved"
+	StatusVerified  = "verified"
 	StatusRejected  = "rejected"
 	StatusRevoked   = "revoked"
 )
@@ -123,7 +124,9 @@ func GetKycVerificationByID(ctx context.Context, verificationId int) (kycVerific
 				k.expires_at,
 				k.revoked_at,
 				k.revoked_by,
-				k.revocation_reason
+				k.revocation_reason,
+				u.kyc_status,
+				u.kyc_verified_at
 		FROM usr.kyc_verification k
 		JOIN usr.users u ON u.id = k.user_id
 		WHERE k.id = $1;
@@ -145,6 +148,8 @@ func GetKycVerificationByID(ctx context.Context, verificationId int) (kycVerific
 		&kycVerification.RevokedAt,
 		&kycVerification.RevokedBy,
 		&kycVerification.RevocationReason,
+		&kycVerification.KycStatus,
+		&kycVerification.KycVerifiedAt,
 	)
 	if err != nil {
 		return kycVerification, fmt.Errorf("failed to get kyc verification by ID: %w", err)

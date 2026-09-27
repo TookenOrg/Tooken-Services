@@ -232,3 +232,40 @@ func (h *Handler) RevokeKycVerification(gCtx *gin.Context, verificationId int) {
 
 	gCtx.JSON(http.StatusOK, kycVerification)
 }
+
+func (h *Handler) SyncApprovedKycVerificationOnChain(gCtx *gin.Context, verificationId int) {
+	claims, exists := middleware.GetUserClaims(gCtx)
+	if !exists {
+		gCtx.JSON(http.StatusUnauthorized, logger.LogError("JWT not valid"))
+		return
+	}
+
+	if claims.Role != authUtils.RoleAdmin {
+		gCtx.JSON(http.StatusForbidden, logger.LogError("Forbidden"))
+		return
+	}
+
+	logger.LogInfo("🚀 Starting syncing approved KYC verification on-chain by ID: %d", verificationId)
+
+	kycVerification, err := h.userSvc.SyncApprovedKycVerificationOnChain(gCtx.Request.Context(), verificationId)
+	if err != nil {
+		switch {
+		case errors.Is(err, services.ErrKycVerificationNotFound):
+			gCtx.JSON(http.StatusNotFound, err.Error())
+			return
+		case errors.Is(err, services.ErrMessageInvalidStatus):
+			gCtx.JSON(http.StatusConflict, err.Error())
+			return
+		case errors.Is(err, services.ErrMessageInvalidExpiresAt):
+			gCtx.JSON(http.StatusConflict, err.Error())
+			return
+		case errors.Is(err, services.ErrMessageInvalidCountryCode):
+			gCtx.JSON(http.StatusConflict, err.Error())
+			return
+		}
+		gCtx.JSON(http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	gCtx.JSON(http.StatusOK, kycVerification)
+}

@@ -9,19 +9,23 @@ import (
 	"strings"
 
 	"github.com/TookenOrg/tooken-services/internal/api/server"
+	blkDatabase "github.com/TookenOrg/tooken-services/internal/blockchain/database"
+	blkServices "github.com/TookenOrg/tooken-services/internal/blockchain/services"
 	"github.com/TookenOrg/tooken-services/internal/users/database"
 	"github.com/TookenOrg/tooken-services/internal/utils"
+	"github.com/TookenOrg/tooken-services/pkg/logger"
 	"github.com/samber/lo"
 )
 
 var (
-	ErrKycVerificationNotFound   = errors.New("KYC verification not found")
-	ErrMessageKycAlreadyExists   = errors.New("a KYC verification with status 'submitted' already exists for this user")
-	ErrMessageInvalidCountryCode = errors.New("invalid country code")
-	ErrMessageInvalidFullName    = errors.New("invalid full name")
-	ErrMessageInvalidExpiresAt   = errors.New("invalid expires_at")
-	ErrMessageInvalidStatus      = errors.New("invalid status for the KYC verification")
-	ErrMessageInvalidReason      = errors.New("invalid reason for rejecting the KYC verification")
+	ErrKycVerificationNotFound     = errors.New("KYC verification not found")
+	ErrMessageKycAlreadyExists     = errors.New("a KYC verification with status 'submitted' already exists for this user")
+	ErrMessageInvalidCountryCode   = errors.New("invalid country code")
+	ErrMessageInvalidFullName      = errors.New("invalid full name")
+	ErrMessageInvalidExpiresAt     = errors.New("invalid expires_at")
+	ErrMessageInvalidStatus        = errors.New("invalid status for the KYC verification")
+	ErrMessageInvalidReason        = errors.New("invalid reason for rejecting the KYC verification")
+	ErrMessageInvalidWalletAddress = errors.New("invalid wallet address for the user")
 )
 
 func (s *Service) PostKycVerifications(ctx context.Context, userId int, request *server.KycVerificationRequest) (err error) {
@@ -169,4 +173,56 @@ func (s *Service) RevokeKycVerification(ctx context.Context, verificationId int,
 		return kycVerification, err
 	}
 	return kycVerification, nil
+}
+
+func (s *Service) SyncApprovedKycVerificationOnChain(ctx context.Context, verificationId int) (kycVerification server.KycVerification, err error) {
+
+	// 0 - Check current status of the KYC verification to ensure it can be synced on-chain
+	currentKycVerification, err := database.GetKycVerificationByID(ctx, verificationId)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return kycVerification, ErrKycVerificationNotFound
+		}
+		return kycVerification, err
+	}
+	if currentKycVerification.Status != database.StatusApproved {
+		return kycVerification, ErrMessageInvalidStatus
+	}
+	if !currentKycVerification.ExpiresAt.After(time.Now()) {
+		return kycVerification, ErrMessageInvalidExpiresAt
+	}
+	if strings.TrimSpace(currentKycVerification.DeclaredCountryCode) == "" {
+		return kycVerification, ErrMessageInvalidCountryCode
+	}
+
+	// 1 - idempotency with user_kyc_status
+	if currentKycVerification.KycStatus != nil && *currentKycVerification.KycStatus == database.StatusVerified {
+		logger.LogInfo("KYC verification ID=%d is already verified in DB for user ID=%d, checking on-chain status", verificationId, currentKycVerification.UserId)
+
+		// A - Get user wallet
+		userWalletAddrPtr, err := blkDatabase.GetWalletByUserId(ctx, currentKycVerification.UserId)
+		if err != nil {
+			return kycVerification, err
+		}
+		if userWalletAddrPtr == nil {
+			return kycVerification, ErrMessageInvalidWalletAddress
+		}
+		userWalletAddr := userWalletAddrPtr.Hex()
+
+		// B - Fetch isVerified in blockchain
+		isVerifiedOnChain, err := blkServices.FetchIsVerifiedOnSharedIdentityRegistry(ctx, userWalletAddr)
+		if err != nil {
+			return kycVerification, err
+		}
+		if isVerifiedOnChain {
+			logger.LogInfo("KYC verification ID=%d is already verified on-chain", verificationId)
+			return currentKycVerification, nil
+		}
+
+		logger.LogInfo("KYC verification ID=%d is not verified on-chain", verificationId)
+	}
+
+	// 2 - Morceau 2
+	return kycVerification, nil
+
 }

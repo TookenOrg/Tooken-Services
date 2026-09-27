@@ -480,6 +480,63 @@ paths:
               schema:
                 $ref: "#/components/schemas/APIResponse"
 
+  /kyc/verifications/{verificationId}/sync-onchain:
+    post:
+      tags:
+        - KYC
+      summary: Sync a specific approved KYC verification with the on-chain record
+      operationId: SyncApprovedKycVerificationOnChain
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: verificationId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KycVerification"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "404":
+          description: KYC verification not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "409":
+          description: The status of the KYC verification is invalid for this operation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
   # Asset
   /assets/real-estates/active:
     get:
@@ -1578,7 +1635,6 @@ paths:
           description: Payment added
         "500":
           description: Internal server error
-
 components:
   securitySchemes:
     bearerAuth:
@@ -2820,6 +2876,13 @@ components:
         revocation_reason:
           type: string
           description: The reason for revoking the KYC verification
+        kyc_status:
+          type: string
+          description: The KYC status of the user (e.g., pending, verified)
+        kyc_verified_at:
+          type: string
+          format: date-time
+          description: The date and time when the user's KYC was verified
 
     KycVerificationRequest:
       type: object

@@ -151,3 +151,15 @@ func fetchIsVerifiedByTokenAddress(ctx context.Context, tokenAddr, walletAddrToC
 	}
 	return isVerified, nil
 }
+
+func FetchIsVerifiedOnSharedIdentityRegistry(ctx context.Context, wallet string) (bool, error) {
+	irInstance, err := resolveIdentityRegistryInstance(ctx)
+	if err != nil {
+		return false, err
+	}
+
+	return irInstance.IsVerified(
+		&bind.CallOpts{Context: ctx},
+		common.HexToAddress(wallet),
+	)
+}
