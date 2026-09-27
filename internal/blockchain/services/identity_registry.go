@@ -164,27 +164,31 @@ func FetchIsVerifiedOnSharedIdentityRegistry(ctx context.Context, wallet string)
 	)
 }
 
-func RegisterIdentityInSharedRegistry(ctx context.Context, walletAddress, identityAddress common.Address, countryCode int) error {
+func RegisterIdentityInSharedRegistry(ctx context.Context, walletAddress, identityAddress common.Address, countryCode int) (txHash *string, err error) {
 
 	IdentityRegistryInstance, err := resolveIdentityRegistryInstance(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	contains, err := IdentityRegistryInstance.Contains(&bind.CallOpts{Context: ctx}, walletAddress)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if contains {
 		registeredIdentity, err := IdentityRegistryInstance.Identity(&bind.CallOpts{Context: ctx}, walletAddress)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if registeredIdentity != identityAddress {
-			return logger.LogError("wallet %s is already registered with identity %s, expected %s", walletAddress.Hex(), registeredIdentity.Hex(), identityAddress.Hex())
+			return nil, logger.LogError("wallet %s is already registered with identity %s, expected %s", walletAddress.Hex(), registeredIdentity.Hex(), identityAddress.Hex())
 		}
-		return nil
+		return nil, nil
 	}
 
-	_, err = registerIdentity(ctx, walletAddress, identityAddress, countryCode)
-	return err
+	tx, err := registerIdentity(ctx, walletAddress, identityAddress, countryCode)
+	if err != nil {
+		return nil, err
+	}
+	hash := tx.Hash().Hex()
+	return &hash, nil
 }

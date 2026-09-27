@@ -176,6 +176,48 @@ func TestRegisterIdentityIntegration(t *testing.T) {
 		}
 	})
 
+	t.Run("public shared registry registration is idempotent for the same identity", func(t *testing.T) {
+		var before int
+		if err := env.DB.QueryRow(
+			`SELECT count(*) FROM blk.eth_transaction WHERE tx_name = $1`,
+			"REGISTER_IDENTITY").Scan(&before); err != nil {
+			t.Fatal(err)
+		}
+
+		txHash, err := RegisterIdentityInSharedRegistry(ctx, investor, investorIdentityAddr, 250)
+		if err != nil {
+			t.Fatalf("RegisterIdentityInSharedRegistry: %v", err)
+		}
+		if txHash != nil {
+			t.Fatalf("idempotent registration must not send a tx, got %s", *txHash)
+		}
+
+		var after int
+		if err := env.DB.QueryRow(
+			`SELECT count(*) FROM blk.eth_transaction WHERE tx_name = $1`,
+			"REGISTER_IDENTITY").Scan(&after); err != nil {
+			t.Fatal(err)
+		}
+		if after != before {
+			t.Fatalf("idempotent registration inserted a transaction: before=%d after=%d", before, after)
+		}
+	})
+
+	t.Run("public shared registry registration refuses a different identity for the same wallet", func(t *testing.T) {
+		_, otherIdentityAddr, _ := fixture.NewInvestorIdentity(t)
+
+		txHash, err := RegisterIdentityInSharedRegistry(ctx, investor, otherIdentityAddr, 250)
+		if err == nil {
+			t.Fatal("RegisterIdentityInSharedRegistry must refuse a different identity for an already registered wallet")
+		}
+		if txHash != nil {
+			t.Fatalf("refused registration must not send a tx, got %s", *txHash)
+		}
+		if !strings.Contains(err.Error(), "already registered with identity") {
+			t.Fatalf("error should explain the identity mismatch, got: %v", err)
+		}
+	})
+
 	t.Run("a registered investor without a claim is still not verified", func(t *testing.T) {
 		// Registration alone is not KYC: the claim is the other half, and the token
 		// checks both. Asserting this before adding the claim is what proves the next

@@ -87,7 +87,7 @@ func GenerateNewWallet(userId int) (publicKey common.Address, walletId int64, er
 	return
 }
 
-func EnsureWalletAndIdentity(ctx context.Context, userID int) (walletAddress, identityAddress common.Address, err error) {
+func EnsureWalletAndIdentity(ctx context.Context, userID int) (walletAddress, identityAddress common.Address, identityTxHash *string, err error) {
 	walletAddressPtr, err := database.GetWalletByUserId(ctx, userID)
 	if err != nil {
 		return
@@ -135,6 +135,8 @@ func EnsureWalletAndIdentity(ctx context.Context, userID int) (walletAddress, id
 		return
 	}
 
+	hash := tx.Hash().Hex()
+	identityTxHash = &hash
 	err = database.InsertIdentity(ctx, userID, walletID, identityAddress.Hex(), tx.Hash().Hex())
 	return
 }

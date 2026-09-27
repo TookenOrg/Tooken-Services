@@ -10,43 +10,56 @@ import (
 	"github.com/TookenOrg/tooken-services/internal/users/database"
 	"github.com/TookenOrg/tooken-services/internal/utils"
 	"github.com/TookenOrg/tooken-services/pkg/logger"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 )
 
 const kycClaimTopic = 7
 
 type kycOnChainSyncService struct {
-	blockchainSvc *blkServices.Service
+	addClaimToIdentity               func(context.Context, server.AddClaimRequest) (*types.Transaction, error)
+	ensureWalletAndIdentity          func(context.Context, int) (common.Address, common.Address, *string, error)
+	fetchIsVerified                  func(context.Context, string) (bool, error)
+	getWalletByUserID                func(context.Context, int) (*common.Address, error)
+	registerIdentityInSharedRegistry func(context.Context, common.Address, common.Address, int) (*string, error)
 }
 
 func newKYCOnChainSyncService(blockchainSvc *blkServices.Service) *kycOnChainSyncService {
 	return &kycOnChainSyncService{
-		blockchainSvc: blockchainSvc,
+		addClaimToIdentity:               blockchainSvc.AddClaimToIdentity,
+		ensureWalletAndIdentity:          blkServices.EnsureWalletAndIdentity,
+		fetchIsVerified:                  blkServices.FetchIsVerifiedOnSharedIdentityRegistry,
+		getWalletByUserID:                blkDatabase.GetWalletByUserId,
+		registerIdentityInSharedRegistry: blkServices.RegisterIdentityInSharedRegistry,
 	}
 }
 
-func (s *kycOnChainSyncService) SyncApprovedKYCOnChain(ctx context.Context, kycVerification server.KycVerification) (isVerifiedOnChain bool, err error) {
-	if kycVerification.KycStatus != nil && *kycVerification.KycStatus == database.StatusVerified {
-		done, err := s.returnIfAlreadyVerifiedOnChain(ctx, kycVerification)
-		if err != nil {
-			return false, err
-		}
-		if done {
-			return true, nil
-		}
-	}
-
+func (s *kycOnChainSyncService) SyncApprovedKYCOnChain(ctx context.Context, kycVerification server.KycVerification) (response server.KycOnChainSyncResponse, isVerifiedOnChain bool, err error) {
 	numericCountryCode, err := utils.CountryAlpha2ToNumeric(kycVerification.DeclaredCountryCode)
 	if err != nil {
-		return false, ErrMessageInvalidCountryCode
+		return response, false, ErrMessageInvalidCountryCode
 	}
 
-	walletAddress, identityAddress, err := blkServices.EnsureWalletAndIdentity(ctx, kycVerification.UserId)
+	walletAddress, identityAddress, identityTxHash, err := s.ensureWalletAndIdentity(ctx, kycVerification.UserId)
 	if err != nil {
 		if errors.Is(err, blkServices.ErrIdentityWithoutWallet) {
-			return false, ErrMessageIncoherentUserState
+			return response, false, ErrMessageIncoherentUserState
 		}
-		return false, err
+		return response, false, err
 	}
+
+	transactions := server.KycOnChainSyncTransactions{
+		Identity: identityTxHash,
+	}
+	response = server.KycOnChainSyncResponse{
+		UserId:          kycVerification.UserId,
+		WalletAddress:   walletAddress.Hex(),
+		IdentityAddress: identityAddress.Hex(),
+		CountryCode:     kycVerification.DeclaredCountryCode,
+		CountryNumeric:  numericCountryCode,
+		Transactions:    transactions,
+	}
+
 	logger.LogInfo(
 		"KYC verification ID=%d has wallet=%s identity=%s country_numeric=%d",
 		kycVerification.Id,
@@ -55,22 +68,37 @@ func (s *kycOnChainSyncService) SyncApprovedKYCOnChain(ctx context.Context, kycV
 		numericCountryCode,
 	)
 
-	err = blkServices.RegisterIdentityInSharedRegistry(ctx, walletAddress, identityAddress, numericCountryCode)
-	if err != nil {
-		return false, err
+	if kycVerification.KycStatus != nil && *kycVerification.KycStatus == database.StatusVerified {
+		done, err := s.returnIfAlreadyVerifiedOnChain(ctx, kycVerification)
+		if err != nil {
+			return response, false, err
+		}
+		if done {
+			return response, true, nil
+		}
 	}
 
-	_, err = s.blockchainSvc.AddClaimToIdentity(ctx, server.AddClaimRequest{
+	claimTx, err := s.addClaimToIdentity(ctx, server.AddClaimRequest{
 		UserId:     kycVerification.UserId,
 		ClaimTopic: kycClaimTopic,
 	})
 	if err != nil {
-		return false, err
+		return response, false, err
+	}
+	if claimTx != nil {
+		hash := claimTx.Hash().Hex()
+		response.Transactions.Claim = &hash
 	}
 
-	isVerifiedOnChain, err = blkServices.FetchIsVerifiedOnSharedIdentityRegistry(ctx, walletAddress.Hex())
+	registerIdentityTxHash, err := s.registerIdentityInSharedRegistry(ctx, walletAddress, identityAddress, numericCountryCode)
 	if err != nil {
-		return false, err
+		return response, false, err
+	}
+	response.Transactions.RegisterIdentity = registerIdentityTxHash
+
+	isVerifiedOnChain, err = s.fetchIsVerified(ctx, walletAddress.Hex())
+	if err != nil {
+		return response, false, err
 	}
 
 	if isVerifiedOnChain {
@@ -79,13 +107,13 @@ func (s *kycOnChainSyncService) SyncApprovedKYCOnChain(ctx context.Context, kycV
 		logger.LogWarn("KYC verification ID=%d failed to be verified on-chain", kycVerification.Id)
 	}
 
-	return isVerifiedOnChain, nil
+	return response, isVerifiedOnChain, nil
 }
 
 func (s *kycOnChainSyncService) returnIfAlreadyVerifiedOnChain(ctx context.Context, kycVerification server.KycVerification) (bool, error) {
 	logger.LogInfo("KYC verification ID=%d is already verified in DB for user ID=%d, checking on-chain status", kycVerification.Id, kycVerification.UserId)
 
-	userWalletAddrPtr, err := blkDatabase.GetWalletByUserId(ctx, kycVerification.UserId)
+	userWalletAddrPtr, err := s.getWalletByUserID(ctx, kycVerification.UserId)
 	if err != nil {
 		return false, err
 	}
@@ -93,7 +121,7 @@ func (s *kycOnChainSyncService) returnIfAlreadyVerifiedOnChain(ctx context.Conte
 		return false, ErrMessageInvalidWalletAddress
 	}
 
-	isVerifiedOnChain, err := blkServices.FetchIsVerifiedOnSharedIdentityRegistry(ctx, userWalletAddrPtr.Hex())
+	isVerifiedOnChain, err := s.fetchIsVerified(ctx, userWalletAddrPtr.Hex())
 	if err != nil {
 		return false, err
 	}

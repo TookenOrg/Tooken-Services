@@ -175,40 +175,49 @@ func (s *Service) RevokeKycVerification(ctx context.Context, verificationId int,
 	return kycVerification, nil
 }
 
-func (s *Service) SyncApprovedKycVerificationOnChain(ctx context.Context, verificationId int) (kycVerification server.KycVerification, err error) {
+func (s *Service) SyncApprovedKycVerificationOnChain(ctx context.Context, verificationId int) (response server.KycOnChainSyncResponse, err error) {
 
 	// 0 - Check current status of the KYC verification to ensure it can be synced on-chain
 	currentKycVerification, err := database.GetKycVerificationByID(ctx, verificationId)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return kycVerification, ErrKycVerificationNotFound
+			return response, ErrKycVerificationNotFound
 		}
-		return kycVerification, err
+		return response, err
 	}
 	if currentKycVerification.Status != database.StatusApproved {
-		return kycVerification, ErrMessageInvalidStatus
+		return response, ErrMessageInvalidStatus
 	}
 	if !currentKycVerification.ExpiresAt.After(time.Now()) {
-		return kycVerification, ErrMessageInvalidExpiresAt
+		return response, ErrMessageInvalidExpiresAt
 	}
 	if strings.TrimSpace(currentKycVerification.DeclaredCountryCode) == "" {
-		return kycVerification, ErrMessageInvalidCountryCode
+		return response, ErrMessageInvalidCountryCode
 	}
 
-	isVerifiedOnChain, err := s.getKYCOnChainSync().SyncApprovedKYCOnChain(ctx, currentKycVerification)
+	response, isVerifiedOnChain, err := s.getKYCOnChainSync().SyncApprovedKYCOnChain(ctx, currentKycVerification)
 	if err != nil {
-		return kycVerification, err
+		return response, err
 	}
 	if !isVerifiedOnChain {
-		return kycVerification, ErrMessageFailedToVerifyOnChain
-	} else {
-		logger.LogInfo("KYC verification ID=%d has been successfully verified on-chain", currentKycVerification.Id)
-		// Update the local database to reflect that the KYC verification has been successfully verified on-chain
-		err = database.MarkUserKycVerified(ctx, currentKycVerification.UserId)
-		if err != nil {
-			return kycVerification, err
-		}
+		return response, ErrMessageFailedToVerifyOnChain
 	}
 
-	return currentKycVerification, nil
+	if currentKycVerification.KycStatus != nil &&
+		*currentKycVerification.KycStatus == database.StatusVerified &&
+		currentKycVerification.KycVerifiedAt != nil {
+		response.KycStatus = database.StatusVerified
+		response.KycVerifiedAt = *currentKycVerification.KycVerifiedAt
+		return response, nil
+	}
+
+	logger.LogInfo("KYC verification ID=%d has been successfully verified on-chain", currentKycVerification.Id)
+	verifiedAt, err := database.MarkUserKycVerified(ctx, currentKycVerification.UserId)
+	if err != nil {
+		return response, err
+	}
+	response.KycStatus = database.StatusVerified
+	response.KycVerifiedAt = verifiedAt
+
+	return response, nil
 }

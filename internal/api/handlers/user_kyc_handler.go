@@ -256,7 +256,8 @@ func (h *Handler) SyncApprovedKycVerificationOnChain(gCtx *gin.Context, verifica
 			errors.Is(err, services.ErrMessageInvalidExpiresAt),
 			errors.Is(err, services.ErrMessageInvalidCountryCode),
 			errors.Is(err, services.ErrMessageIncoherentUserState),
-			errors.Is(err, services.ErrMessageInvalidWalletAddress):
+			errors.Is(err, services.ErrMessageInvalidWalletAddress),
+			errors.Is(err, services.ErrMessageFailedToVerifyOnChain):
 			gCtx.JSON(http.StatusConflict, err.Error())
 		default:
 			gCtx.JSON(http.StatusInternalServerError, err.Error())

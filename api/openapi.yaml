@@ -259,7 +259,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/KycVerification"
+                $ref: "#/components/schemas/KycOnChainSyncResponse"
         "401":
           description: Unauthorized
           content:
@@ -2883,6 +2883,49 @@ components:
           type: string
           format: date-time
           description: The date and time when the user's KYC was verified
+
+    KycOnChainSyncResponse:
+      type: object
+      required:
+        - user_id
+        - wallet_address
+        - identity_address
+        - country_code
+        - country_numeric
+        - kyc_status
+        - kyc_verified_at
+        - transactions
+      properties:
+        user_id:
+          type: integer
+        wallet_address:
+          type: string
+        identity_address:
+          type: string
+        country_code:
+          type: string
+        country_numeric:
+          type: integer
+        kyc_status:
+          type: string
+        kyc_verified_at:
+          type: string
+          format: date-time
+        transactions:
+          $ref: "#/components/schemas/KycOnChainSyncTransactions"
+
+    KycOnChainSyncTransactions:
+      type: object
+      properties:
+        identity:
+          type: string
+          description: Transaction hash of the identity deployment, absent when reused
+        claim:
+          type: string
+          description: Transaction hash of the KYC claim addition, absent when reused
+        register_identity:
+          type: string
+          description: Transaction hash of the IdentityRegistry registration, absent when already registered
 
     KycVerificationRequest:
       type: object
