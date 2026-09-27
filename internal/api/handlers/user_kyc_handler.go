@@ -265,6 +265,9 @@ func (h *Handler) SyncApprovedKycVerificationOnChain(gCtx *gin.Context, verifica
 		case errors.Is(err, services.ErrMessageIncoherentUserState):
 			gCtx.JSON(http.StatusConflict, err.Error())
 			return
+		case errors.Is(err, services.ErrMessageInvalidWalletAddress):
+			gCtx.JSON(http.StatusConflict, err.Error())
+			return
 		}
 		gCtx.JSON(http.StatusInternalServerError, err.Error())
 		return

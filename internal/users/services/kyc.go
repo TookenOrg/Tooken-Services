@@ -9,11 +9,8 @@ import (
 	"strings"
 
 	"github.com/TookenOrg/tooken-services/internal/api/server"
-	blkDatabase "github.com/TookenOrg/tooken-services/internal/blockchain/database"
-	blkServices "github.com/TookenOrg/tooken-services/internal/blockchain/services"
 	"github.com/TookenOrg/tooken-services/internal/users/database"
 	"github.com/TookenOrg/tooken-services/internal/utils"
-	"github.com/TookenOrg/tooken-services/pkg/logger"
 	"github.com/samber/lo"
 )
 
@@ -196,55 +193,10 @@ func (s *Service) SyncApprovedKycVerificationOnChain(ctx context.Context, verifi
 		return kycVerification, ErrMessageInvalidCountryCode
 	}
 
-	// 1 - idempotency with user_kyc_status
-	// Return early when the KYC is already verified in DB and on-chain
-	if currentKycVerification.KycStatus != nil && *currentKycVerification.KycStatus == database.StatusVerified {
-		logger.LogInfo("KYC verification ID=%d is already verified in DB for user ID=%d, checking on-chain status", verificationId, currentKycVerification.UserId)
-
-		// A - Get user wallet
-		userWalletAddrPtr, err := blkDatabase.GetWalletByUserId(ctx, currentKycVerification.UserId)
-		if err != nil {
-			return kycVerification, err
-		}
-		if userWalletAddrPtr == nil {
-			return kycVerification, ErrMessageInvalidWalletAddress
-		}
-		userWalletAddr := userWalletAddrPtr.Hex()
-
-		// B - Fetch isVerified in blockchain
-		isVerifiedOnChain, err := blkServices.FetchIsVerifiedOnSharedIdentityRegistry(ctx, userWalletAddr)
-		if err != nil {
-			return kycVerification, err
-		}
-		if isVerifiedOnChain {
-			logger.LogInfo("KYC verification ID=%d is already verified on-chain", verificationId)
-			return currentKycVerification, nil
-		}
-
-		logger.LogInfo("KYC verification ID=%d is not verified on-chain", verificationId)
-	}
-
-	// 2 - convert country alpha code to numeric code for blockchain compatibility
-	numericCountryCode, err := utils.CountryAlpha2ToNumeric(currentKycVerification.DeclaredCountryCode)
+	err = s.getKYCOnChainSync().SyncApprovedKYCOnChain(ctx, currentKycVerification)
 	if err != nil {
-		return kycVerification, ErrMessageInvalidCountryCode
-	}
-
-	// 3 - ensure wallet and ONCHAINID exist before continuing to registry/claim steps.
-	walletAddress, identityAddress, err := blkServices.EnsureWalletAndIdentity(ctx, currentKycVerification.UserId)
-	if err != nil {
-		if errors.Is(err, blkServices.ErrIdentityWithoutWallet) {
-			return kycVerification, ErrMessageIncoherentUserState
-		}
 		return kycVerification, err
 	}
-	logger.LogInfo(
-		"KYC verification ID=%d has wallet=%s identity=%s country_numeric=%d",
-		verificationId,
-		walletAddress.Hex(),
-		identityAddress.Hex(),
-		numericCountryCode,
-	)
 
 	return currentKycVerification, nil
 }
