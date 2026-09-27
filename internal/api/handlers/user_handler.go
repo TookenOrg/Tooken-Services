@@ -129,3 +129,32 @@ func (h *Handler) GetListKycVerifications(gCtx *gin.Context, params server.GetLi
 
 	gCtx.JSON(http.StatusOK, kycVerification)
 }
+
+func (h *Handler) GetKycVerificationById(gCtx *gin.Context, verificationId int) {
+
+	claims, exists := middleware.GetUserClaims(gCtx)
+	if !exists {
+		gCtx.JSON(http.StatusUnauthorized, logger.LogError("JWT not valid"))
+		return
+	}
+
+	if claims.Role != authUtils.RoleAdmin {
+		gCtx.JSON(http.StatusForbidden, logger.LogError("Forbidden"))
+		return
+	}
+
+	logger.LogInfo("🚀 Starting getting KYC verification by ID: %d", verificationId)
+
+	kycVerification, err := h.userSvc.GetKycVerificationById(gCtx.Request.Context(), verificationId)
+	if err != nil {
+		switch {
+		case errors.Is(err, services.ErrKycVerificationNotFound):
+			gCtx.JSON(http.StatusNotFound, err.Error())
+			return
+		}
+		gCtx.JSON(http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	gCtx.JSON(http.StatusOK, kycVerification)
+}

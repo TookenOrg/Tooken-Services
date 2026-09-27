@@ -44,7 +44,22 @@ func InsertKycVerification(ctx context.Context, userId int, request *server.KycV
 func GetKycVerificationByUserIDAndStatus(ctx context.Context, userId *int, status *string) (kycVerification []server.KycVerification, err error) {
 	// A nil filter becomes NULL and is ignored.
 	query := `
-		SELECT k.id, k.user_id, k.status, k.declared_full_name, k.declared_country_code, k.created_at, k.updated_at, u.email
+		SELECT k.id,
+				k.user_id,
+				k.status,
+				k.declared_full_name,
+				k.declared_country_code,
+				k.created_at,
+				k.updated_at,
+				u.email,
+				k.submitted_at,
+				k.decided_at,
+				k.decided_by,
+				k.rejection_reason,
+				k.expires_at,
+				k.revoked_at,
+				k.revoked_by,
+				k.revocation_reason
 		FROM usr.kyc_verification k
 		JOIN usr.users u ON u.id = k.user_id
 		WHERE ($1::integer IS NULL OR k.user_id = $1)
@@ -68,6 +83,14 @@ func GetKycVerificationByUserIDAndStatus(ctx context.Context, userId *int, statu
 			&kv.CreatedAt,
 			&kv.UpdatedAt,
 			&kv.Email,
+			&kv.SubmittedAt,
+			&kv.DecidedAt,
+			&kv.DecidedBy,
+			&kv.RejectionReason,
+			&kv.ExpiresAt,
+			&kv.RevokedAt,
+			&kv.RevokedBy,
+			&kv.RevocationReason,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan kyc verification: %w", err)
 		}
@@ -77,5 +100,51 @@ func GetKycVerificationByUserIDAndStatus(ctx context.Context, userId *int, statu
 		return nil, fmt.Errorf("failed to iterate kyc verification rows: %w", err)
 	}
 
+	return kycVerification, nil
+}
+
+func GetKycVerificationByID(ctx context.Context, verificationId int) (kycVerification server.KycVerification, err error) {
+	query := `
+		SELECT 	k.id,
+				k.user_id,
+				k.status,
+				k.declared_full_name,
+				k.declared_country_code,
+				k.created_at,
+				k.updated_at,
+				u.email,
+				k.submitted_at,
+				k.decided_at,
+				k.decided_by,
+				k.rejection_reason,
+				k.expires_at,
+				k.revoked_at,
+				k.revoked_by,
+				k.revocation_reason
+		FROM usr.kyc_verification k
+		JOIN usr.users u ON u.id = k.user_id
+		WHERE k.id = $1;
+	`
+	err = globals.DB.QueryRowContext(ctx, query, verificationId).Scan(
+		&kycVerification.Id,
+		&kycVerification.UserId,
+		&kycVerification.Status,
+		&kycVerification.DeclaredFullName,
+		&kycVerification.DeclaredCountryCode,
+		&kycVerification.CreatedAt,
+		&kycVerification.UpdatedAt,
+		&kycVerification.Email,
+		&kycVerification.SubmittedAt,
+		&kycVerification.DecidedAt,
+		&kycVerification.DecidedBy,
+		&kycVerification.RejectionReason,
+		&kycVerification.ExpiresAt,
+		&kycVerification.RevokedAt,
+		&kycVerification.RevokedBy,
+		&kycVerification.RevocationReason,
+	)
+	if err != nil {
+		return kycVerification, fmt.Errorf("failed to get kyc verification by ID: %w", err)
+	}
 	return kycVerification, nil
 }

@@ -238,6 +238,53 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/APIResponse"
+
+  /users/kyc/verifications/{verificationId}:
+    get:
+      tags:
+        - KYC
+      summary: Get a specific KYC verification by ID
+      operationId: GetKycVerificationById
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: verificationId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KycVerification"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "404":
+          description: KYC verification not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+
   # Asset
   /assets/real-estates/active:
     get:
@@ -2550,6 +2597,34 @@ components:
           description: Additional message or reason for the verification status
         email:
           type: string
+        submitted_at:
+          type: string
+          format: date-time
+          description: The date and time when the KYC verification was submitted
+        decided_at:
+          type: string
+          format: date-time
+          description: The date and time when the KYC verification was decided
+        decided_by:
+          type: integer
+          description: The ID of the user who decided the KYC verification
+        rejection_reason:
+          type: string
+          description: The reason for rejecting the KYC verification
+        expires_at:
+          type: string
+          format: date-time
+          description: The date and time when the KYC verification expires
+        revoked_at:
+          type: string
+          format: date-time
+          description: The date and time when the KYC verification was revoked
+        revoked_by:
+          type: integer
+          description: The ID of the user who revoked the KYC verification
+        revocation_reason:
+          type: string
+          description: The reason for revoking the KYC verification
 
     KycVerificationRequest:
       type: object

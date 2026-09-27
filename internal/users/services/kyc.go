@@ -59,3 +59,14 @@ func (s *Service) PostKycVerifications(ctx context.Context, userId int, request 
 func (s *Service) GetListKycVerifications(ctx context.Context, userId *int, status *string) (kycVerifications []server.KycVerification, err error) {
 	return database.GetKycVerificationByUserIDAndStatus(ctx, userId, status)
 }
+
+func (s *Service) GetKycVerificationById(ctx context.Context, verificationId int) (kycVerification server.KycVerification, err error) {
+	kycVerification, err = database.GetKycVerificationByID(ctx, verificationId)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return kycVerification, ErrKycVerificationNotFound
+		}
+		return kycVerification, err
+	}
+	return kycVerification, nil
+}
