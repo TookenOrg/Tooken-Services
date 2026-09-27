@@ -38,7 +38,7 @@ func defineKycStatus(user server.User) (status *server.UserKycStatus) {
 
 	isExpired := user.KycExpiresAt != nil && user.KycExpiresAt.Before(time.Now())
 	if isExpired {
-		status = lo.ToPtr(server.UserKycStatus(server.Expired))
+		status = lo.ToPtr(server.UserKycStatus(server.UserKycStatusExpired))
 	} else {
 		status = user.KycStatus
 	}

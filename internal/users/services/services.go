@@ -4,14 +4,30 @@ package services
 import (
 	"context"
 
+	"github.com/TookenOrg/tooken-services/internal/api/server"
+	blkServices "github.com/TookenOrg/tooken-services/internal/blockchain/services"
 	"github.com/TookenOrg/tooken-services/internal/users/database"
 )
 
 type Service struct {
+	kycOnChainSync kycOnChainSynchronizer
+}
+
+type kycOnChainSynchronizer interface {
+	SyncApprovedKYCOnChain(ctx context.Context, kycVerification server.KycVerification) (server.KycOnChainSyncResponse, bool, error)
 }
 
 func NewService() *Service {
-	return &Service{}
+	return &Service{
+		kycOnChainSync: newKYCOnChainSyncService(blkServices.NewService()),
+	}
+}
+
+func (s *Service) getKYCOnChainSync() kycOnChainSynchronizer {
+	if s.kycOnChainSync == nil {
+		s.kycOnChainSync = newKYCOnChainSyncService(blkServices.NewService())
+	}
+	return s.kycOnChainSync
 }
 
 func (s *Service) AddFavoritesRealEstateForUser(ctx context.Context, userId, realEstateId int) (err error) {

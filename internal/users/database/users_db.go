@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"time"
 
 	"github.com/TookenOrg/tooken-services/internal/api/server"
 	"github.com/TookenOrg/tooken-services/internal/globals"
@@ -33,5 +34,17 @@ func GetUserByID(ctx context.Context, userID int) (user *server.User, err error)
 	}
 
 	logger.LogDebug("User retrieved with ID [%d]", userID)
+	return
+}
+
+func MarkUserKycVerified(ctx context.Context, userID int) (verifiedAt time.Time, err error) {
+	query := `
+        UPDATE usr.users
+        SET kyc_status = $2,
+			kyc_verified_at = NOW()
+        WHERE id = $1
+		RETURNING kyc_verified_at
+    `
+	err = globals.DB.QueryRowContext(ctx, query, userID, StatusVerified).Scan(&verifiedAt)
 	return
 }

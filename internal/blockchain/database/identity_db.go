@@ -2,6 +2,8 @@ package database
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/TookenOrg/tooken-services/internal/globals"
@@ -17,8 +19,11 @@ func GetIdentityAddrByUserId(ctx context.Context, userId int) (identityAddr *com
     `
 
 	var identityAddress string
-	err = globals.DB.QueryRow(query, userId).Scan(&identityAddress)
+	err = globals.DB.QueryRowContext(ctx, query, userId).Scan(&identityAddress)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("failed to select identity address for userId %d: %w", userId, err)
 	}
 
