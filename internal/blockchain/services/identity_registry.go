@@ -163,3 +163,8 @@ func FetchIsVerifiedOnSharedIdentityRegistry(ctx context.Context, wallet string)
 		common.HexToAddress(wallet),
 	)
 }
+
+func RegisterIdentityInSharedRegistry(ctx context.Context, walletAddress, identityAddress common.Address, countryCode int) error {
+	_, err := registerIdentity(ctx, walletAddress, identityAddress, countryCode)
+	return err
+}

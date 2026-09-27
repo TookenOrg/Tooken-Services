@@ -52,6 +52,11 @@ func (s *kycOnChainSyncService) SyncApprovedKYCOnChain(ctx context.Context, kycV
 		numericCountryCode,
 	)
 
+	err = blkServices.RegisterIdentityInSharedRegistry(ctx, walletAddress, identityAddress, numericCountryCode)
+	if err != nil {
+		return err
+	}
+
 	_, err = s.blockchainSvc.AddClaimToIdentity(ctx, server.AddClaimRequest{
 		UserId:     kycVerification.UserId,
 		ClaimTopic: kycClaimTopic,
