@@ -165,6 +165,26 @@ func FetchIsVerifiedOnSharedIdentityRegistry(ctx context.Context, wallet string)
 }
 
 func RegisterIdentityInSharedRegistry(ctx context.Context, walletAddress, identityAddress common.Address, countryCode int) error {
-	_, err := registerIdentity(ctx, walletAddress, identityAddress, countryCode)
+
+	IdentityRegistryInstance, err := resolveIdentityRegistryInstance(ctx)
+	if err != nil {
+		return err
+	}
+	contains, err := IdentityRegistryInstance.Contains(&bind.CallOpts{Context: ctx}, walletAddress)
+	if err != nil {
+		return err
+	}
+	if contains {
+		registeredIdentity, err := IdentityRegistryInstance.Identity(&bind.CallOpts{Context: ctx}, walletAddress)
+		if err != nil {
+			return err
+		}
+		if registeredIdentity != identityAddress {
+			return logger.LogError("wallet %s is already registered with identity %s, expected %s", walletAddress.Hex(), registeredIdentity.Hex(), identityAddress.Hex())
+		}
+		return nil
+	}
+
+	_, err = registerIdentity(ctx, walletAddress, identityAddress, countryCode)
 	return err
 }

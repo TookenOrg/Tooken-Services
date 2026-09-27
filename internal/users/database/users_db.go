@@ -35,3 +35,14 @@ func GetUserByID(ctx context.Context, userID int) (user *server.User, err error)
 	logger.LogDebug("User retrieved with ID [%d]", userID)
 	return
 }
+
+func MarkUserKycVerified(ctx context.Context, userID int) (err error) {
+	query := `
+        UPDATE usr.users
+        SET kyc_status = $2,
+			kyc_verified_at = NOW()
+        WHERE id = $1
+    `
+	_, err = globals.DB.Exec(query, userID, StatusVerified)
+	return
+}

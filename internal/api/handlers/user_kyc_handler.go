@@ -252,24 +252,15 @@ func (h *Handler) SyncApprovedKycVerificationOnChain(gCtx *gin.Context, verifica
 		switch {
 		case errors.Is(err, services.ErrKycVerificationNotFound):
 			gCtx.JSON(http.StatusNotFound, err.Error())
-			return
-		case errors.Is(err, services.ErrMessageInvalidStatus):
+		case errors.Is(err, services.ErrMessageInvalidStatus),
+			errors.Is(err, services.ErrMessageInvalidExpiresAt),
+			errors.Is(err, services.ErrMessageInvalidCountryCode),
+			errors.Is(err, services.ErrMessageIncoherentUserState),
+			errors.Is(err, services.ErrMessageInvalidWalletAddress):
 			gCtx.JSON(http.StatusConflict, err.Error())
-			return
-		case errors.Is(err, services.ErrMessageInvalidExpiresAt):
-			gCtx.JSON(http.StatusConflict, err.Error())
-			return
-		case errors.Is(err, services.ErrMessageInvalidCountryCode):
-			gCtx.JSON(http.StatusConflict, err.Error())
-			return
-		case errors.Is(err, services.ErrMessageIncoherentUserState):
-			gCtx.JSON(http.StatusConflict, err.Error())
-			return
-		case errors.Is(err, services.ErrMessageInvalidWalletAddress):
-			gCtx.JSON(http.StatusConflict, err.Error())
-			return
+		default:
+			gCtx.JSON(http.StatusInternalServerError, err.Error())
 		}
-		gCtx.JSON(http.StatusInternalServerError, err.Error())
 		return
 	}
 

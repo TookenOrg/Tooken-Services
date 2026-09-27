@@ -11,19 +11,21 @@ import (
 	"github.com/TookenOrg/tooken-services/internal/api/server"
 	"github.com/TookenOrg/tooken-services/internal/users/database"
 	"github.com/TookenOrg/tooken-services/internal/utils"
+	"github.com/TookenOrg/tooken-services/pkg/logger"
 	"github.com/samber/lo"
 )
 
 var (
-	ErrKycVerificationNotFound     = errors.New("KYC verification not found")
-	ErrMessageKycAlreadyExists     = errors.New("a KYC verification with status 'submitted' already exists for this user")
-	ErrMessageInvalidCountryCode   = errors.New("invalid country code")
-	ErrMessageInvalidFullName      = errors.New("invalid full name")
-	ErrMessageInvalidExpiresAt     = errors.New("invalid expires_at")
-	ErrMessageInvalidStatus        = errors.New("invalid status for the KYC verification")
-	ErrMessageInvalidReason        = errors.New("invalid reason for rejecting the KYC verification")
-	ErrMessageInvalidWalletAddress = errors.New("invalid wallet address for the user")
-	ErrMessageIncoherentUserState  = errors.New("incoherent user state: missing wallet but has on-chain identity")
+	ErrKycVerificationNotFound      = errors.New("KYC verification not found")
+	ErrMessageKycAlreadyExists      = errors.New("a KYC verification with status 'submitted' already exists for this user")
+	ErrMessageInvalidCountryCode    = errors.New("invalid country code")
+	ErrMessageInvalidFullName       = errors.New("invalid full name")
+	ErrMessageInvalidExpiresAt      = errors.New("invalid expires_at")
+	ErrMessageInvalidStatus         = errors.New("invalid status for the KYC verification")
+	ErrMessageInvalidReason         = errors.New("invalid reason for rejecting the KYC verification")
+	ErrMessageInvalidWalletAddress  = errors.New("invalid wallet address for the user")
+	ErrMessageIncoherentUserState   = errors.New("incoherent user state: missing wallet but has on-chain identity")
+	ErrMessageFailedToVerifyOnChain = errors.New("failed to verify KYC on-chain")
 )
 
 func (s *Service) PostKycVerifications(ctx context.Context, userId int, request *server.KycVerificationRequest) (err error) {
@@ -193,9 +195,19 @@ func (s *Service) SyncApprovedKycVerificationOnChain(ctx context.Context, verifi
 		return kycVerification, ErrMessageInvalidCountryCode
 	}
 
-	err = s.getKYCOnChainSync().SyncApprovedKYCOnChain(ctx, currentKycVerification)
+	isVerifiedOnChain, err := s.getKYCOnChainSync().SyncApprovedKYCOnChain(ctx, currentKycVerification)
 	if err != nil {
 		return kycVerification, err
+	}
+	if !isVerifiedOnChain {
+		return kycVerification, ErrMessageFailedToVerifyOnChain
+	} else {
+		logger.LogInfo("KYC verification ID=%d has been successfully verified on-chain", currentKycVerification.Id)
+		// Update the local database to reflect that the KYC verification has been successfully verified on-chain
+		err = database.MarkUserKycVerified(ctx, currentKycVerification.UserId)
+		if err != nil {
+			return kycVerification, err
+		}
 	}
 
 	return currentKycVerification, nil

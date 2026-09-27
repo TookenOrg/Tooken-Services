@@ -24,25 +24,28 @@ func newKYCOnChainSyncService(blockchainSvc *blkServices.Service) *kycOnChainSyn
 	}
 }
 
-func (s *kycOnChainSyncService) SyncApprovedKYCOnChain(ctx context.Context, kycVerification server.KycVerification) error {
+func (s *kycOnChainSyncService) SyncApprovedKYCOnChain(ctx context.Context, kycVerification server.KycVerification) (isVerifiedOnChain bool, err error) {
 	if kycVerification.KycStatus != nil && *kycVerification.KycStatus == database.StatusVerified {
 		done, err := s.returnIfAlreadyVerifiedOnChain(ctx, kycVerification)
-		if done || err != nil {
-			return err
+		if err != nil {
+			return false, err
+		}
+		if done {
+			return true, nil
 		}
 	}
 
 	numericCountryCode, err := utils.CountryAlpha2ToNumeric(kycVerification.DeclaredCountryCode)
 	if err != nil {
-		return ErrMessageInvalidCountryCode
+		return false, ErrMessageInvalidCountryCode
 	}
 
 	walletAddress, identityAddress, err := blkServices.EnsureWalletAndIdentity(ctx, kycVerification.UserId)
 	if err != nil {
 		if errors.Is(err, blkServices.ErrIdentityWithoutWallet) {
-			return ErrMessageIncoherentUserState
+			return false, ErrMessageIncoherentUserState
 		}
-		return err
+		return false, err
 	}
 	logger.LogInfo(
 		"KYC verification ID=%d has wallet=%s identity=%s country_numeric=%d",
@@ -54,14 +57,29 @@ func (s *kycOnChainSyncService) SyncApprovedKYCOnChain(ctx context.Context, kycV
 
 	err = blkServices.RegisterIdentityInSharedRegistry(ctx, walletAddress, identityAddress, numericCountryCode)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	_, err = s.blockchainSvc.AddClaimToIdentity(ctx, server.AddClaimRequest{
 		UserId:     kycVerification.UserId,
 		ClaimTopic: kycClaimTopic,
 	})
-	return err
+	if err != nil {
+		return false, err
+	}
+
+	isVerifiedOnChain, err = blkServices.FetchIsVerifiedOnSharedIdentityRegistry(ctx, walletAddress.Hex())
+	if err != nil {
+		return false, err
+	}
+
+	if isVerifiedOnChain {
+		logger.LogInfo("KYC verification ID=%d has been successfully verified on-chain", kycVerification.Id)
+	} else {
+		logger.LogWarn("KYC verification ID=%d failed to be verified on-chain", kycVerification.Id)
+	}
+
+	return isVerifiedOnChain, nil
 }
 
 func (s *kycOnChainSyncService) returnIfAlreadyVerifiedOnChain(ctx context.Context, kycVerification server.KycVerification) (bool, error) {

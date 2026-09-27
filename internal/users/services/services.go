@@ -14,7 +14,7 @@ type Service struct {
 }
 
 type kycOnChainSynchronizer interface {
-	SyncApprovedKYCOnChain(ctx context.Context, kycVerification server.KycVerification) error
+	SyncApprovedKYCOnChain(ctx context.Context, kycVerification server.KycVerification) (bool, error)
 }
 
 func NewService() *Service {
