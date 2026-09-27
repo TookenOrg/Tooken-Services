@@ -3,6 +3,8 @@ package services
 import (
 	"context"
 	"database/sql"
+	"time"
+
 	"errors"
 	"strings"
 
@@ -17,6 +19,9 @@ var (
 	ErrMessageKycAlreadyExists   = errors.New("a KYC verification with status 'submitted' already exists for this user")
 	ErrMessageInvalidCountryCode = errors.New("invalid country code")
 	ErrMessageInvalidFullName    = errors.New("invalid full name")
+	ErrMessageInvalidExpiresAt   = errors.New("invalid expires_at")
+	ErrMessageInvalidStatus      = errors.New("invalid status for the KYC verification")
+	ErrMessageInvalidReason      = errors.New("invalid reason for rejecting the KYC verification")
 )
 
 func (s *Service) PostKycVerifications(ctx context.Context, userId int, request *server.KycVerificationRequest) (err error) {
@@ -62,6 +67,71 @@ func (s *Service) GetListKycVerifications(ctx context.Context, userId *int, stat
 
 func (s *Service) GetKycVerificationById(ctx context.Context, verificationId int) (kycVerification server.KycVerification, err error) {
 	kycVerification, err = database.GetKycVerificationByID(ctx, verificationId)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return kycVerification, ErrKycVerificationNotFound
+		}
+		return kycVerification, err
+	}
+	return kycVerification, nil
+}
+
+func (s *Service) ApproveKycVerification(ctx context.Context, verificationId int, expiresAt time.Time, decidedBy int) (kycVerification server.KycVerification, err error) {
+
+	// 0 - Validate the expiresAt parameter
+	if expiresAt.IsZero() {
+		return kycVerification, ErrMessageInvalidExpiresAt
+	}
+
+	// 1 - Check if the expiresAt parameter is in the future
+	if expiresAt.Before(time.Now()) {
+		return kycVerification, ErrMessageInvalidExpiresAt
+	}
+
+	// 2 - Check current status of the KYC verification to ensure it can be approved
+	currentKycVerification, err := database.GetKycVerificationByID(ctx, verificationId)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return kycVerification, ErrKycVerificationNotFound
+		}
+		return kycVerification, err
+	}
+	if currentKycVerification.Status != database.StatusSubmitted {
+		return kycVerification, ErrMessageInvalidStatus
+	}
+
+	// 3 - Approve the KYC verification
+	kycVerification, err = database.ApproveKycVerification(ctx, verificationId, expiresAt, decidedBy)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return kycVerification, ErrKycVerificationNotFound
+		}
+		return kycVerification, err
+	}
+	return kycVerification, nil
+}
+
+func (s *Service) RejectKycVerification(ctx context.Context, verificationId int, reason string, decidedBy int) (kycVerification server.KycVerification, err error) {
+
+	reason = strings.TrimSpace(reason)
+	// 0 - Validate the reason parameter
+	if reason == "" {
+		return kycVerification, ErrMessageInvalidReason
+	}
+
+	// 1 - Check current status of the KYC verification to ensure it can be rejected
+	currentKycVerification, err := database.GetKycVerificationByID(ctx, verificationId)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return kycVerification, ErrKycVerificationNotFound
+		}
+		return kycVerification, err
+	}
+	if currentKycVerification.Status != database.StatusSubmitted {
+		return kycVerification, ErrMessageInvalidStatus
+	}
+
+	kycVerification, err = database.RejectKycVerification(ctx, verificationId, reason, decidedBy)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return kycVerification, ErrKycVerificationNotFound

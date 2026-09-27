@@ -285,6 +285,136 @@ paths:
               schema:
                 $ref: "#/components/schemas/APIResponse"
 
+  /kyc/verifications/{verificationId}/approve:
+    post:
+      tags:
+        - KYC
+      summary: Approve a specific KYC verification by ID
+      operationId: ApproveKycVerification
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: verificationId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        description: Approve KYC verification request
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/KycVerificationApproveRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KycVerification"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "404":
+          description: KYC verification not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "409":
+          description: The status of the KYC verification is invalid for this operation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+
+  /kyc/verifications/{verificationId}/reject:
+    post:
+      tags:
+        - KYC
+      summary: Reject a specific KYC verification by ID
+      operationId: RejectKycVerification
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: verificationId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        description: Reject KYC verification request
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/KycVerificationRejectRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KycVerification"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "404":
+          description: KYC verification not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "409":
+          description: The status of the KYC verification is invalid for this operation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+
   # Asset
   /assets/real-estates/active:
     get:
@@ -2659,3 +2789,22 @@ components:
                   description: Additional message or reason for the verification status
               required:
                 - verification_status
+
+    KycVerificationApproveRequest:
+      type: object
+      required:
+        - expires_at
+      properties:
+        expires_at:
+          type: string
+          format: date-time
+          description: The date and time when the KYC verification expires
+
+    KycVerificationRejectRequest:
+      type: object
+      required:
+        - reason
+      properties:
+        reason:
+          type: string
+          description: The reason for rejecting the KYC verification

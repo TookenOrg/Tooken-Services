@@ -148,3 +148,101 @@ func GetKycVerificationByID(ctx context.Context, verificationId int) (kycVerific
 	}
 	return kycVerification, nil
 }
+
+func ApproveKycVerification(ctx context.Context, verificationId int, expiresAt time.Time, decidedBy int) (kycVerification server.KycVerification, err error) {
+	query := `
+		UPDATE usr.kyc_verification
+		SET status = 'approved',
+			expires_at = $2,
+			decided_at = NOW(),
+			decided_by = $3
+		WHERE id = $1
+		RETURNING id,
+				  user_id,
+				  status,
+				  declared_full_name,
+				  declared_country_code,
+				  created_at,
+				  updated_at,
+				  (SELECT email FROM usr.users WHERE id = usr.kyc_verification.user_id),
+				  submitted_at,
+				  decided_at,
+				  decided_by,
+				  rejection_reason,
+				  expires_at,
+				  revoked_at,
+				  revoked_by,
+				  revocation_reason;
+	`
+	err = globals.DB.QueryRowContext(ctx, query, verificationId, expiresAt, decidedBy).Scan(
+		&kycVerification.Id,
+		&kycVerification.UserId,
+		&kycVerification.Status,
+		&kycVerification.DeclaredFullName,
+		&kycVerification.DeclaredCountryCode,
+		&kycVerification.CreatedAt,
+		&kycVerification.UpdatedAt,
+		&kycVerification.Email,
+		&kycVerification.SubmittedAt,
+		&kycVerification.DecidedAt,
+		&kycVerification.DecidedBy,
+		&kycVerification.RejectionReason,
+		&kycVerification.ExpiresAt,
+		&kycVerification.RevokedAt,
+		&kycVerification.RevokedBy,
+		&kycVerification.RevocationReason,
+	)
+	if err != nil {
+		return kycVerification, fmt.Errorf("failed to approve kyc verification: %w", err)
+	}
+	return kycVerification, nil
+}
+
+func RejectKycVerification(ctx context.Context, verificationId int, reason string, decidedBy int) (kycVerification server.KycVerification, err error) {
+	query := `
+		UPDATE usr.kyc_verification
+		SET status = 'rejected',
+			rejection_reason = $2,
+			decided_at = NOW(),
+			decided_by = $3
+		WHERE id = $1
+		RETURNING id,
+				  user_id,
+				  status,
+				  declared_full_name,
+				  declared_country_code,
+				  created_at,
+				  updated_at,
+				  (SELECT email FROM usr.users WHERE id = usr.kyc_verification.user_id),
+				  submitted_at,
+				  decided_at,
+				  decided_by,
+				  rejection_reason,
+				  expires_at,
+				  revoked_at,
+				  revoked_by,
+				  revocation_reason;
+	`
+	err = globals.DB.QueryRowContext(ctx, query, verificationId, reason, decidedBy).Scan(
+		&kycVerification.Id,
+		&kycVerification.UserId,
+		&kycVerification.Status,
+		&kycVerification.DeclaredFullName,
+		&kycVerification.DeclaredCountryCode,
+		&kycVerification.CreatedAt,
+		&kycVerification.UpdatedAt,
+		&kycVerification.Email,
+		&kycVerification.SubmittedAt,
+		&kycVerification.DecidedAt,
+		&kycVerification.DecidedBy,
+		&kycVerification.RejectionReason,
+		&kycVerification.ExpiresAt,
+		&kycVerification.RevokedAt,
+		&kycVerification.RevokedBy,
+		&kycVerification.RevocationReason,
+	)
+	if err != nil {
+		return kycVerification, fmt.Errorf("failed to reject kyc verification: %w", err)
+	}
+	return kycVerification, nil
+}
