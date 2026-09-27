@@ -222,7 +222,11 @@ func (s *Service) SyncApprovedKycVerificationOnChain(ctx context.Context, verifi
 		logger.LogInfo("KYC verification ID=%d is not verified on-chain", verificationId)
 	}
 
-	// 2 - Morceau 2
+	// 2 - convert country alpha code to numeric code for blockchain compatibility
+	_, err = utils.CountryAlpha2ToNumeric(currentKycVerification.DeclaredCountryCode)
+	if err != nil {
+		return kycVerification, ErrMessageInvalidCountryCode
+	}
 	return kycVerification, nil
 
 }
