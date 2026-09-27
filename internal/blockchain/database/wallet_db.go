@@ -26,6 +26,20 @@ func GetWalletByUserId(ctx context.Context, userId int) (walletPubKey *common.Ad
 	return &addr, nil
 }
 
+func GetActiveWalletIDByUserID(ctx context.Context, userID int) (id int64, err error) {
+	err = globals.DB.QueryRowContext(ctx, `
+    SELECT id FROM blk.user_wallet
+    WHERE user_id = $1 AND is_active
+`, userID).Scan(&id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("failed to get active wallet id by user id: %w", err)
+	}
+	return id, nil
+}
+
 func InsertWallet(userID int, walletAddress, label string) (id int64, err error) {
 	query := `
         INSERT INTO blk.user_wallet

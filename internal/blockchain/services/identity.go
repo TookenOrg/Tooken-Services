@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math/big"
 
 	"github.com/TookenOrg/tooken-services/internal/api/server"
@@ -15,6 +16,8 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 )
+
+var ErrIdentityWithoutWallet = errors.New("identity exists without an active wallet")
 
 func (s *Service) CreateIdentity(ctx context.Context, identityReq server.CreateIdentityRequest) (newIdentityResponse server.IdentityInfos, err error) {
 
@@ -81,6 +84,58 @@ func GenerateNewWallet(userId int) (publicKey common.Address, walletId int64, er
 
 	walletId, err = database.InsertWallet(userId, publicKey.Hex(), "Main Wallet")
 
+	return
+}
+
+func EnsureWalletAndIdentity(ctx context.Context, userID int) (walletAddress, identityAddress common.Address, err error) {
+	walletAddressPtr, err := database.GetWalletByUserId(ctx, userID)
+	if err != nil {
+		return
+	}
+
+	identityAddressPtr, err := database.GetIdentityAddrByUserId(ctx, userID)
+	if err != nil {
+		return
+	}
+
+	// Check for incoherent user state: identity exists without a wallet
+	if identityAddressPtr != nil && walletAddressPtr == nil {
+		err = ErrIdentityWithoutWallet
+		return
+	}
+
+	var walletID int64
+	if walletAddressPtr == nil {
+		walletAddress, walletID, err = GenerateNewWallet(userID)
+		if err != nil {
+			return
+		}
+	} else {
+		walletAddress = *walletAddressPtr
+		walletID, err = database.GetActiveWalletIDByUserID(ctx, userID)
+		if err != nil {
+			return
+		}
+		if walletID == 0 {
+			err = fmt.Errorf("active wallet id not found for user %d", userID)
+			return
+		}
+	}
+
+	// Both wallet and identity already exist, so this step is idempotent
+	if identityAddressPtr != nil {
+		identityAddress = *identityAddressPtr
+		return
+	}
+
+	// Deploy a new identity proxy for the user since it doesn't exist yet
+	var tx *types.Transaction
+	identityAddress, tx, err = deployIdentityProxy(ctx)
+	if err != nil {
+		return
+	}
+
+	err = database.InsertIdentity(ctx, userID, walletID, identityAddress.Hex(), tx.Hash().Hex())
 	return
 }
 

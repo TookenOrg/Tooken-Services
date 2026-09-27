@@ -26,6 +26,7 @@ var (
 	ErrMessageInvalidStatus        = errors.New("invalid status for the KYC verification")
 	ErrMessageInvalidReason        = errors.New("invalid reason for rejecting the KYC verification")
 	ErrMessageInvalidWalletAddress = errors.New("invalid wallet address for the user")
+	ErrMessageIncoherentUserState  = errors.New("incoherent user state: missing wallet but has on-chain identity")
 )
 
 func (s *Service) PostKycVerifications(ctx context.Context, userId int, request *server.KycVerificationRequest) (err error) {
@@ -196,6 +197,7 @@ func (s *Service) SyncApprovedKycVerificationOnChain(ctx context.Context, verifi
 	}
 
 	// 1 - idempotency with user_kyc_status
+	// Return early when the KYC is already verified in DB and on-chain
 	if currentKycVerification.KycStatus != nil && *currentKycVerification.KycStatus == database.StatusVerified {
 		logger.LogInfo("KYC verification ID=%d is already verified in DB for user ID=%d, checking on-chain status", verificationId, currentKycVerification.UserId)
 
@@ -223,10 +225,26 @@ func (s *Service) SyncApprovedKycVerificationOnChain(ctx context.Context, verifi
 	}
 
 	// 2 - convert country alpha code to numeric code for blockchain compatibility
-	_, err = utils.CountryAlpha2ToNumeric(currentKycVerification.DeclaredCountryCode)
+	numericCountryCode, err := utils.CountryAlpha2ToNumeric(currentKycVerification.DeclaredCountryCode)
 	if err != nil {
 		return kycVerification, ErrMessageInvalidCountryCode
 	}
-	return kycVerification, nil
 
+	// 3 - ensure wallet and ONCHAINID exist before continuing to registry/claim steps.
+	walletAddress, identityAddress, err := blkServices.EnsureWalletAndIdentity(ctx, currentKycVerification.UserId)
+	if err != nil {
+		if errors.Is(err, blkServices.ErrIdentityWithoutWallet) {
+			return kycVerification, ErrMessageIncoherentUserState
+		}
+		return kycVerification, err
+	}
+	logger.LogInfo(
+		"KYC verification ID=%d has wallet=%s identity=%s country_numeric=%d",
+		verificationId,
+		walletAddress.Hex(),
+		identityAddress.Hex(),
+		numericCountryCode,
+	)
+
+	return currentKycVerification, nil
 }
