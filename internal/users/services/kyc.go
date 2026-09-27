@@ -140,3 +140,33 @@ func (s *Service) RejectKycVerification(ctx context.Context, verificationId int,
 	}
 	return kycVerification, nil
 }
+
+func (s *Service) RevokeKycVerification(ctx context.Context, verificationId int, reason string, revokedBy int) (kycVerification server.KycVerification, err error) {
+
+	reason = strings.TrimSpace(reason)
+	// 0 - Validate the reason parameter
+	if reason == "" {
+		return kycVerification, ErrMessageInvalidReason
+	}
+
+	// 1 - Check current status of the KYC verification to ensure it can be revoked
+	currentKycVerification, err := database.GetKycVerificationByID(ctx, verificationId)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return kycVerification, ErrKycVerificationNotFound
+		}
+		return kycVerification, err
+	}
+	if currentKycVerification.Status != database.StatusApproved {
+		return kycVerification, ErrMessageInvalidStatus
+	}
+
+	kycVerification, err = database.RevokeKycVerification(ctx, verificationId, reason, revokedBy)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return kycVerification, ErrKycVerificationNotFound
+		}
+		return kycVerification, err
+	}
+	return kycVerification, nil
+}

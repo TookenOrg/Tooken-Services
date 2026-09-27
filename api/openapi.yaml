@@ -415,6 +415,71 @@ paths:
               schema:
                 $ref: "#/components/schemas/APIResponse"
 
+  /kyc/verifications/{verificationId}/revoke:
+    post:
+      tags:
+        - KYC
+      summary: Revoke a specific KYC verification by ID
+      operationId: RevokeKycVerification
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: verificationId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        description: Revoke KYC verification request
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/KycVerificationRevokeRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KycVerification"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "404":
+          description: KYC verification not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "409":
+          description: The status of the KYC verification is invalid for this operation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+
   # Asset
   /assets/real-estates/active:
     get:
@@ -2808,3 +2873,12 @@ components:
         reason:
           type: string
           description: The reason for rejecting the KYC verification
+
+    KycVerificationRevokeRequest:
+      type: object
+      required:
+        - reason
+      properties:
+        reason:
+          type: string
+          description: The reason for revoking the KYC verification
