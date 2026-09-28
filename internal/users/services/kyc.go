@@ -12,12 +12,12 @@ import (
 	"github.com/TookenOrg/tooken-services/internal/users/database"
 	"github.com/TookenOrg/tooken-services/internal/utils"
 	"github.com/TookenOrg/tooken-services/pkg/logger"
-	"github.com/samber/lo"
 )
 
 var (
 	ErrKycVerificationNotFound      = errors.New("KYC verification not found")
 	ErrMessageKycAlreadyExists      = errors.New("a KYC verification with status 'submitted' already exists for this user")
+	ErrMessageKycStillValid         = errors.New("a valid KYC verification already exists for this user")
 	ErrMessageInvalidCountryCode    = errors.New("invalid country code")
 	ErrMessageInvalidFullName       = errors.New("invalid full name")
 	ErrMessageInvalidExpiresAt      = errors.New("invalid expires_at")
@@ -47,13 +47,17 @@ func (s *Service) PostKycVerifications(ctx context.Context, userId int, request 
 		return
 	}
 
-	// 2 - Get Kyc verification to check if one already exists for the user with status "submitted"
-	kycVerifications, err := database.GetKycVerificationByUserIDAndStatus(ctx, &userId, lo.ToPtr(database.StatusSubmitted))
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return
+	// 2 - Refuse a new filing while the previous one still stands
+	latestKyc, latestErr := database.GetLatestKycVerificationByUserID(ctx, userId)
+	if latestErr != nil && !errors.Is(latestErr, sql.ErrNoRows) {
+		return latestErr
 	}
-	if len(kycVerifications) > 0 {
-		return ErrMessageKycAlreadyExists
+	var latest *server.KycVerification
+	if latestErr == nil {
+		latest = &latestKyc
+	}
+	if err = canAcceptNewKycFiling(latest, time.Now()); err != nil {
+		return err
 	}
 
 	// 3 - Insert in kyc_verification with status submitted
@@ -65,10 +69,38 @@ func (s *Service) PostKycVerifications(ctx context.Context, userId int, request 
 	return nil
 }
 
+// canAcceptNewKycFiling decides whether a user may file a new KYC verification,
+// given their latest one. latest is nil when the user has never filed.
+//
+// Filing again must stay possible after a rejection, a revocation or an expiry:
+// a single refusal must not lock an investor out for good. What must not happen
+// is a filing landing on top of an entitlement that still holds. The projection
+// trigger of migration 000025 reads the latest submission, so a fresh
+// 'submitted' row drags usr.users back to 'pending' and clears kyc_expires_at —
+// while the chain still verifies that investor. Milestone 3 gates every order on
+// kyc_status = 'verified', so the investor would be silently refused.
+func canAcceptNewKycFiling(latest *server.KycVerification, now time.Time) error {
+	if latest == nil {
+		return nil
+	}
+
+	switch latest.Status {
+	case database.StatusSubmitted:
+		return ErrMessageKycAlreadyExists
+	case database.StatusApproved:
+		// A missing expiry is an anomaly, never a licence to file again:
+		// approving always sets one.
+		if latest.ExpiresAt == nil || latest.ExpiresAt.After(now) {
+			return ErrMessageKycStillValid
+		}
+	}
+
+	return nil
+}
+
 func (s *Service) GetListKycVerifications(ctx context.Context, userId *int, status *string) (kycVerifications []server.KycVerification, err error) {
 	return database.GetKycVerificationByUserIDAndStatus(ctx, userId, status)
 }
-
 func (s *Service) GetKycVerificationById(ctx context.Context, verificationId int) (kycVerification server.KycVerification, err error) {
 	kycVerification, err = database.GetKycVerificationByID(ctx, verificationId)
 	if err != nil {

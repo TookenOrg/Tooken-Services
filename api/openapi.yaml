@@ -152,6 +152,20 @@ paths:
       tags:
         - KYC
       summary: Create a new KYC verification
+      description: >-
+        Files a KYC verification for the authenticated user.
+
+
+        A new filing is refused while the previous one still stands: either it
+        is awaiting a decision (`submitted`), or it was approved and has not
+        expired yet. Filing again stays possible after a rejection, a revocation
+        or an expiry, so a single refusal never locks an investor out.
+
+
+        The restriction exists because `usr.users.kyc_status` is a projection of
+        the user's latest filing. A new `submitted` row would drag an already
+        verified investor back to `pending` and clear their expiry date, while
+        the chain still verifies them — and every order is gated on `verified`.
       operationId: PostKycVerifications
       security:
         - bearerAuth: []
@@ -181,7 +195,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/APIResponse"
         "409":
-          description: Conflict, e.g., a request for a KYC verification that already exists
+          description: >-
+            Conflict. Either a filing is already awaiting a decision, or the
+            user still holds a valid, non-expired approval.
           content:
             application/json:
               schema:
@@ -285,7 +301,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/APIResponse"
 
-  /kyc/verifications/{verificationId}/approve:
+  /users/kyc/verifications/{verificationId}/approve:
     post:
       tags:
         - KYC
@@ -350,7 +366,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/APIResponse"
 
-  /kyc/verifications/{verificationId}/reject:
+  /users/kyc/verifications/{verificationId}/reject:
     post:
       tags:
         - KYC
@@ -415,7 +431,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/APIResponse"
 
-  /kyc/verifications/{verificationId}/revoke:
+  /users/kyc/verifications/{verificationId}/revoke:
     post:
       tags:
         - KYC
@@ -480,11 +496,27 @@ paths:
               schema:
                 $ref: "#/components/schemas/APIResponse"
 
-  /kyc/verifications/{verificationId}/sync-onchain:
+  /users/kyc/verifications/{verificationId}/sync-onchain:
     post:
       tags:
         - KYC
       summary: Sync a specific approved KYC verification with the on-chain record
+      description: >
+        Carries an approved verification onto the chain, in one call: the
+        investor gets a wallet if they have none, their ONCHAINID is deployed,
+        the KYC claim is signed by the platform claim issuer and added to it,
+        and the pair wallet/identity is written to the IdentityRegistry.
+
+        Every step is idempotent on its own, so replaying the call after a
+        partial failure resumes where it stopped instead of deploying a second
+        identity. A hash is therefore returned only for the steps this call
+        actually performed, and omitted for those it found already done.
+
+        The work is synchronous: the answer comes once the chain has confirmed,
+        which on a public network takes minutes rather than seconds.
+
+        Reserved to an ADMIN. Registering an investor is what makes a mint
+        possible for them, so it is a decision, not a formality.
       operationId: SyncApprovedKycVerificationOnChain
       security:
         - bearerAuth: []
@@ -496,11 +528,14 @@ paths:
             type: integer
       responses:
         "200":
-          description: OK
+          description: >
+            The verification is now reflected on the chain. The transactions
+            object names only the steps this call performed; a step already
+            done on a previous attempt is absent rather than repeated.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/KycVerification"
+                $ref: "#/components/schemas/KycOnChainSyncResponse"
         "400":
           description: Invalid request
           content:
