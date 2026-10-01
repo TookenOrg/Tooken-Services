@@ -107,6 +107,61 @@ func GetKycVerificationByUserIDAndStatus(ctx context.Context, userId *int, statu
 	return kycVerification, nil
 }
 
+// GetLatestKycVerificationByUserID returns the most recent filing of a user, or
+// sql.ErrNoRows when that user has never filed.
+//
+// The ordering deliberately mirrors usr.kyc_verification_sync_user() (migration
+// 000025). The guard that accepts a new filing and the trigger that projects
+// usr.users must read the same row; were they to disagree, the API would allow
+// a filing the projection then interprets differently.
+func GetLatestKycVerificationByUserID(ctx context.Context, userId int) (kycVerification server.KycVerification, err error) {
+	query := `
+		SELECT 	k.id,
+				k.user_id,
+				k.status,
+				k.declared_full_name,
+				k.declared_country_code,
+				k.created_at,
+				k.updated_at,
+				u.email,
+				k.submitted_at,
+				k.decided_at,
+				k.decided_by,
+				k.rejection_reason,
+				k.expires_at,
+				k.revoked_at,
+				k.revoked_by,
+				k.revocation_reason
+		FROM usr.kyc_verification k
+		JOIN usr.users u ON u.id = k.user_id
+		WHERE k.user_id = $1
+		ORDER BY k.submitted_at DESC, k.id DESC
+		LIMIT 1;
+	`
+	err = globals.DB.QueryRowContext(ctx, query, userId).Scan(
+		&kycVerification.Id,
+		&kycVerification.UserId,
+		&kycVerification.Status,
+		&kycVerification.DeclaredFullName,
+		&kycVerification.DeclaredCountryCode,
+		&kycVerification.CreatedAt,
+		&kycVerification.UpdatedAt,
+		&kycVerification.Email,
+		&kycVerification.SubmittedAt,
+		&kycVerification.DecidedAt,
+		&kycVerification.DecidedBy,
+		&kycVerification.RejectionReason,
+		&kycVerification.ExpiresAt,
+		&kycVerification.RevokedAt,
+		&kycVerification.RevokedBy,
+		&kycVerification.RevocationReason,
+	)
+	if err != nil {
+		return kycVerification, fmt.Errorf("failed to get latest kyc verification: %w", err)
+	}
+	return kycVerification, nil
+}
+
 func GetKycVerificationByID(ctx context.Context, verificationId int) (kycVerification server.KycVerification, err error) {
 	query := `
 		SELECT 	k.id,

@@ -298,5 +298,9 @@ func deployTrexSuite(ctx context.Context, tokenDetails contracts.ITREXFactoryTok
 		return
 	}
 
+	if derr := database.InsertEthTransaction(ctx, txDeploySuite.Hash().Hex(), "DEPLOY_TREX_SUITE", trexFactoryAddr.Hex(), int64(deploymentDetails.Raw.BlockNumber), big.Int{}); derr != nil {
+		logger.LogWarn("could not persist DEPLOY_TREX_SUITE tx: %s", derr.Error())
+	}
+
 	return
 }

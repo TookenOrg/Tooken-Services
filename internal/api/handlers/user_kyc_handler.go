@@ -33,7 +33,7 @@ func (h *Handler) PostKycVerifications(gCtx *gin.Context) {
 	err := h.userSvc.PostKycVerifications(gCtx.Request.Context(), userId, &req)
 	if err != nil {
 		switch {
-		case errors.Is(err, services.ErrMessageKycAlreadyExists):
+		case errors.Is(err, services.ErrMessageKycAlreadyExists), errors.Is(err, services.ErrMessageKycStillValid):
 			gCtx.JSON(http.StatusConflict, err.Error())
 			return
 		case errors.Is(err, services.ErrMessageInvalidCountryCode), errors.Is(err, services.ErrMessageInvalidFullName):

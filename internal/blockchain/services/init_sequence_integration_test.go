@@ -174,14 +174,63 @@ func TestInitSequenceIntegration(t *testing.T) {
 
 	// ---- step 5: the shared singletons ----------------------------------------
 
-	t.Run("DeployTrexSuite records the claim issuer and the compliance module", func(t *testing.T) {
+	t.Run("DeployTrexSuite records its three roles and traces its transaction", func(t *testing.T) {
 		if _, err := svc.DeployTrexSuite(ctx); err != nil {
 			t.Fatalf("DeployTrexSuite: %v", err)
 		}
-		for _, name := range []string{chainglobals.ClaimIssuerName, chainglobals.TransferRestrictionModuleName} {
+
+		// 🔴 SHARED_IRS used to be missing from this list. It is the anchor that keeps
+		// a single KYC whitelist across every token, so it is the one role whose loss
+		// would fragment the investor registry — and it was the only one unchecked.
+		for _, name := range []string{
+			chainglobals.ClaimIssuerName,
+			chainglobals.TransferRestrictionModuleName,
+			chainglobals.SharedIdentityRegistryStorageName,
+		} {
 			if _, err := database.GetContractRoleByName(ctx, name); err != nil {
 				t.Fatalf("%s must be recorded as a contract role: %v", name, err)
 			}
+		}
+
+		// 🔴 The audit trail, which this test used to ignore entirely: it asserted on
+		// contract_role and never on eth_transaction. That blind spot let the heaviest
+		// transaction of the whole sequence go untraced on Sepolia (3.87 M gas, 50
+		// logs) without anything turning red — 17 rows recorded for 18 transactions.
+		var traced int
+		if err := env.DB.QueryRow(
+			`SELECT count(*) FROM blk.eth_transaction WHERE tx_name = $1`,
+			"DEPLOY_TREX_SUITE",
+		).Scan(&traced); err != nil {
+			t.Fatal(err)
+		}
+		if traced != 1 {
+			t.Fatalf("blk.eth_transaction must hold exactly one DEPLOY_TREX_SUITE row at this point, found %d", traced)
+		}
+
+		var txHash string
+		var blockNumber int64
+		if err := env.DB.QueryRow(
+			`SELECT tx_hash, block_number FROM blk.eth_transaction WHERE tx_name = $1`,
+			"DEPLOY_TREX_SUITE",
+		).Scan(&txHash, &blockNumber); err != nil {
+			t.Fatalf("DEPLOY_TREX_SUITE must be traced in blk.eth_transaction: %v", err)
+		}
+		if blockNumber <= 0 {
+			t.Fatalf("DEPLOY_TREX_SUITE recorded an unusable block number: %d", blockNumber)
+		}
+
+		// The role and the trace must name the same transaction. If they diverge, one
+		// of the two was written from something other than the deployment itself —
+		// which is how a plausible-looking row ends up pointing at nothing.
+		var roleTxHash string
+		if err := env.DB.QueryRow(
+			`SELECT tx_hash FROM blk.contract_role WHERE contract_name = $1`,
+			chainglobals.SharedIdentityRegistryStorageName,
+		).Scan(&roleTxHash); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.EqualFold(txHash, roleTxHash) {
+			t.Fatalf("SHARED_IRS points at %s while the traced transaction is %s", roleTxHash, txHash)
 		}
 	})
 

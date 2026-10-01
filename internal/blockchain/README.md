@@ -331,6 +331,41 @@ currently public (auth is spec-driven — see the repo `copilot-instructions.md`
 |---|---|---|
 | `WS_RPC_URL` | `services/blockchain.go` | EVM node endpoint (`ethclient.Dial`) |
 | `PRIVATE_KEY` | `utils/keys_utils.go`, `identity_claim.go` | platform signer (hex, `0x` optional) |
+| `ETH_MIN_TIP_GWEI` | `utils/transactions_utils.go` | floor for the miner tip, in gwei, fractional allowed. Default **1**, capped at 1000. Applied as `max(floor, SuggestGasTipCap())` |
+| `ETH_TX_WAIT` | `utils/transactions_utils.go` | how long to wait for a transaction to be mined, as a Go duration (`"5m"`, `"90s"`). Default **5m** |
+
+Both optional variables fall back to their default — with a `logger.LogWarn` — on
+any unusable value: a mistyped variable must not stop the server from sending
+transactions.
+
+### Fees: why `GasPrice` and `GasLimit` are never set
+
+`GenerateTransactOpts` deliberately leaves `GasPrice`, `GasFeeCap` and `GasLimit`
+at their zero value. That is not an omission, it is the point.
+
+Setting `GasPrice` makes `bind` build a **legacy** transaction whose price is
+frozen at signing time. The base fee moves by up to 12.5% per block, so such a
+transaction falls below the network floor within a few blocks and can no longer
+enter any block — it is not slow, it is *forbidden*. On 2026-09-28 one sat in the
+Sepolia mempool for 25 minutes, had to be evicted by hand, and froze the whole
+nine-contract install sequence behind it (`PendingNonceAt` queues every later
+transaction behind the stuck one).
+
+Left unset, `bind` builds a dynamic-fee transaction:
+
+| field | value | source |
+|---|---|---|
+| `GasTipCap` | `max(ETH_MIN_TIP_GWEI, SuggestGasTipCap())` | `GenerateTransactOpts` |
+| `GasFeeCap` | `GasTipCap + 2 × baseFee` | `bind` (`basefeeWiggleMultiplier`) |
+| `GasLimit` | `EstimateGas()` | `bind` |
+
+The fee cap is a **ceiling, not a price**: only `baseFee + tip` is ever paid, so a
+high cap costs nothing and buys room for the base fee to double. The tip is the
+opposite — it is paid in full every time, which is why `ETH_MIN_TIP_GWEI` is
+capped.
+
+`TestGenerateTransactOptsUsesDynamicFees` (integration tag) fails if anyone
+re-adds those fields.
 
 `globals.EthClient` is initialised once in `main.go` via `SetupEthClient()`.
 

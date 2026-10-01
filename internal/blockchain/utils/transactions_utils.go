@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"os"
+	"strings"
 	"time"
 
 	contracts "github.com/TookenOrg/tooken-services/internal/blockchain/contracts/bindings"
@@ -13,6 +15,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/shopspring/decimal"
 )
 
 func GenerateTransactOpts(ctx context.Context) (opts *bind.TransactOpts, err error) {
@@ -24,12 +27,12 @@ func GenerateTransactOpts(ctx context.Context) (opts *bind.TransactOpts, err err
 		return
 	}
 
-	gasPrice, err := globals.EthClient.SuggestGasPrice(ctx)
+	chainID, err := globals.EthClient.NetworkID(ctx)
 	if err != nil {
 		return
 	}
 
-	chainID, err := globals.EthClient.NetworkID(ctx)
+	gasTipCap, err := globals.EthClient.SuggestGasTipCap(ctx)
 	if err != nil {
 		return
 	}
@@ -39,13 +42,114 @@ func GenerateTransactOpts(ctx context.Context) (opts *bind.TransactOpts, err err
 		return
 	}
 
+	// The node's suggestion tracks recent blocks, but a chain whose blocks are
+	// half empty suggests a tip near zero — 0.001 gwei on Sepolia. That buys no
+	// priority the moment blocks fill up, so keep whichever value is higher.
+	if floor := minGasTipCap(); gasTipCap.Cmp(floor) < 0 {
+		gasTipCap = floor
+	}
+
 	opts.From = fromAddress
 	opts.Nonce = big.NewInt(int64(nonce))
-	opts.Value = big.NewInt(0)         // in wei
-	opts.GasLimit = uint64(15_000_000) // in units
-	opts.GasPrice = gasPrice
+	opts.Value = big.NewInt(0) // in wei
+	opts.GasTipCap = gasTipCap
+
+	// GasPrice, GasFeeCap and GasLimit are deliberately left unset.
+	//
+	// Setting GasPrice makes bind build a legacy transaction whose price is frozen
+	// at signing time. The base fee moves by up to 12.5% per block, so such a
+	// transaction drops below the network floor within a few blocks and can no
+	// longer enter any block — it is not slow, it is forbidden. That is what
+	// stalled the Sepolia install sequence on 2026-09-28.
+	//
+	// Left nil, bind builds a dynamic-fee transaction with
+	// GasFeeCap = GasTipCap + 2*baseFee, which tolerates a doubling of the base
+	// fee, and estimates GasLimit instead of reserving a fixed 15M. The cap is a
+	// ceiling, not a price: only baseFee + tip is ever actually paid.
 
 	return
+}
+
+const (
+	// defaultMinTipGwei is the tip floor, in gwei, applied when ETH_MIN_TIP_GWEI
+	// is unset or unusable.
+	defaultMinTipGwei = 1
+
+	// maxMinTipGwei rejects values that can only be a typo. 1000 gwei is already
+	// an order of magnitude above mainnet peaks, and unlike the fee cap — which is
+	// merely a ceiling — the tip is paid in full on every single transaction.
+	maxMinTipGwei = 1000
+)
+
+// weiPerGwei scales the unit operators think in (gwei) to the unit the protocol
+// works in (wei).
+var weiPerGwei = decimal.New(1, 9)
+
+// minGasTipCap returns the floor applied to the node's suggested tip, in wei.
+//
+// It reads ETH_MIN_TIP_GWEI, a value expressed in gwei that may be fractional
+// ("1", "0.5", "2.5"). Any unusable value falls back to the default instead of
+// failing: a mistyped environment variable must not stop the server from sending
+// transactions. The fallback is always logged, so it never passes unnoticed.
+func minGasTipCap() *big.Int {
+	fallback := decimal.NewFromInt(defaultMinTipGwei).Mul(weiPerGwei).BigInt()
+
+	raw := strings.TrimSpace(os.Getenv("ETH_MIN_TIP_GWEI"))
+	if raw == "" {
+		return fallback
+	}
+
+	gwei, err := decimal.NewFromString(raw)
+	if err != nil {
+		logger.LogWarn("⚠️ ETH_MIN_TIP_GWEI=%q is not a number, using %d gwei", raw, defaultMinTipGwei)
+		return fallback
+	}
+
+	if !gwei.IsPositive() {
+		logger.LogWarn("⚠️ ETH_MIN_TIP_GWEI=%q must be strictly positive, using %d gwei", raw, defaultMinTipGwei)
+		return fallback
+	}
+
+	if gwei.GreaterThan(decimal.NewFromInt(maxMinTipGwei)) {
+		logger.LogWarn("⚠️ ETH_MIN_TIP_GWEI=%q exceeds the %d gwei ceiling, using %d gwei", raw, maxMinTipGwei, defaultMinTipGwei)
+		return fallback
+	}
+
+	// Scale before converting: Decimal.BigInt truncates towards zero, so
+	// converting "0.5" first would yield 0 instead of 500000000 wei.
+	return gwei.Mul(weiPerGwei).BigInt()
+}
+
+// defaultTxWait is how long to wait for a transaction to be mined when
+// ETH_TX_WAIT is unset or unusable.
+//
+// The previous value was two minutes, which is ten blocks on a 12-second chain —
+// enough on a local node that mines instantly, too little on a public network
+// where a transaction may sit through a burst of congestion before landing.
+const defaultTxWait = 5 * time.Minute
+
+// txWaitTimeout returns how long to wait for a transaction to be mined.
+//
+// It reads ETH_TX_WAIT as a Go duration ("5m", "90s"). Like minGasTipCap, any
+// unusable value falls back to the default and says so, rather than failing.
+func txWaitTimeout() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("ETH_TX_WAIT"))
+	if raw == "" {
+		return defaultTxWait
+	}
+
+	wait, err := time.ParseDuration(raw)
+	if err != nil {
+		logger.LogWarn("⚠️ ETH_TX_WAIT=%q is not a duration, using %s", raw, defaultTxWait)
+		return defaultTxWait
+	}
+
+	if wait <= 0 {
+		logger.LogWarn("⚠️ ETH_TX_WAIT=%q must be strictly positive, using %s", raw, defaultTxWait)
+		return defaultTxWait
+	}
+
+	return wait
 }
 
 type txDetails struct {
@@ -77,9 +181,11 @@ func WaitDeployedTransaction(ctx context.Context, tx *types.Transaction, shouldW
 
 	txHex := tx.Hash().Hex()
 
-	logger.LogInfo("⏳ Waiting for transaction %s to be mined...", txHex)
+	wait := txWaitTimeout()
 
-	waitCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	logger.LogInfo("⏳ Waiting up to %s for transaction %s to be mined...", wait, txHex)
+
+	waitCtx, cancel := context.WithTimeout(ctx, wait)
 	defer cancel()
 
 	receipt, err := bind.WaitMined(waitCtx, globals.EthClient, tx)
