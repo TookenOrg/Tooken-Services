@@ -572,6 +572,7 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/APIResponse"
+
   # Asset
   /assets/real-estates/active:
     get:
@@ -636,6 +637,11 @@ paths:
         asset without deploying a second time, so two managers clicking the same
         button do not produce a failure. The token an asset carries is bound
         once and never repointed.
+
+        Publishing never moves an asset backwards. An asset that has gone
+        further — fundraising, funded or closed — is refused with 409 rather
+        than sent back to published, which would silently close its
+        subscription.
       operationId: publishRealEstate
       security:
         - bearerAuth: []
@@ -671,7 +677,85 @@ paths:
               schema:
                 $ref: "#/components/schemas/APIResponse"
         "409":
-          description: The asset is not complete enough to be published
+          description: >
+            The asset is not complete enough to be published, its issuer is not
+            active, or it is already past publication (fundraising, funded,
+            closed)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+
+  /assets/real-estates/{id}/open-fundraising:
+    post:
+      tags:
+        - Assets
+      summary: Open fundraising for a real estate asset
+      description: >
+        Opens the subscription of a published asset: it moves from published to
+        fundraising, the only status in which investors can place orders.
+        Reserved to a MANAGER or an ADMIN.
+
+        Publishing and opening the fundraising are two separate decisions on
+        purpose. A published asset is an announced offer that investors can
+        browse; nobody can subscribe to it until a manager opens it.
+
+        The asset stays visible and keeps its token: nothing is deployed and
+        nothing is written onchain, so the call is a plain write.
+
+        The issuer is checked again. It may have been suspended since the
+        asset was published, and opening a subscription under a vehicle that
+        can no longer issue would collect money for shares nobody can deliver.
+
+        Opening an asset that is already raising funds is not an error: it
+        returns the asset unchanged, so two managers clicking the same button do
+        not produce a failure. Any other status is refused with 409 — a draft
+        has to be published first, and a funded or closed asset has finished
+        its primary market.
+      operationId: openFundraisingRealEstate
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RealEstate"
+        "401":
+          description: Missing or invalid token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "403":
+          description: The role does not allow opening fundraising
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "404":
+          description: Real Estate Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "409":
+          description: >
+            The asset is not published (draft, funded or closed), or its issuer
+            is not active
           content:
             application/json:
               schema:

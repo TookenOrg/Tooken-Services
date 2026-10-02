@@ -140,6 +140,23 @@ func (h *Handler) PublishRealEstate(gCtx *gin.Context, id int) {
 	gCtx.JSON(http.StatusOK, realEstate)
 }
 
+func (h *Handler) OpenFundraisingRealEstate(gCtx *gin.Context, id int) {
+	logger.LogDebug("🚀 Starting open fundraising for real estate id %d", id)
+
+	if !middleware.RequireRole(gCtx, authUtils.RoleManager, authUtils.RoleAdmin) {
+		return
+	}
+
+	realEstate, err := h.realEstateSvc.OpenFundraisingRealEstate(gCtx.Request.Context(), id)
+	if err != nil {
+		respondRealEstateError(gCtx, err, "Unable to open fundraising for real estate.")
+		return
+	}
+
+	logger.LogInfo("✅ Real estate %d fundraising opened", id)
+	gCtx.JSON(http.StatusOK, realEstate)
+}
+
 func (h *Handler) DeleteRealEstate(gCtx *gin.Context, id int) {
 	logger.LogDebug("🚀 Starting delete real estate id %d", id)
 

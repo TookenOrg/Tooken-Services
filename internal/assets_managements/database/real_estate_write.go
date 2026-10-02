@@ -32,6 +32,9 @@ const StatusDraft = 1
 // 000006 derives active = true from it, so nothing else has to be set.
 const StatusPublished = 3
 
+// StatusFundraising is the status of an asset that is currently raising funds from investors.
+const StatusFundraising = 4
+
 // StatusCancelled is the status a soft-deleted asset carries. Constraint
 // real_estate_deleted_status_ck (migration 000011) forbids any other.
 const StatusCancelled = 7
@@ -436,6 +439,38 @@ WHERE id = $1
 `
 
 	res, err := globals.DB.ExecContext(ctx, query, realEstateID, StatusPublished, tokenID)
+	if err != nil {
+		return err
+	}
+
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return sql.ErrNoRows
+	}
+
+	return nil
+}
+
+// OpenFundraisingRealEstate moves a published asset to fundraising.
+//
+// The status condition lives in the WHERE clause, not only in the caller: the
+// asset may have moved between the caller's read and this write, and only the
+// database sees both at once. sql.ErrNoRows therefore means "not a published
+// asset any more", not necessarily "missing" — the caller reads it again.
+func OpenFundraisingRealEstate(ctx context.Context, realEstateID int) error {
+	const query = `
+UPDATE ass.real_estate
+SET status_id = $2,
+    updated_at = now()
+WHERE id = $1
+  AND deleted_at IS NULL
+  AND status_id = $3
+`
+
+	res, err := globals.DB.ExecContext(ctx, query, realEstateID, StatusFundraising, StatusPublished)
 	if err != nil {
 		return err
 	}
