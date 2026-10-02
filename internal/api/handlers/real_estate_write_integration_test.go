@@ -164,26 +164,13 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 	    ON CONFLICT (id) DO NOTHING`); err != nil {
 		t.Fatal(err)
 	}
-	// iss.issuance_order_statuses is filled by nothing: 000010 already calls it
-	// "the existing reference table", so it predates the migration history. A
-	// database built from the migrations alone holds the table and none of its
-	// rows, and the first order written below fails on fk_issuance_orders_status.
-	//
-	// The codes and the counts_as_reserved flag are the ones 000010 documents:
-	// only CANCELLED and EXPIRED release the shares they hold. DO NOTHING so a
-	// baseline carrying the real production labels keeps them.
-	if _, err := db.Exec(`
-	    INSERT INTO iss.issuance_order_statuses (id, code, label, is_final, counts_as_reserved) VALUES
-	        (1, 'CREATED',           'Créée',               FALSE, TRUE),
-	        (2, 'RESERVED',          'Réservée',            FALSE, TRUE),
-	        (3, 'PAYMENT_PENDING',   'Paiement en attente', FALSE, TRUE),
-	        (4, 'PAYMENT_CONFIRMED', 'Paiement confirmé',   FALSE, TRUE),
-	        (5, 'COMPLETED',         'Complétée',           TRUE,  TRUE),
-	        (6, 'CANCELLED',         'Annulée',             TRUE,  FALSE),
-	        (7, 'EXPIRED',           'Expirée',             TRUE,  FALSE)
-	    ON CONFLICT (id) DO NOTHING`); err != nil {
-		t.Fatal(err)
-	}
+	// iss.issuance_order_statuses is deliberately not seeded here. Migration
+	// 000027 writes the whole referential itself, by explicit id, so any database
+	// at version 27 or above already holds it. The seed this suite used to carry
+	// listed the codes of 000010 with ON CONFLICT DO NOTHING: on a migrated
+	// database it would have done nothing for six of them and silently brought
+	// back 3 PAYMENT_PENDING, the status 000027 withdraws.
+
 	// issuer_id is NOT NULL since migration 000016, and every asset written
 	// below names vehicle 1. Seeded here for the same reason as the two
 	// referentials above: the suite must run from the migrations alone.
@@ -650,13 +637,21 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 		assetID := mustScanID(t, `INSERT INTO ass.real_estate (title, description, imageurl, estate_type, issuer_id, status_id)
 		    VALUES ('Reserved guard', 'A guard', 'https://x/g.jpg', 1, 1, 1) RETURNING id`)
 		mustExec(t, `INSERT INTO ass.real_estate_shares_config (real_estate_id, total_shares, price_per_share, yield) VALUES ($1, 1000, 10, 4)`, assetID)
-		// status 2 = RESERVED, which carries counts_as_reserved. The reference is
-		// derived from the asset so the suite can run twice on the same database:
-		// order_reference is unique. user_id names the investor seeded at the top
-		// of the suite: the column is NOT NULL and points at usr.users, so an
-		// order without a buyer cannot be written.
-		mustExec(t, `INSERT INTO iss.issuance_orders (user_id, asset_id, quantity, status_id, order_reference)
-		    VALUES (2, $1, 400, 2, $2)`, assetID, "ORD-RESERVED-"+itoa(assetID))
+		// status 2 = AWAITING_PAYMENT, the reservation proper: it carries
+		// counts_as_reserved, and since 000028 it must be priced and dated (I3,
+		// I4). A complete order is written rather than one in a status that
+		// happens to reserve without amounts: that would lean on a gap of the
+		// schema, not on its intent. 400 × 10 = 4000.00, no fee.
+		//
+		// The reference is derived from the asset so the suite can run twice on
+		// the same database: order_reference is unique. user_id names the
+		// investor seeded at the top of the suite: the column is NOT NULL and
+		// points at usr.users, so an order without a buyer cannot be written.
+		mustExec(t, `INSERT INTO iss.issuance_orders
+		        (user_id, asset_id, quantity, status_id, order_reference,
+		         unit_price, currency_code, gross_amount, fee_amount, amount_due, expires_at)
+		    VALUES (2, $1, 400, 2, $2, 10, 'EUR', 4000.00, 0.00, 4000.00, now() + interval '15 minutes')`,
+			assetID, "ORD-RESERVED-"+itoa(assetID))
 
 		base := `{"configuration":{"total_shares":"%s"}}`
 

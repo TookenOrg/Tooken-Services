@@ -139,6 +139,42 @@ state — this is verified (see below).
 | 000013 | Identity sequences resynchronised after seeding with explicit ids |
 | 000014 | `ass.issuer.lei_code` unique (partial index, the LEI stays optional) |
 | 000015 | Referential integrity: the missing foreign keys on the detail tables and the order book, one detail row per asset |
+| 000016 | An asset is always issued by a vehicle: `real_estate.issuer_id` becomes `NOT NULL` |
+| 000017 | A `blk.contract_role` is identified by its name, not by its address |
+| 000018 | An asset is born incomplete: the seven over-strict `specification` columns become optional |
+| 000019 | `blk.token.token_name` unique — the constraint production already had, now in a migration |
+| 000020 | A token's identity is its salt: `blk.token.deployment_salt`, unique |
+| 000021 | `real_estate.active` becomes a projection of `status_id`; `active_requires_token_ck` posed `NOT VALID` |
+| 000022 | The `VALIDATE` that `000021` deferred, once the legacy assets were resolved |
+| 000023 | The platform stops holding investor private keys: the columns are dropped, not renamed |
+| 000024 | A KYC is a dated decision, not a column: new `usr.kyc_verification` |
+| 000025 | `usr.users.kyc_*` becomes a projection of the decision history (trigger) |
+| 000026 | An ONCHAINID belongs to someone: foreign keys and one active wallet per user |
+| 000027 | Order lifecycle: the 13-status referential, `PAYMENT_PENDING` retired, append-only `iss.issuance_order_status_history`, delivery/reversal hashes |
+| 000028 | Order pricing: the frozen amounts on `iss.issuance_orders`, `iss.issuance_order_fees`, `iss.issuance_order_payments`, `iss.issuance_allocations` dropped |
+| 000029 | `ass.real_estate_shares_config.max_shares_per_investor` — the per-investor cap |
+
+## Migrations that refuse rather than guess
+
+`000027` and `000028` open with pre-flight guards. They do not repair data: they
+stop, name the offending rows and state the way out. Three situations trigger
+them, all inherited from data that predates the migration:
+
+- an order sitting in `COMPLETED` with no `delivery_tx_hash` — the column is
+  created by `000027` itself, so such an order can never satisfy I5;
+- an order sitting in `AWAITING_PAYMENT` with no `expires_at` or no frozen
+  amounts — including the orders `000027` moves there out of `PAYMENT_PENDING`;
+- an id in `iss.issuance_order_statuses` that does not carry the expected code.
+
+Each file runs in a **single transaction**: a guard that fires leaves the
+database untouched and only sets `dirty = true`. Resolve the rows it named, then
+`migrate -path tools/db/migrations -database "$DATABASE_URL" force <n>` and run
+`up` again.
+
+One caveat on `000028`'s `down`: it drops the eight pricing columns, so the
+amounts and deadlines they held are **gone**. The rollback restores the schema,
+not the data. Rolling back after orders have been priced means expiring or
+settling them first.
 
 ## Compatibility with the code running in production
 
