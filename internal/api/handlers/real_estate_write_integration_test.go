@@ -649,7 +649,7 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 		// points at usr.users, so an order without a buyer cannot be written.
 		mustExec(t, `INSERT INTO iss.issuance_orders
 		        (user_id, asset_id, quantity, status_id, order_reference,
-		         unit_price, currency_code, gross_amount, fee_amount, amount_due, expires_at)
+		         unit_price, currency_code, gross_amount, fee_amount, amount_due, reservation_expires_at)
 		    VALUES (2, $1, 400, 2, $2, 10, 'EUR', 4000.00, 0.00, 4000.00, now() + interval '15 minutes')`,
 			assetID, "ORD-RESERVED-"+itoa(assetID))
 

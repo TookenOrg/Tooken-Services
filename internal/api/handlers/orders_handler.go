@@ -9,7 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func (h *Handler) CreateIssuanceOrder(gCtx *gin.Context) {
+func (h *Handler) CreateIssuanceOrder(gCtx *gin.Context, params server.CreateIssuanceOrderParams) {
 
 	claims, exists := middleware.GetUserClaims(gCtx)
 	if !exists {

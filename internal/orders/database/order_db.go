@@ -71,7 +71,6 @@ func scanIssuanceOrder(scanner interface {
 		&e.StatusId,
 		&e.StatusCode,
 		&e.StatusLabel,
-		&e.StatusIfFinal,
 		&title,
 	)
 	if err != nil {

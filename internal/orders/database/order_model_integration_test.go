@@ -212,7 +212,7 @@ const insertBareOrder = `
 const insertPricedOrder = `
     INSERT INTO iss.issuance_orders
         (user_id, asset_id, quantity, status_id, order_reference,
-         unit_price, currency_code, gross_amount, fee_amount, amount_due, expires_at)
+         unit_price, currency_code, gross_amount, fee_amount, amount_due, reservation_expires_at)
     VALUES ($1, $2, 10, $3, $4, 200.00000000, 'EUR', 2000.00, 40.00, 2040.00, now() + interval '15 minutes')
     RETURNING id`
 
@@ -303,7 +303,7 @@ func TestOrderModel(t *testing.T) {
 	})
 
 	// 4 and 5 — I4: a reservation has an end, and the end is after the start.
-	t.Run("04 AWAITING_PAYMENT without expires_at is refused", func(t *testing.T) {
+	t.Run("04 AWAITING_PAYMENT without reservation_expires_at is refused", func(t *testing.T) {
 		withFixture(t, db, func(t *testing.T, f orderFixture) {
 			expectRefused(t, f.tx, codeCheckViolation, "issuance_orders_awaiting_payment_ck", `
 			    INSERT INTO iss.issuance_orders
@@ -317,11 +317,11 @@ func TestOrderModel(t *testing.T) {
 	t.Run("05 AWAITING_PAYMENT expiring at its creation is refused", func(t *testing.T) {
 		withFixture(t, db, func(t *testing.T, f orderFixture) {
 			// now() is frozen for the whole transaction, so created_at and
-			// expires_at are exactly equal here — the boundary itself.
+			// reservation_expires_at are exactly equal here — the boundary itself.
 			expectRefused(t, f.tx, codeCheckViolation, "issuance_orders_awaiting_payment_ck", `
 			    INSERT INTO iss.issuance_orders
 			        (user_id, asset_id, quantity, status_id, order_reference,
-			         unit_price, currency_code, gross_amount, fee_amount, amount_due, created_at, expires_at)
+			         unit_price, currency_code, gross_amount, fee_amount, amount_due, created_at, reservation_expires_at)
 			    VALUES ($1, $2, 10, 2, 'OM-05', 200, 'EUR', 2000.00, 40.00, 2040.00, now(), now())`,
 				f.alice, f.asset)
 		})

@@ -362,7 +362,7 @@ CREATE TABLE IF NOT EXISTS iss.issuance_orders (
     gross_amount numeric(20,2),
     fee_amount numeric(20,2),
     amount_due numeric(20,2),
-    expires_at timestamp with time zone,
+    reservation_expires_at timestamp with time zone,
     idempotency_key text,
     refund_reason text
 );
@@ -478,7 +478,7 @@ ALTER TABLE iss.issuance_order_status_history ADD CONSTRAINT issuance_order_stat
 ALTER TABLE iss.issuance_order_statuses ADD CONSTRAINT issuance_order_statuses_code_key UNIQUE (code);
 ALTER TABLE iss.issuance_order_statuses ADD CONSTRAINT issuance_order_statuses_pkey PRIMARY KEY (id);
 ALTER TABLE iss.issuance_orders ADD CONSTRAINT issuance_orders_amounts_ck CHECK (((num_nonnulls(unit_price, currency_code, gross_amount, fee_amount, amount_due) = ANY (ARRAY[0, 5])) AND ((unit_price IS NULL) OR ((gross_amount = round(((quantity)::numeric * unit_price), 2)) AND (fee_amount >= (0)::numeric) AND (amount_due = (gross_amount + fee_amount))))));
-ALTER TABLE iss.issuance_orders ADD CONSTRAINT issuance_orders_awaiting_payment_ck CHECK (((status_id <> 2) OR ((expires_at IS NOT NULL) AND (expires_at > created_at) AND (amount_due IS NOT NULL))));
+ALTER TABLE iss.issuance_orders ADD CONSTRAINT issuance_orders_awaiting_payment_ck CHECK (((status_id <> 2) OR ((reservation_expires_at IS NOT NULL) AND (reservation_expires_at > created_at) AND (amount_due IS NOT NULL))));
 ALTER TABLE iss.issuance_orders ADD CONSTRAINT issuance_orders_delivered_hash_ck CHECK (((status_id <> ALL (ARRAY[5, 10, 11, 12])) OR (delivery_tx_hash IS NOT NULL)));
 ALTER TABLE iss.issuance_orders ADD CONSTRAINT issuance_orders_delivery_tx_hash_ck CHECK (((delivery_tx_hash IS NULL) OR ((delivery_tx_hash)::text ~ '^0x[0-9a-fA-F]{64}$'::text)));
 ALTER TABLE iss.issuance_orders ADD CONSTRAINT issuance_orders_order_reference_uk UNIQUE (order_reference);
@@ -652,11 +652,11 @@ COMMENT ON TABLE iss.issuance_order_statuses IS 'The thirteen states an issuance
 COMMENT ON COLUMN iss.issuance_order_statuses.counts_as_reserved IS 'Un ordre dans ce statut immobilise-t-il les parts commandees ? FALSE uniquement pour les etats qui les relachent (annulation, expiration, refus, echec). Tout nouveau statut doit fixer ce drapeau explicitement.';
 COMMENT ON COLUMN iss.issuance_orders.amount_due IS 'gross_amount + fee_amount. What the ADMIN compares a declared payment against (M3-6).';
 COMMENT ON COLUMN iss.issuance_orders.delivery_tx_hash IS 'Hash of the mint that delivered the shares. Written before waiting for the receipt (M3-8), so a crash mid-wait leaves the proof behind.';
-COMMENT ON COLUMN iss.issuance_orders.expires_at IS 'End of the reservation. Until it passes, the shares are held out of the stock; the duration itself is M3-3 (D28).';
 COMMENT ON COLUMN iss.issuance_orders.fee_amount IS 'Sum of the fee lines charged to the investor. Kept beside the lines rather than derived from them, because the order is read far more often than its breakdown.';
 COMMENT ON COLUMN iss.issuance_orders.gross_amount IS 'round(quantity * unit_price, 2). The rounding rule belongs to the database (I3): PostgreSQL rounds a half away from zero, and M3-3 has to agree with it.';
 COMMENT ON COLUMN iss.issuance_orders.idempotency_key IS 'Key sent by the client. The unique index below is the lock: two simultaneous requests carrying the same key, one inserts and the other reads back (T9).';
 COMMENT ON COLUMN iss.issuance_orders.refund_reason IS 'PLATFORM or INVESTOR_REQUEST (D36). Who caused the refund decides who bears the cost, so it is recorded, not inferred.';
+COMMENT ON COLUMN iss.issuance_orders.reservation_expires_at IS 'End of the share reservation. Until it passes, the shares are held out of the stock; past it, an unpaid order is EXPIRED. Kept once the order is paid, as part of its history. The duration is ORDER_RESERVATION_TTL (D28, M3-3).';
 COMMENT ON COLUMN iss.issuance_orders.reversal_tx_hash IS 'Hash of the burn that took the shares back (M3-9).';
 COMMENT ON COLUMN iss.issuance_orders.unit_price IS 'Copy of ass.real_estate_shares_config.price_per_share at the time of the order. Same type as the source, so no precision is lost on the way in.';
 COMMENT ON TABLE usr.kyc_verification IS 'History of KYC decisions. The source of truth: usr.users.kyc_* is a projection of this table, maintained by trigger (000025).';
