@@ -1,46 +1,59 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/TookenOrg/tooken-services/internal/api/server"
+	authUtils "github.com/TookenOrg/tooken-services/internal/auth/utils"
 	"github.com/TookenOrg/tooken-services/internal/middleware"
+	"github.com/TookenOrg/tooken-services/internal/orders/services"
 	"github.com/TookenOrg/tooken-services/pkg/logger"
 	"github.com/gin-gonic/gin"
 )
 
 func (h *Handler) CreateIssuanceOrder(gCtx *gin.Context, params server.CreateIssuanceOrderParams) {
 
-	claims, exists := middleware.GetUserClaims(gCtx)
-	if !exists {
-		gCtx.JSON(http.StatusBadRequest, logger.LogError("JWT not valid"))
+	if !middleware.RequireRole(gCtx, authUtils.RoleUser) {
 		return
 	}
+
+	claims, exists := middleware.GetUserClaims(gCtx)
+	if !exists {
+		gCtx.JSON(http.StatusUnauthorized, server.APIResponse{Message: "JWT not valid"})
+		return
+	}
+	userId := claims.UserID
 
 	var req server.CreateIssuanceOrderRequest
 	if err := gCtx.ShouldBindJSON(&req); err != nil {
-		gCtx.JSON(http.StatusBadRequest, err.Error())
+		gCtx.JSON(http.StatusBadRequest, server.APIResponse{Message: err.Error()})
 		return
 	}
 
-	userId := claims.UserID
+	logger.LogInfo("🚀 Starting creating one issuance order for userId %d and real estate id %d, quantity: %d. Idempotency key: %s", userId, req.RealEstateId, req.Quantity, params.IdempotencyKey)
 
-	logger.LogInfo("🚀 Starting creating one issuance order for userId %d and real estate id %d, quantity: %d", userId, req.RealEstateId, req.Quantity)
-
-	orderCreated, err := h.orderSvc.CreateIssuanceOrder(gCtx.Request.Context(), req, userId)
+	order, created, err := h.orderSvc.CreateIssuanceOrder(gCtx.Request.Context(), req, userId, params.IdempotencyKey)
 	if err != nil {
-		gCtx.JSON(http.StatusBadRequest, server.APIResponse{
-			Message: err.Error(),
-		})
+		respondIssuanceOrderError(gCtx, err, "Unable to create issuance order.")
 		return
 	}
 
-	resp := server.CreateIssuanceOrderResponse{
-		Data:    &orderCreated,
-		Message: "Order created",
+	if created {
+		logger.LogInfo("✅ Successfully created issuance order for userId %d and real estate id %d, quantity: %d. Idempotency key: %s", userId, req.RealEstateId, req.Quantity, params.IdempotencyKey)
+		resp := server.CreateIssuanceOrderResponse{
+			Data:    &order,
+			Message: "Order created",
+		}
+		gCtx.JSON(http.StatusCreated, resp)
+	} else {
+		logger.LogInfo("ℹ️ Issuance order already exists for userId %d and real estate id %d, quantity: %d. Idempotency key: %s", userId, req.RealEstateId, req.Quantity, params.IdempotencyKey)
+		resp := server.CreateIssuanceOrderResponse{
+			Data:    &order,
+			Message: "Order already exists",
+		}
+		gCtx.JSON(http.StatusOK, resp)
 	}
-
-	gCtx.JSON(http.StatusCreated, resp)
 }
 
 func (h *Handler) FetchIssuanceOrder(gCtx *gin.Context, orderRef string) {
@@ -60,4 +73,25 @@ func (h *Handler) FetchIssuanceOrder(gCtx *gin.Context, orderRef string) {
 	}
 
 	gCtx.JSON(http.StatusOK, resp)
+}
+
+// respondIssuanceOrderError maps the service sentinels onto status codes.
+func respondIssuanceOrderError(gCtx *gin.Context, err error, fallback string) {
+	switch {
+	case errors.Is(err, services.ErrRealEstateNotFound):
+		gCtx.JSON(http.StatusNotFound, server.APIResponse{Message: err.Error()})
+	case errors.Is(err, services.ErrQuantityInvalid):
+		gCtx.JSON(http.StatusBadRequest, server.APIResponse{Message: err.Error()})
+	case errors.Is(err, services.ErrNotEnoughShares),
+		errors.Is(err, services.ErrRealEstateNotAvailable),
+		errors.Is(err, services.ErrStakeLimit):
+		gCtx.JSON(http.StatusConflict, server.APIResponse{Message: err.Error()})
+	case errors.Is(err, services.ErrIdempotencyKeyReused):
+		gCtx.JSON(http.StatusUnprocessableEntity, server.APIResponse{Message: err.Error()})
+	case errors.Is(err, services.ErrInvestorNotEligible):
+		gCtx.JSON(http.StatusForbidden, server.APIResponse{Message: err.Error()})
+	default:
+		logger.LogError("%s: %v", fallback, err)
+		gCtx.JSON(http.StatusInternalServerError, server.APIResponse{Message: fallback})
+	}
 }
