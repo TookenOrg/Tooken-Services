@@ -47,12 +47,11 @@ const (
 )
 
 // Status ids of the target referential (TICKET-M3-1 §2.1). The constraints are
-// CHECKs on ids, so the tests name ids too.
+// CHECKs on ids, so the tests name ids too. statusCreated and
+// statusAwaitingPayment come from issuance_order_write_db.go.
 const (
-	statusCreated         = 1
-	statusAwaitingPayment = 2
-	statusClosed          = 5
-	statusRefundPending   = 13
+	statusClosed        = 5
+	statusRefundPending = 13
 )
 
 func openOrderModelDB(t *testing.T) *sql.DB {
@@ -203,7 +202,7 @@ func execInSavepoint(tx *sql.Tx, query string, args ...any) error {
 }
 
 // The insert most cases start from. Columns not listed stay NULL, which is a
-// draft order as InsertIssuranceOrder writes it today.
+// draft order, as the pre-M3-3 insert used to write it.
 const insertBareOrder = `
     INSERT INTO iss.issuance_orders (user_id, asset_id, quantity, status_id, order_reference)
     VALUES ($1, $2, $3, $4, $5)`

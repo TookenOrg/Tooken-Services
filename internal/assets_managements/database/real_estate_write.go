@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/TookenOrg/tooken-services/internal/globals"
+	"github.com/TookenOrg/tooken-services/internal/utils"
 	"github.com/shopspring/decimal"
 )
 
@@ -140,15 +141,7 @@ SELECT re.id,
 FROM ass.real_estate re
 LEFT JOIN ass.real_estate_shares_config conf
     ON conf.real_estate_id = re.id
-LEFT JOIN (
-    SELECT o.asset_id, SUM(o.quantity) AS reserved
-    FROM iss.issuance_orders o
-    JOIN iss.issuance_order_statuses s
-        ON s.id = o.status_id
-    WHERE s.counts_as_reserved
-    GROUP BY o.asset_id
-) sold
-    ON sold.asset_id = re.id
+` + reservedByAsset + `
 WHERE re.id = $1
 `
 
@@ -169,7 +162,7 @@ WHERE re.id = $1
 // published_at only makes sense for an asset that is actually published, so a
 // draft is created without one.
 func CreateRealEstate(ctx context.Context, in RealEstateWriteDTO, statusID int) (id int, err error) {
-	err = inTransaction(ctx, func(tx *sql.Tx) error {
+	err = utils.InTransaction(ctx, func(tx *sql.Tx) error {
 		const query = `
 INSERT INTO ass.real_estate (title, description, imageurl, estate_type, issuer_id, status_id, published_at)
 VALUES ($1, $2, $3, $4, $5, $6, CASE WHEN $7 THEN now() END)
@@ -204,7 +197,7 @@ RETURNING id
 // It reports sql.ErrNoRows when the asset does not exist or was deleted, so a
 // caller can answer 404 without a second round trip.
 func UpdateRealEstate(ctx context.Context, id int, in RealEstateWriteDTO) error {
-	return inTransaction(ctx, func(tx *sql.Tx) error {
+	return utils.InTransaction(ctx, func(tx *sql.Tx) error {
 		const query = `
 UPDATE ass.real_estate
 SET title = $2,
@@ -383,32 +376,6 @@ VALUES ($1, $2, $3, $4, $5, $6)
 	}
 
 	return nil
-}
-
-// inTransaction runs fn in a transaction and rolls back on any failure,
-// including a panic: leaving a transaction open would hold locks on the asset
-// until the connection is recycled.
-func inTransaction(ctx context.Context, fn func(*sql.Tx) error) (err error) {
-	tx, err := globals.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-
-	defer func() {
-		if p := recover(); p != nil {
-			_ = tx.Rollback()
-			panic(p)
-		}
-		if err != nil {
-			_ = tx.Rollback()
-		}
-	}()
-
-	if err = fn(tx); err != nil {
-		return err
-	}
-
-	return tx.Commit()
 }
 
 // PublishRealEstate moves an asset to the published status and binds it to the

@@ -1,5 +1,6 @@
 .env
 .env.*
+!.env.example
 
 # VS Code : reglages perso (chemins machine). launch.json reste versionne.
 .vscode/settings.json
