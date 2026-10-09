@@ -1197,7 +1197,7 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 			}
 		})
 
-		// Before this ticket /publish wrote status 3 whatever the asset held, so a
+		// /publish used to write status 3 whatever the asset held, so a
 		// late click on "publish" closed a running subscription without a word.
 		// It now refuses to move an asset backwards, and never deploys again.
 		for _, c := range []struct {

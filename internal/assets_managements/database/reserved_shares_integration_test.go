@@ -1,6 +1,6 @@
 //go:build integration
 
-// The three reads of reserved shares must agree (TICKET-M3-3 §2.5): the stock
+// The three reads of reserved shares must agree: the stock
 // an order is checked against, tokens_sold shown on the asset, and the guard
 // state a manager's write is checked against. Two of them once counted lapsed
 // reservations and the third did not: the order passed while the asset showed

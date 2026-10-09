@@ -1,6 +1,6 @@
 //go:build integration
 
-// Coverage of PlaceIssuanceOrder (TICKET-M3-3 §2.4, §3, §5) against a real
+// Coverage of PlaceIssuanceOrder against a real
 // PostgreSQL.
 //
 // Unlike order_model_integration_test.go, these cases cannot run inside a
@@ -497,7 +497,7 @@ func TestPlaceIssuanceOrder(t *testing.T) {
 			}
 		})
 
-		// §3.5: a replay answers with the order as it is, without re-running any
+		// A replay answers with the order as it is, without re-running any
 		// business check.
 		for _, c := range []struct {
 			name   string
@@ -580,7 +580,7 @@ func TestPlaceIssuanceOrder(t *testing.T) {
 			}
 		})
 
-		t.Run("concurrent requests with the same key create one order (§3.4)", func(t *testing.T) {
+		t.Run("concurrent requests with the same key create one order", func(t *testing.T) {
 			asset := newAsset(t, db, fundraising())
 			in := placeInput(newInvestor(t, db, kycVerified), asset, 2)
 
@@ -736,7 +736,7 @@ func TestPlaceIssuanceOrder(t *testing.T) {
 			{"the exact last shares", []existing{{1495, 2, "10 minutes"}}, 5, nil, ""},
 			{"one share too many", []existing{{1495, 2, "10 minutes"}}, 6, ErrOrderNotEnoughShares, "only 5 shares left, 6 requested"},
 			{"sold out", []existing{{1500, 4, "0"}}, 1, ErrOrderNotEnoughShares, "only 0 shares left, 1 requested"},
-			{"expired reservations free their shares (§3.2)", []existing{{1495, 2, "-1 minute"}}, 10, nil, ""},
+			{"expired reservations free their shares", []existing{{1495, 2, "-1 minute"}}, 10, nil, ""},
 			{"cancelled, expired and refunded orders hold nothing", []existing{{500, 6, "0"}, {500, 7, "0"}, {499, 14, "0"}}, 1500, nil, ""},
 			{"paid, closed, delivering and reversing orders hold shares", []existing{{300, 4, "0"}, {300, 5, "0"}, {300, 8, "0"}, {300, 11, "0"}, {295, 12, "0"}}, 6, ErrOrderNotEnoughShares, "only 5 shares left, 6 requested"},
 			{"a whole asset in one order", nil, 1500, nil, ""},
@@ -858,7 +858,7 @@ func TestPlaceIssuanceOrder(t *testing.T) {
 			}
 		})
 
-		// Case 20 (§3.7): the price changes while the order waits for the lock.
+		// The price changes while the order waits for the lock.
 		t.Run("a price changed while waiting is the price charged", func(t *testing.T) {
 			a := fundraising()
 			a.price, a.rate = "200", nil

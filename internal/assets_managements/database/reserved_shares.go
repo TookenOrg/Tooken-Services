@@ -1,7 +1,7 @@
 package database
 
-// ReservedOrders is THE definition of the orders that hold shares of an asset
-// (TICKET-M3-3 §2.5). Every read of reserved shares builds on it: the stock
+// ReservedOrders is THE definition of the orders that hold shares of an asset.
+// Every read of reserved shares builds on it: the stock
 // checked when an order is placed, tokens_sold shown on the asset, and the
 // guard state a manager's write is checked against. Three copies of this rule
 // drifted once (the lapsed reservations were counted by two of them): keep one.

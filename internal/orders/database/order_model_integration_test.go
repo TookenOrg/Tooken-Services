@@ -46,7 +46,7 @@ const (
 	codeRaiseException  = "P0001"
 )
 
-// Status ids of the target referential (TICKET-M3-1 §2.1). The constraints are
+// Status ids of the target referential. The constraints are
 // CHECKs on ids, so the tests name ids too. statusCreated and
 // statusAwaitingPayment come from issuance_order_write_db.go.
 const (
@@ -218,7 +218,7 @@ const insertPricedOrder = `
 func TestOrderModel(t *testing.T) {
 	db := openOrderModelDB(t)
 
-	// 1 — the referential is the one §2.1 describes.
+	// 1 — the referential is the expected one.
 	t.Run("01 the referential has 13 statuses and no PAYMENT_PENDING", func(t *testing.T) {
 		want := map[int]struct {
 			code     string

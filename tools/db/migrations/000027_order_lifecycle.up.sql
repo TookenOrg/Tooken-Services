@@ -64,8 +64,8 @@ END $$;
 -- end with the same thirteen.
 --
 -- CREATED stops reserving (T4). It is the draft of an order, not a claim on the
--- stock; only AWAITING_PAYMENT holds shares back. The milestone says so in §3,
--- and real_estate_columns.go computes tokens_sold straight from this flag, so
+-- stock; only AWAITING_PAYMENT holds shares back, and real_estate_columns.go
+-- computes tokens_sold straight from this flag, so
 -- the change takes effect with no Go to write.
 INSERT INTO iss.issuance_order_statuses (id, code, label, is_final, counts_as_reserved) VALUES
     (1,  'CREATED',              'Order created',        false, false),

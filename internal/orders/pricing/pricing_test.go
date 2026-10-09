@@ -12,7 +12,7 @@ func rate(s string) *decimal.Decimal {
 	return &r
 }
 
-// TestPriceOrder covers TICKET-M3-3 §5 (R1-R5) plus the rounding edge cases.
+// TestPriceOrder covers the pricing rules plus the rounding edge cases.
 // Amounts are compared with StringFixed(2) because decimal.Equal ignores the
 // scale and the API exposes exactly two decimals.
 func TestPriceOrder(t *testing.T) {

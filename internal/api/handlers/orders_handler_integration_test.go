@@ -1,7 +1,7 @@
 //go:build integration
 
-// End-to-end coverage of POST /assets/real-estate/issuance/orders, the cases of
-// TICKET-M3-3 §5, through the real router, middleware, handler, service and
+// End-to-end coverage of POST /assets/real-estate/issuance/orders through the
+// real router, middleware, handler, service and
 // database. What the database layer proves on its own (every refusal, every
 // rollback) lives in internal/orders/database; this file proves the contract a
 // client sees: status codes, headers, the response body.
@@ -15,8 +15,8 @@
 //	TEST_DATABASE_URL="postgres://postgres:pw@localhost:55432/tk?sslmode=disable" \
 //	    go test -tags integration -run 'TestIssuanceOrder' ./internal/api/handlers/
 //
-// The concurrent cases (17, 20, 21) live in their own function so that the
-// ticket's -count=20 runs them alone:
+// The concurrent cases (17, 20, 21) live in their own function so that they can
+// be repeated alone with -count=20:
 //
 //	go test -tags integration -race -count=20 -run 'TestIssuanceOrderConcurrency' ./internal/api/handlers/
 package handlers
@@ -116,7 +116,7 @@ func (h *orderHarness) newUser(t *testing.T, role, kycStatus, kycExpires string)
 	return orderUser{id: id, token: token}
 }
 
-// investor is Alice of the ticket: a USER whose KYC is verified for a year.
+// investor is the reference investor: a USER whose KYC is verified for a year.
 func (h *orderHarness) investor(t *testing.T) orderUser {
 	return h.newUser(t, authUtils.RoleUser, "verified", "now() + interval '1 year'")
 }
@@ -129,7 +129,7 @@ type orderAsset struct {
 	cap    *int64  // max_shares_per_investor, nil = NULL
 }
 
-// villaBelair is the asset of the ticket's §0: 1 500 shares at 200.00 EUR,
+// villaBelair is the reference asset of these tests: 1 500 shares at 200.00 EUR,
 // 2 % of entry fee, 50 shares per investor at most.
 func villaBelair() orderAsset {
 	rate, limit := "2", int64(50)
@@ -390,7 +390,7 @@ func TestIssuanceOrderEndpoint(t *testing.T) {
 		}
 	})
 
-	t.Run("the order of §0", func(t *testing.T) {
+	t.Run("the nominal order", func(t *testing.T) {
 		asset := h.newAsset(t, villaBelair())
 		alice := h.investor(t)
 		key := newKey()
@@ -530,7 +530,7 @@ func TestIssuanceOrderEndpoint(t *testing.T) {
 			expectCode(t, code, body, http.StatusCreated)
 
 			// The detail shown on the asset must agree with the stock the order
-			// was checked against: 10 sold, not 1 505 (§2.5).
+			// was checked against: 10 sold, not 1 505.
 			req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("%s/assets/real-estates/%d", globals.BaseURL, asset), nil)
 			w := httptest.NewRecorder()
 			h.r.ServeHTTP(w, req)
@@ -543,7 +543,7 @@ func TestIssuanceOrderEndpoint(t *testing.T) {
 				t.Fatalf("no tokens_sold in %s", w.Body.String())
 			}
 			if sold := *re.Progression.TokensSold; sold != 10 {
-				t.Fatalf("tokens_sold = %d, want 10: the lapsed 1 495 are still counted (§2.5)", sold)
+				t.Fatalf("tokens_sold = %d, want 10: the lapsed 1 495 are still counted", sold)
 			}
 		})
 	})
@@ -652,7 +652,7 @@ func (h *orderHarness) postAsync(c orderCall) <-chan orderResponse {
 	return out
 }
 
-// The cases the ticket wants run with -count=20.
+// The cases that must be run with -count=20.
 func TestIssuanceOrderConcurrency(t *testing.T) {
 	h := newOrderHarness(t)
 
@@ -694,7 +694,7 @@ func TestIssuanceOrderConcurrency(t *testing.T) {
 		}
 	})
 
-	// §3.7: what the order waited for is what it is priced with.
+	// What the order waited for is what it is priced with.
 	t.Run("20 a price changed while the order waits is the price charged", func(t *testing.T) {
 		asset := h.newAsset(t, villaBelair())
 		manager, err := h.db.Begin()

@@ -63,7 +63,7 @@ type lockedRealEstateDTO struct {
 //
 // The asset row is locked first and every check runs after: two orders on the
 // same asset are serialised, so the stock they read is the stock they write
-// against (TICKET-M3-3 §3.1). Orders on different assets do not wait.
+// against. Orders on different assets do not wait.
 func PlaceIssuanceOrder(ctx context.Context, in PlaceOrderDTO) (placed PlacedOrderDTO, err error) {
 	err = utils.InTransaction(ctx, func(tx *sql.Tx) error {
 		// 1 - Lock first, nothing else.
@@ -72,7 +72,7 @@ func PlaceIssuanceOrder(ctx context.Context, in PlaceOrderDTO) (placed PlacedOrd
 		}
 
 		// 2 - Replay before any business check: a replayed key returns the
-		// existing order as it is, even if the fundraising closed since (§3.5).
+		// existing order as it is, even if the fundraising closed since.
 		existing, found, err := findOrderByIdempotencyKey(ctx, tx, in.UserID, in.IdempotencyKey)
 		if err != nil {
 			return err
@@ -148,7 +148,7 @@ func PlaceIssuanceOrder(ctx context.Context, in PlaceOrderDTO) (placed PlacedOrd
 //
 // The query reads nothing else on purpose: when FOR UPDATE has to wait,
 // PostgreSQL refreshes the locked row but not the rows of a joined table, which
-// stay as they were when the statement started (TICKET-M3-3 §3.7, proven).
+// stay as they were when the statement started (proven by an integration test).
 func lockRealEstate(ctx context.Context, tx *sql.Tx, realEstateID int) error {
 	const query = `SELECT 1 FROM ass.real_estate WHERE id = $1 FOR UPDATE`
 
@@ -172,7 +172,7 @@ type idempotentOrder struct {
 
 // findOrderByIdempotencyKey looks for the order this key already produced.
 // The lock of step 1 is what makes it safe: a concurrent request with the same
-// key waits on the asset, then sees the committed order (§3.4).
+// key waits on the asset, then sees the committed order.
 func findOrderByIdempotencyKey(ctx context.Context, tx *sql.Tx, userID int, key string) (o idempotentOrder, found bool, err error) {
 	const query = `
 SELECT id, order_reference, asset_id, quantity
@@ -241,7 +241,7 @@ const (
 
 // readReservedShares returns the shares held on the asset by every investor,
 // and by userID alone, in one pass. What "held" means is the shared definition,
-// assetsDb.ReservedOrders (§2.5): lapsed reservations do not count.
+// assetsDb.ReservedOrders: lapsed reservations do not count.
 func readReservedShares(ctx context.Context, tx *sql.Tx, realEstateID, userID int) (onAsset, byUser int64, err error) {
 	const query = `
 SELECT
@@ -258,7 +258,7 @@ SELECT
 }
 
 // checkSharesAvailable refuses an order the asset cannot serve, then one that
-// would take the investor above the cap. The messages say what to do (§3.6).
+// would take the investor above the cap. The messages say what to do.
 func checkSharesAvailable(a lockedRealEstateDTO, onAsset, byUser int64, quantity int) error {
 	requested := int64(quantity)
 
@@ -324,7 +324,7 @@ func isUniqueViolation(err error, constraint string) bool {
 
 // insertOrder writes the order in AWAITING_PAYMENT with its frozen amounts.
 //
-// Both dates come from the database clock (U2, §3.3): created_at by default,
+// Both dates come from the database clock (U2): created_at by default,
 // reservation_expires_at from now() of the same transaction, so the CHECK
 // reservation_expires_at > created_at holds by construction.
 func insertOrder(ctx context.Context, tx *sql.Tx, in PlaceOrderDTO, currencyCode string, price pricing.PricedOrder) (orderID int64, err error) {
@@ -348,7 +348,7 @@ RETURNING id
 			return 0, ErrDuplicateOrderReference
 		}
 		// The asset lock does not serialise one key replayed on two assets:
-		// the later order meets the unique index instead of step 2 (§3.4).
+		// the later order meets the unique index instead of step 2.
 		if isUniqueViolation(err, idempotencyKeyConstraint) {
 			return 0, ErrOrderIdempotencyKeyReuse
 		}

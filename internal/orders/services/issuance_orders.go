@@ -21,7 +21,7 @@ var (
 	// The refusals of the order placement are the database's own sentinels:
 	// they are decided under the asset lock, in database.PlaceIssuanceOrder,
 	// which cannot import this package. Aliasing keeps their detailed message
-	// ("only 5 shares left, 10 requested") for the 409 (TICKET-M3-3 §3.6).
+	// ("only 5 shares left, 10 requested") for the 409.
 	ErrRealEstateNotFound     = database.ErrOrderAssetNotFound       // 404
 	ErrRealEstateNotAvailable = database.ErrOrderAssetNotOpen        // 409
 	ErrNotEnoughShares        = database.ErrOrderNotEnoughShares     // 409
@@ -109,7 +109,7 @@ func (s *Service) CreateIssuanceOrder(ctx context.Context, req server.CreateIssu
 
 	// 3 - Answer with the order as the database holds it: amounts, fees,
 	// dates from its clock. On a replay it is the existing order, as it is
-	// now (§3.5), not the reference generated for this call.
+	// now, not the reference generated for this call.
 	order, err = database.GetIssuanceOrderByRef(ctx, placed.OrderReference)
 	if err != nil {
 		// The order is committed: a retry with the same key replays it.

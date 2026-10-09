@@ -7,7 +7,7 @@ import (
 )
 
 // TestCheckSharesAvailable covers the decision of step 5; the SQL that feeds
-// it is covered by the integration tests (TICKET-M3-3 §5, cases 13 to 19).
+// it is covered by the integration tests.
 func TestCheckSharesAvailable(t *testing.T) {
 	noCap := sql.NullInt64{}
 	cap50 := sql.NullInt64{Int64: 50, Valid: true}
