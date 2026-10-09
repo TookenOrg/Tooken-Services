@@ -1,8 +1,8 @@
 //go:build integration
 
-// End-to-end coverage of POST /assets/real-estate/issuance/orders through the
-// real router, middleware, handler, service and
-// database. What the database layer proves on its own (every refusal, every
+// End-to-end coverage of POST and GET /assets/real-estate/issuance/orders, and
+// of GET /assets/real-estate/issuance/orders/{orderRef}, through the real
+// router, middleware, handler, service and database. What the database layer proves on its own (every refusal, every
 // rollback) lives in internal/orders/database; this file proves the contract a
 // client sees: status codes, headers, the response body.
 //
@@ -749,5 +749,160 @@ func TestIssuanceOrderConcurrency(t *testing.T) {
 		if n := h.ordersOf(t, alice.id); n != 0 {
 			t.Fatalf("want no order, found %d", n)
 		}
+	})
+}
+
+// ---------------------------------------------------------------- reads (M3-4)
+
+func (h *orderHarness) get(token, path string) (int, string) {
+	req := httptest.NewRequest(http.MethodGet, globals.BaseURL+path, nil)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	w := httptest.NewRecorder()
+	h.r.ServeHTTP(w, req)
+	return w.Code, w.Body.String()
+}
+
+func decodeOrderList(t *testing.T, body string) []server.IssuanceOrder {
+	t.Helper()
+	var resp server.IssuanceOrderListResponse
+	if err := json.Unmarshal([]byte(body), &resp); err != nil {
+		t.Fatalf("decoding %s: %v", body, err)
+	}
+	return resp.Data
+}
+
+// placeFor places an order through the API and returns its reference.
+func (h *orderHarness) placeFor(t *testing.T, investor orderUser, asset int) string {
+	t.Helper()
+	code, body := h.post(orderCall{token: investor.token, key: newKey(), body: orderBody(asset, 1)})
+	expectCode(t, code, body, http.StatusCreated)
+	return decodeOrder(t, body).OrderRef
+}
+
+func TestIssuanceOrderReadEndpoints(t *testing.T) {
+	h := newOrderHarness(t)
+
+	asset := h.newAsset(t, villaBelair())
+	paul := h.investor(t)
+	marie := h.investor(t)
+	paulRefs := []string{h.placeFor(t, paul, asset), h.placeFor(t, paul, asset)}
+	marieRef := h.placeFor(t, marie, asset)
+
+	t.Run("list", func(t *testing.T) {
+		t.Run("11 a user gets only his orders", func(t *testing.T) {
+			code, body := h.get(paul.token, ordersPath)
+			expectCode(t, code, body, http.StatusOK)
+			got := decodeOrderList(t, body)
+			if len(got) != len(paulRefs) {
+				t.Fatalf("want %d orders, got %d: %s", len(paulRefs), len(got), body)
+			}
+			for _, o := range got {
+				if o.UserId != paul.id {
+					t.Fatalf("order %s of user %d leaked to user %d", o.OrderRef, o.UserId, paul.id)
+				}
+			}
+			if strings.Contains(body, marieRef) {
+				t.Fatalf("Marie's order %s leaked to Paul", marieRef)
+			}
+		})
+
+		for _, c := range []struct{ num, role string }{
+			{"12", authUtils.RoleManager},
+			{"13", authUtils.RoleAdmin},
+		} {
+			t.Run(c.num+" a "+c.role+" gets every order", func(t *testing.T) {
+				staff := h.newUser(t, c.role, "verified", "NULL")
+				code, body := h.get(staff.token, ordersPath)
+				expectCode(t, code, body, http.StatusOK)
+				got := map[string]bool{}
+				for _, o := range decodeOrderList(t, body) {
+					got[o.OrderRef] = true
+				}
+				for _, ref := range append([]string{marieRef}, paulRefs...) {
+					if !got[ref] {
+						t.Fatalf("order %s missing from the %s list", ref, c.role)
+					}
+				}
+			})
+		}
+
+		t.Run("14 anonymous is a 401", func(t *testing.T) {
+			code, body := h.get("", ordersPath)
+			expectCode(t, code, body, http.StatusUnauthorized)
+		})
+
+		t.Run("14b a forged token is a 401", func(t *testing.T) {
+			code, body := h.get("not.a.jwt", ordersPath)
+			expectCode(t, code, body, http.StatusUnauthorized)
+		})
+
+		t.Run("15 a user without order gets data: []", func(t *testing.T) {
+			nobody := h.investor(t)
+			code, body := h.get(nobody.token, ordersPath)
+			expectCode(t, code, body, http.StatusOK)
+			var raw struct {
+				Data json.RawMessage `json:"data"`
+			}
+			if err := json.Unmarshal([]byte(body), &raw); err != nil {
+				t.Fatal(err)
+			}
+			if string(raw.Data) != "[]" {
+				t.Fatalf(`want "data": [], got %s`, body)
+			}
+		})
+
+		t.Run("15b a lapsed reservation is listed as EXPIRED", func(t *testing.T) {
+			late := h.investor(t)
+			h.rawOrder(t, late.id, asset, 1, 2, "-1 minute")
+			code, body := h.get(late.token, ordersPath)
+			expectCode(t, code, body, http.StatusOK)
+			got := decodeOrderList(t, body)
+			if len(got) != 1 || got[0].StatusCode != "EXPIRED" || got[0].StatusId == nil || *got[0].StatusId != 7 {
+				t.Fatalf("want one EXPIRED order, got %s", body)
+			}
+		})
+	})
+
+	t.Run("detail", func(t *testing.T) {
+		t.Run("16 a user reads his own order", func(t *testing.T) {
+			code, body := h.get(paul.token, ordersPath+"/"+paulRefs[0])
+			expectCode(t, code, body, http.StatusOK)
+			o := decodeOrder(t, body)
+			if o.OrderRef != paulRefs[0] || o.UserId != paul.id {
+				t.Fatalf("want order %s of user %d, got %s of user %d", paulRefs[0], paul.id, o.OrderRef, o.UserId)
+			}
+			if len(o.Fees) != 1 || o.RealEstateTitle == nil {
+				t.Fatalf("want fees and title, got %s", body)
+			}
+		})
+
+		t.Run("17 a user cannot read someone else's order", func(t *testing.T) {
+			code, body := h.get(paul.token, ordersPath+"/"+marieRef)
+			expectCode(t, code, body, http.StatusNotFound)
+			if strings.Contains(body, marieRef) {
+				t.Fatalf("the 404 must not echo the order: %s", body)
+			}
+		})
+
+		t.Run("18 a manager reads anyone's order", func(t *testing.T) {
+			manager := h.newUser(t, authUtils.RoleManager, "verified", "NULL")
+			code, body := h.get(manager.token, ordersPath+"/"+marieRef)
+			expectCode(t, code, body, http.StatusOK)
+			if o := decodeOrder(t, body); o.OrderRef != marieRef {
+				t.Fatalf("want order %s, got %s", marieRef, o.OrderRef)
+			}
+		})
+
+		t.Run("19 an unknown reference is a 404", func(t *testing.T) {
+			code, body := h.get(paul.token, ordersPath+"/"+h.unique("UNKNOWN"))
+			expectCode(t, code, body, http.StatusNotFound)
+		})
+
+		t.Run("19b anonymous is a 401", func(t *testing.T) {
+			code, body := h.get("", ordersPath+"/"+paulRefs[0])
+			expectCode(t, code, body, http.StatusUnauthorized)
+		})
 	})
 }

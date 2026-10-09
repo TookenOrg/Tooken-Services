@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"errors"
 	"fmt"
 	"os"
@@ -28,6 +29,7 @@ var (
 	ErrStakeLimit             = database.ErrOrderStakeLimit          // 409
 	ErrInvestorNotEligible    = database.ErrOrderInvestorNotEligible // 403
 	ErrIdempotencyKeyReused   = database.ErrOrderIdempotencyKeyReuse // 422
+	ErrOrderNotFound          = errors.New("order not found")
 )
 
 // defaultReservationTTL is how long an unpaid order holds its shares when
@@ -110,7 +112,7 @@ func (s *Service) CreateIssuanceOrder(ctx context.Context, req server.CreateIssu
 	// 3 - Answer with the order as the database holds it: amounts, fees,
 	// dates from its clock. On a replay it is the existing order, as it is
 	// now, not the reference generated for this call.
-	order, err = database.GetIssuanceOrderByRef(ctx, placed.OrderReference)
+	order, err = database.GetIssuanceOrderByRef(ctx, placed.OrderReference, false, userId)
 	if err != nil {
 		// The order is committed: a retry with the same key replays it.
 		err = fmt.Errorf("read placed order %s: %w", placed.OrderReference, err)
@@ -121,8 +123,17 @@ func (s *Service) CreateIssuanceOrder(ctx context.Context, req server.CreateIssu
 	return
 }
 
-func (s *Service) FetchIssuanceOrder(ctx context.Context, orderRef string) (order server.IssuanceOrder, err error) {
-	return database.GetIssuanceOrderByRef(ctx, orderRef)
+func (s *Service) ListIssuanceOrders(ctx context.Context, isStaff bool, userID int) (orders []server.IssuanceOrder, err error) {
+	return database.ListIssuanceOrders(ctx, isStaff, userID)
+}
+
+func (s *Service) FetchIssuanceOrder(ctx context.Context, orderRef string, isStaff bool, userID int) (order server.IssuanceOrder, err error) {
+	order, err = database.GetIssuanceOrderByRef(ctx, orderRef, isStaff, userID)
+	if errors.Is(err, sql.ErrNoRows) {
+		err = ErrOrderNotFound
+		return
+	}
+	return
 }
 
 // generateIssuanceOrderReference builds "ISS-YYYYMMDD-XXXXXX": chronologically
