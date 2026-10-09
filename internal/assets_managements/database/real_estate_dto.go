@@ -164,9 +164,7 @@ type RealEstateMediaDTO struct {
 
 // RealEstateProgressionDTO holds the reserved shares, computed in SQL.
 //
-// What counts as "reserved" is carried by
-// iss.issuance_order_statuses.counts_as_reserved (migration 000010), not by this
-// code: adding a status to the flow requires no change here.
+// What counts as "reserved" is defined once, by ReservedOrders.
 type RealEstateProgressionDTO struct {
 	TokensSold     int64
 	TokensSoldPctg decimal.Decimal

@@ -164,26 +164,13 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 	    ON CONFLICT (id) DO NOTHING`); err != nil {
 		t.Fatal(err)
 	}
-	// iss.issuance_order_statuses is filled by nothing: 000010 already calls it
-	// "the existing reference table", so it predates the migration history. A
-	// database built from the migrations alone holds the table and none of its
-	// rows, and the first order written below fails on fk_issuance_orders_status.
-	//
-	// The codes and the counts_as_reserved flag are the ones 000010 documents:
-	// only CANCELLED and EXPIRED release the shares they hold. DO NOTHING so a
-	// baseline carrying the real production labels keeps them.
-	if _, err := db.Exec(`
-	    INSERT INTO iss.issuance_order_statuses (id, code, label, is_final, counts_as_reserved) VALUES
-	        (1, 'CREATED',           'Créée',               FALSE, TRUE),
-	        (2, 'RESERVED',          'Réservée',            FALSE, TRUE),
-	        (3, 'PAYMENT_PENDING',   'Paiement en attente', FALSE, TRUE),
-	        (4, 'PAYMENT_CONFIRMED', 'Paiement confirmé',   FALSE, TRUE),
-	        (5, 'COMPLETED',         'Complétée',           TRUE,  TRUE),
-	        (6, 'CANCELLED',         'Annulée',             TRUE,  FALSE),
-	        (7, 'EXPIRED',           'Expirée',             TRUE,  FALSE)
-	    ON CONFLICT (id) DO NOTHING`); err != nil {
-		t.Fatal(err)
-	}
+	// iss.issuance_order_statuses is deliberately not seeded here. Migration
+	// 000027 writes the whole referential itself, by explicit id, so any database
+	// at version 27 or above already holds it. The seed this suite used to carry
+	// listed the codes of 000010 with ON CONFLICT DO NOTHING: on a migrated
+	// database it would have done nothing for six of them and silently brought
+	// back 3 PAYMENT_PENDING, the status 000027 withdraws.
+
 	// issuer_id is NOT NULL since migration 000016, and every asset written
 	// below names vehicle 1. Seeded here for the same reason as the two
 	// referentials above: the suite must run from the migrations alone.
@@ -650,13 +637,21 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 		assetID := mustScanID(t, `INSERT INTO ass.real_estate (title, description, imageurl, estate_type, issuer_id, status_id)
 		    VALUES ('Reserved guard', 'A guard', 'https://x/g.jpg', 1, 1, 1) RETURNING id`)
 		mustExec(t, `INSERT INTO ass.real_estate_shares_config (real_estate_id, total_shares, price_per_share, yield) VALUES ($1, 1000, 10, 4)`, assetID)
-		// status 2 = RESERVED, which carries counts_as_reserved. The reference is
-		// derived from the asset so the suite can run twice on the same database:
-		// order_reference is unique. user_id names the investor seeded at the top
-		// of the suite: the column is NOT NULL and points at usr.users, so an
-		// order without a buyer cannot be written.
-		mustExec(t, `INSERT INTO iss.issuance_orders (user_id, asset_id, quantity, status_id, order_reference)
-		    VALUES (2, $1, 400, 2, $2)`, assetID, "ORD-RESERVED-"+itoa(assetID))
+		// status 2 = AWAITING_PAYMENT, the reservation proper: it carries
+		// counts_as_reserved, and since 000028 it must be priced and dated (I3,
+		// I4). A complete order is written rather than one in a status that
+		// happens to reserve without amounts: that would lean on a gap of the
+		// schema, not on its intent. 400 × 10 = 4000.00, no fee.
+		//
+		// The reference is derived from the asset so the suite can run twice on
+		// the same database: order_reference is unique. user_id names the
+		// investor seeded at the top of the suite: the column is NOT NULL and
+		// points at usr.users, so an order without a buyer cannot be written.
+		mustExec(t, `INSERT INTO iss.issuance_orders
+		        (user_id, asset_id, quantity, status_id, order_reference,
+		         unit_price, currency_code, gross_amount, fee_amount, amount_due, reservation_expires_at)
+		    VALUES (2, $1, 400, 2, $2, 10, 'EUR', 4000.00, 0.00, 4000.00, now() + interval '15 minutes')`,
+			assetID, "ORD-RESERVED-"+itoa(assetID))
 
 		base := `{"configuration":{"total_shares":"%s"}}`
 
@@ -1015,6 +1010,221 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 				t.Errorf("unknown id: want 404 got %d", code)
 			}
 		})
+	})
+
+	// Opening the fundraising is the only way into the one status that will
+	// accept orders (D34). Every case starts from an asset that went through the
+	// real publication path, so the token it carries is bound the way production
+	// binds it; only the states the API cannot reach yet (funded, closed, a
+	// suspended issuer) are forced in SQL.
+	t.Run("fundraising", func(t *testing.T) {
+		adm, _ := authUtils.GenerateJWT(1, "m@t.lu", authUtils.RoleAdmin)
+
+		// The issuer is identifiable and active, like vehicle 1. A dedicated one
+		// lets the suspended case change its status without touching the vehicle
+		// every other case relies on.
+		const suspendableIssuer = 1002
+		mustExec(t, `
+		    INSERT INTO ass.issuer (id, name, legal_form, registration_number, status_id)
+		    VALUES ($1, 'Tooken RE Suspendable', 'SA', 'B999998', 2)
+		    ON CONFLICT (id) DO UPDATE
+		        SET registration_number = EXCLUDED.registration_number,
+		            status_id           = EXCLUDED.status_id`, suspendableIssuer)
+
+		published := func(t *testing.T, issuerID int) int {
+			t.Helper()
+			p := strings.Replace(payload, `"issuer_id": 1`, `"issuer_id": `+itoa(issuerID), 1)
+			code, body := do("POST", "/assets/real-estates", mgr, p)
+			if code != http.StatusCreated {
+				t.Fatalf("create: want 201 got %d: %s", code, body)
+			}
+			var re map[string]any
+			json.Unmarshal([]byte(body), &re)
+			id := int(re["id"].(float64))
+			if code, body := do("POST", "/assets/real-estates/"+itoa(id)+"/publish", mgr, ""); code != http.StatusOK {
+				t.Fatalf("publish: want 200 got %d: %s", code, body)
+			}
+			return id
+		}
+		statusOf := func(t *testing.T, id int) int {
+			t.Helper()
+			var status int
+			if err := db.QueryRow(`SELECT status_id FROM ass.real_estate WHERE id = $1`, id).Scan(&status); err != nil {
+				t.Fatalf("read status: %v", err)
+			}
+			return status
+		}
+		open := func(id int, token string) (int, string) {
+			return do("POST", "/assets/real-estates/"+itoa(id)+"/open-fundraising", token, "")
+		}
+
+		t.Run("01 anonymous is refused", func(t *testing.T) {
+			id := published(t, 1)
+			if code, body := open(id, ""); code != http.StatusUnauthorized {
+				t.Fatalf("want 401 got %d: %s", code, body)
+			}
+		})
+
+		t.Run("02 a plain user is refused", func(t *testing.T) {
+			id := published(t, 1)
+			if code, body := open(id, usr); code != http.StatusForbidden {
+				t.Fatalf("want 403 got %d: %s", code, body)
+			}
+			if got := statusOf(t, id); got != 3 {
+				t.Errorf("a refused call moved the asset to status %d", got)
+			}
+		})
+
+		t.Run("03 an unknown asset is 404", func(t *testing.T) {
+			if code, body := open(999999, mgr); code != http.StatusNotFound {
+				t.Fatalf("want 404 got %d: %s", code, body)
+			}
+		})
+
+		t.Run("04 a deleted asset is 404", func(t *testing.T) {
+			goneID := mustScanID(t, `
+			    INSERT INTO ass.real_estate (title, estate_type, issuer_id, status_id, deleted_at)
+			    VALUES ('Gone before it opened', 1, 1, 7, now()) RETURNING id`)
+			if code, body := open(goneID, mgr); code != http.StatusNotFound {
+				t.Fatalf("want 404 got %d: %s", code, body)
+			}
+		})
+
+		t.Run("05 a draft is refused and stays a draft", func(t *testing.T) {
+			draftID := mustScanID(t, `
+			    INSERT INTO ass.real_estate (title, estate_type, issuer_id, status_id)
+			    VALUES ('Not announced yet', 1, 1, 1) RETURNING id`)
+			code, body := open(draftID, mgr)
+			if code != http.StatusConflict {
+				t.Fatalf("want 409 got %d: %s", code, body)
+			}
+			if got := statusOf(t, draftID); got != 1 {
+				t.Errorf("draft moved to status %d", got)
+			}
+		})
+
+		t.Run("06 a published asset opens, stays visible and keeps its token", func(t *testing.T) {
+			id := published(t, 1)
+			var tokenBefore int
+			if err := db.QueryRow(`SELECT token_id FROM ass.real_estate WHERE id = $1`, id).Scan(&tokenBefore); err != nil {
+				t.Fatal(err)
+			}
+			before := deployer.calls
+
+			code, body := open(id, mgr)
+			if code != http.StatusOK {
+				t.Fatalf("want 200 got %d: %s", code, body)
+			}
+			var re map[string]any
+			json.Unmarshal([]byte(body), &re)
+			if re["status"] != "fundraising" || re["active"] != true {
+				t.Errorf("want fundraising and active, got %v / %v", re["status"], re["active"])
+			}
+
+			var tokenAfter int
+			if err := db.QueryRow(`SELECT token_id FROM ass.real_estate WHERE id = $1`, id).Scan(&tokenAfter); err != nil {
+				t.Fatal(err)
+			}
+			if tokenAfter != tokenBefore {
+				t.Errorf("the token was repointed: %d then %d", tokenBefore, tokenAfter)
+			}
+			if got := deployer.calls - before; got != 0 {
+				t.Errorf("opening the fundraising deployed %d token(s)", got)
+			}
+			if code, _ := do("GET", "/assets/real-estates/"+itoa(id), "", ""); code != http.StatusOK {
+				t.Errorf("an asset in fundraising is hidden from the public: %d", code)
+			}
+		})
+
+		t.Run("07 opening twice is not an error", func(t *testing.T) {
+			id := published(t, 1)
+			if code, body := open(id, mgr); code != http.StatusOK {
+				t.Fatalf("first: want 200 got %d: %s", code, body)
+			}
+			code, body := open(id, mgr)
+			if code != http.StatusOK {
+				t.Fatalf("second: want 200 got %d: %s", code, body)
+			}
+			if got := statusOf(t, id); got != 4 {
+				t.Errorf("want fundraising (4), got %d", got)
+			}
+		})
+
+		// The API refuses to suspend an issuer that carries an active asset, so
+		// this state is forced in SQL. It is the case the check exists for: a
+		// vehicle suspended by hand, or before that guard existed.
+		t.Run("08 a suspended issuer cannot open a subscription", func(t *testing.T) {
+			id := published(t, suspendableIssuer)
+			mustExec(t, `UPDATE ass.issuer SET status_id = 3 WHERE id = $1`, suspendableIssuer)
+			t.Cleanup(func() {
+				_, _ = db.Exec(`UPDATE ass.issuer SET status_id = 2 WHERE id = $1`, suspendableIssuer)
+			})
+
+			code, body := open(id, mgr)
+			if code != http.StatusConflict {
+				t.Fatalf("want 409 got %d: %s", code, body)
+			}
+			if got := statusOf(t, id); got != 3 {
+				t.Errorf("want published (3), got %d", got)
+			}
+		})
+
+		for _, c := range []struct {
+			name   string
+			status int
+		}{
+			{"09 a funded asset cannot reopen", 5},
+			{"09b a closed asset cannot reopen", 6},
+		} {
+			t.Run(c.name, func(t *testing.T) {
+				id := published(t, 1)
+				mustExec(t, `UPDATE ass.real_estate SET status_id = $2 WHERE id = $1`, id, c.status)
+
+				code, body := open(id, mgr)
+				if code != http.StatusConflict {
+					t.Fatalf("want 409 got %d: %s", code, body)
+				}
+				if got := statusOf(t, id); got != c.status {
+					t.Errorf("status moved from %d to %d", c.status, got)
+				}
+			})
+		}
+
+		t.Run("10 an admin may open it too", func(t *testing.T) {
+			id := published(t, 1)
+			if code, body := open(id, adm); code != http.StatusOK {
+				t.Fatalf("want 200 got %d: %s", code, body)
+			}
+		})
+
+		// /publish used to write status 3 whatever the asset held, so a
+		// late click on "publish" closed a running subscription without a word.
+		// It now refuses to move an asset backwards, and never deploys again.
+		for _, c := range []struct {
+			name   string
+			status int
+		}{
+			{"11 publish does not close a running fundraising", 4},
+			{"12 publish does not reopen a funded asset", 5},
+			{"13 publish does not reopen a closed asset", 6},
+		} {
+			t.Run(c.name, func(t *testing.T) {
+				id := published(t, 1)
+				mustExec(t, `UPDATE ass.real_estate SET status_id = $2 WHERE id = $1`, id, c.status)
+				before := deployer.calls
+
+				code, body := do("POST", "/assets/real-estates/"+itoa(id)+"/publish", mgr, "")
+				if code != http.StatusConflict {
+					t.Fatalf("want 409 got %d: %s", code, body)
+				}
+				if got := statusOf(t, id); got != c.status {
+					t.Errorf("publish moved the asset from %d to %d", c.status, got)
+				}
+				if got := deployer.calls - before; got != 0 {
+					t.Errorf("publish deployed %d token(s)", got)
+				}
+			})
+		}
 	})
 }
 

@@ -3,50 +3,94 @@ package services
 import (
 	"context"
 	"crypto/rand"
-	"database/sql"
 	"errors"
 	"fmt"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/TookenOrg/tooken-services/internal/api/server"
-	assetManagementDb "github.com/TookenOrg/tooken-services/internal/assets_managements/database"
 	"github.com/TookenOrg/tooken-services/internal/orders/database"
 	"github.com/TookenOrg/tooken-services/pkg/logger"
 	"github.com/avast/retry-go/v4"
 )
 
+var (
+	ErrQuantityInvalid = errors.New("quantity can't be 0 or negative")
+
+	// The refusals of the order placement are the database's own sentinels:
+	// they are decided under the asset lock, in database.PlaceIssuanceOrder,
+	// which cannot import this package. Aliasing keeps their detailed message
+	// ("only 5 shares left, 10 requested") for the 409.
+	ErrRealEstateNotFound     = database.ErrOrderAssetNotFound       // 404
+	ErrRealEstateNotAvailable = database.ErrOrderAssetNotOpen        // 409
+	ErrNotEnoughShares        = database.ErrOrderNotEnoughShares     // 409
+	ErrStakeLimit             = database.ErrOrderStakeLimit          // 409
+	ErrInvestorNotEligible    = database.ErrOrderInvestorNotEligible // 403
+	ErrIdempotencyKeyReused   = database.ErrOrderIdempotencyKeyReuse // 422
+)
+
+// defaultReservationTTL is how long an unpaid order holds its shares when
+// ORDER_RESERVATION_TTL is unset or unusable (U1).
+const defaultReservationTTL = 15 * time.Minute
+
+// reservationTTL reads ORDER_RESERVATION_TTL as a Go duration ("15m", "1h").
+// Like ETH_TX_WAIT, an unusable value falls back to the default and says so.
+func reservationTTL() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("ORDER_RESERVATION_TTL"))
+	if raw == "" {
+		return defaultReservationTTL
+	}
+
+	ttl, err := time.ParseDuration(raw)
+	if err != nil {
+		logger.LogWarn("⚠️ ORDER_RESERVATION_TTL=%q is not a duration, using %s", raw, defaultReservationTTL)
+		return defaultReservationTTL
+	}
+
+	// Zero or negative would break issuance_orders_awaiting_payment_ck
+	// (reservation_expires_at > created_at): every order would fail with a 500.
+	if ttl <= 0 {
+		logger.LogWarn("⚠️ ORDER_RESERVATION_TTL=%q must be strictly positive, using %s", raw, defaultReservationTTL)
+		return defaultReservationTTL
+	}
+
+	return ttl
+}
+
 // Issuance order is for order on primary market
-func (s *Service) CreateIssuanceOrder(ctx context.Context, req server.CreateIssuanceOrderRequest, userId int) (order server.IssuanceOrder, err error) {
+func (s *Service) CreateIssuanceOrder(ctx context.Context, req server.CreateIssuanceOrderRequest, userId int, idempotencyKey server.IdempotencyKey) (order server.IssuanceOrder, created bool, err error) {
 
 	// 1 - check request
 	if req.Quantity <= 0 {
-		err = errors.New("Quantity can't be 0 or negative")
+		err = ErrQuantityInvalid
 		return
 	}
 
-	// false: an order can only be placed on a publicly available asset. A draft
-	// or a deleted asset must be as unreachable here as it is on the listing.
-	realEstate, err := assetManagementDb.GetRealEstateById(ctx, req.RealEstateId, false)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return server.IssuanceOrder{}, logger.LogError("Real Estate not found with id %d", req.RealEstateId)
-		}
-		return
-	}
-
-	// 2 - Insert with a unique reference, retrying on the rare reference collision
+	// 2 - Place the order, retrying the whole transaction on the rare
+	// reference collision.
 	var (
 		orderReference string
-		createdAt      time.Time
+		placed         database.PlacedOrderDTO
 	)
+	ttl := reservationTTL()
 	err = retry.Do(
 		func() error {
-			orderReference, err = generateIssuanceOrderReference(time.Now().UTC())
-			if err != nil {
-				return err
+			var genErr error
+			orderReference, genErr = generateIssuanceOrderReference(time.Now().UTC())
+			if genErr != nil {
+				return genErr
 			}
-			_, createdAt, err = database.InsertIssuranceOrder(ctx, req.RealEstateId, req.Quantity, userId, orderReference)
-			return err
+			var placeErr error
+			placed, placeErr = database.PlaceIssuanceOrder(ctx, database.PlaceOrderDTO{
+				UserID:         userId,
+				RealEstateID:   req.RealEstateId,
+				Quantity:       req.Quantity,
+				IdempotencyKey: idempotencyKey.String(),
+				OrderReference: orderReference,
+				ReservationTTL: ttl,
+			})
+			return placeErr
 		},
 		retry.Attempts(3),
 		retry.Context(ctx),
@@ -61,18 +105,20 @@ func (s *Service) CreateIssuanceOrder(ctx context.Context, req server.CreateIssu
 	if err != nil {
 		return
 	}
+	created = !placed.Replayed
 
-	order.CreatedAt = createdAt
+	// 3 - Answer with the order as the database holds it: amounts, fees,
+	// dates from its clock. On a replay it is the existing order, as it is
+	// now, not the reference generated for this call.
+	order, err = database.GetIssuanceOrderByRef(ctx, placed.OrderReference)
+	if err != nil {
+		// The order is committed: a retry with the same key replays it.
+		err = fmt.Errorf("read placed order %s: %w", placed.OrderReference, err)
+		return
+	}
 	order.CreatedBy = userId
-	order.OrderRef = orderReference
-	order.RealEstateId = req.RealEstateId
-	order.TokenQuantity = req.Quantity
-
-	// TODO, structToString()
-	logger.LogDebug("%v", realEstate)
 
 	return
-
 }
 
 func (s *Service) FetchIssuanceOrder(ctx context.Context, orderRef string) (order server.IssuanceOrder, err error) {

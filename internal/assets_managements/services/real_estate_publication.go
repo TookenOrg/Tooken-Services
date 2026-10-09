@@ -257,6 +257,11 @@ func (s *Service) PublishRealEstate(ctx context.Context, id int) (server.RealEst
 		return server.RealEstate{}, ErrRealEstateNotFound
 	}
 
+	if state.StatusId > database.StatusPublished {
+		return server.RealEstate{}, conflict(
+			"an asset currently published cannot be published again")
+	}
+
 	// Reusing the write path to read the stored asset keeps one definition of
 	// what an asset is made of. writePatch, not writeCreate: an asset stored
 	// before those rules existed must still be publishable once completed.
@@ -301,4 +306,90 @@ func (s *Service) PublishRealEstate(ctx context.Context, id int) (server.RealEst
 	}
 
 	return s.GetRealEstateById(ctx, id, true)
+}
+
+// OpenFundraisingRealEstate opens the subscription of a published asset (D34).
+// It is a plain write: the token was bound at publication, so nothing reaches
+// the chain here.
+func (s *Service) OpenFundraisingRealEstate(ctx context.Context, id int) (server.RealEstate, error) {
+	current, err := database.GetRealEstateById(ctx, id, true)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return server.RealEstate{}, ErrRealEstateNotFound
+		}
+		return server.RealEstate{}, err
+	}
+
+	state, err := database.GetRealEstateGuardState(ctx, id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return server.RealEstate{}, ErrRealEstateNotFound
+		}
+		return server.RealEstate{}, err
+	}
+
+	// A deleted asset does not exist for anyone, so its fundraising cannot be
+	// opened either.
+	if state.Deleted {
+		return server.RealEstate{}, ErrRealEstateNotFound
+	}
+
+	// Two managers clicking the same button must not produce a failure.
+	if state.StatusId == database.StatusFundraising {
+		return s.GetRealEstateById(ctx, id, true)
+	}
+
+	if state.StatusId != database.StatusPublished {
+		return server.RealEstate{}, conflict(
+			"an asset currently not published cannot be opened for fundraising")
+	}
+
+	in, err := toWriteDTO(toWriteRequest(current), writePatch)
+	if err != nil {
+		return server.RealEstate{}, err
+	}
+
+	// The issuer may have been suspended since publication. Opening a
+	// subscription under a vehicle that can no longer issue would collect money
+	// for shares nobody can deliver.
+	standing, err := issuerStandsBehind(ctx, in.IssuerId)
+	if err != nil {
+		return server.RealEstate{}, err
+	}
+	if !standing {
+		return server.RealEstate{}, conflict(
+			"the issuer of this asset is not active; activate it before opening the fundraising")
+	}
+
+	if err := database.OpenFundraisingRealEstate(ctx, id); err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			return server.RealEstate{}, translateWriteError(err)
+		}
+		// No row matched: the asset moved between the read above and the
+		// write. Read it again to answer for the state it is actually in.
+		return s.afterLostFundraisingRace(ctx, id)
+	}
+
+	return s.GetRealEstateById(ctx, id, true)
+}
+
+// afterLostFundraisingRace answers a call whose UPDATE matched no row. Another
+// manager opening the same asset is the common case and is not an error; any
+// other move (deleted, funded) is reported for what it is.
+func (s *Service) afterLostFundraisingRace(ctx context.Context, id int) (server.RealEstate, error) {
+	state, err := database.GetRealEstateGuardState(ctx, id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return server.RealEstate{}, ErrRealEstateNotFound
+		}
+		return server.RealEstate{}, err
+	}
+	if state.Deleted {
+		return server.RealEstate{}, ErrRealEstateNotFound
+	}
+	if state.StatusId == database.StatusFundraising {
+		return s.GetRealEstateById(ctx, id, true)
+	}
+	return server.RealEstate{}, conflict(
+		"the asset changed while its fundraising was being opened and is no longer published")
 }

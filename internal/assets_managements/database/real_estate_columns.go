@@ -129,24 +129,8 @@ LEFT JOIN ass.payment_frequency_type payt
 LEFT JOIN ass.real_estate_address addr
     ON re.id = addr.real_estate_id
 
--- Shares already taken. The aggregate is computed ONCE and then joined: a
--- correlated subquery would be re-executed per asset (N+1) — measured at 196 ms
--- against 9 ms on 500 assets / 50,000 orders. The same form serves the detail
--- query: PostgreSQL pushes the re.id = $1 predicate into the aggregate.
---
--- What counts as a reserved share is not encoded here but carried by
--- iss.issuance_order_statuses.counts_as_reserved: adding a status to the flow
--- requires no change to this query.
-LEFT JOIN (
-    SELECT o.asset_id, SUM(o.quantity) AS reserved
-    FROM iss.issuance_orders o
-    JOIN iss.issuance_order_statuses s
-        ON s.id = o.status_id
-    WHERE s.counts_as_reserved
-    GROUP BY o.asset_id
-) sold
-    ON sold.asset_id = re.id
-`
+-- Shares already taken: see reservedByAsset.
+` + reservedByAsset
 
 // buildRealEstateQuery assembles the SELECT from the column table.
 //

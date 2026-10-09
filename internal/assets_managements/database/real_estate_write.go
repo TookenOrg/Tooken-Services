@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/TookenOrg/tooken-services/internal/globals"
+	"github.com/TookenOrg/tooken-services/internal/utils"
 	"github.com/shopspring/decimal"
 )
 
@@ -31,6 +32,9 @@ const StatusDraft = 1
 // asked for; an incomplete one waits in StatusDraft. The trigger of migration
 // 000006 derives active = true from it, so nothing else has to be set.
 const StatusPublished = 3
+
+// StatusFundraising is the status of an asset that is currently raising funds from investors.
+const StatusFundraising = 4
 
 // StatusCancelled is the status a soft-deleted asset carries. Constraint
 // real_estate_deleted_status_ck (migration 000011) forbids any other.
@@ -137,15 +141,7 @@ SELECT re.id,
 FROM ass.real_estate re
 LEFT JOIN ass.real_estate_shares_config conf
     ON conf.real_estate_id = re.id
-LEFT JOIN (
-    SELECT o.asset_id, SUM(o.quantity) AS reserved
-    FROM iss.issuance_orders o
-    JOIN iss.issuance_order_statuses s
-        ON s.id = o.status_id
-    WHERE s.counts_as_reserved
-    GROUP BY o.asset_id
-) sold
-    ON sold.asset_id = re.id
+` + reservedByAsset + `
 WHERE re.id = $1
 `
 
@@ -166,7 +162,7 @@ WHERE re.id = $1
 // published_at only makes sense for an asset that is actually published, so a
 // draft is created without one.
 func CreateRealEstate(ctx context.Context, in RealEstateWriteDTO, statusID int) (id int, err error) {
-	err = inTransaction(ctx, func(tx *sql.Tx) error {
+	err = utils.InTransaction(ctx, func(tx *sql.Tx) error {
 		const query = `
 INSERT INTO ass.real_estate (title, description, imageurl, estate_type, issuer_id, status_id, published_at)
 VALUES ($1, $2, $3, $4, $5, $6, CASE WHEN $7 THEN now() END)
@@ -201,7 +197,7 @@ RETURNING id
 // It reports sql.ErrNoRows when the asset does not exist or was deleted, so a
 // caller can answer 404 without a second round trip.
 func UpdateRealEstate(ctx context.Context, id int, in RealEstateWriteDTO) error {
-	return inTransaction(ctx, func(tx *sql.Tx) error {
+	return utils.InTransaction(ctx, func(tx *sql.Tx) error {
 		const query = `
 UPDATE ass.real_estate
 SET title = $2,
@@ -382,32 +378,6 @@ VALUES ($1, $2, $3, $4, $5, $6)
 	return nil
 }
 
-// inTransaction runs fn in a transaction and rolls back on any failure,
-// including a panic: leaving a transaction open would hold locks on the asset
-// until the connection is recycled.
-func inTransaction(ctx context.Context, fn func(*sql.Tx) error) (err error) {
-	tx, err := globals.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-
-	defer func() {
-		if p := recover(); p != nil {
-			_ = tx.Rollback()
-			panic(p)
-		}
-		if err != nil {
-			_ = tx.Rollback()
-		}
-	}()
-
-	if err = fn(tx); err != nil {
-		return err
-	}
-
-	return tx.Commit()
-}
-
 // PublishRealEstate moves an asset to the published status and binds it to the
 // token that backs it.
 //
@@ -436,6 +406,38 @@ WHERE id = $1
 `
 
 	res, err := globals.DB.ExecContext(ctx, query, realEstateID, StatusPublished, tokenID)
+	if err != nil {
+		return err
+	}
+
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return sql.ErrNoRows
+	}
+
+	return nil
+}
+
+// OpenFundraisingRealEstate moves a published asset to fundraising.
+//
+// The status condition lives in the WHERE clause, not only in the caller: the
+// asset may have moved between the caller's read and this write, and only the
+// database sees both at once. sql.ErrNoRows therefore means "not a published
+// asset any more", not necessarily "missing" — the caller reads it again.
+func OpenFundraisingRealEstate(ctx context.Context, realEstateID int) error {
+	const query = `
+UPDATE ass.real_estate
+SET status_id = $2,
+    updated_at = now()
+WHERE id = $1
+  AND deleted_at IS NULL
+  AND status_id = $3
+`
+
+	res, err := globals.DB.ExecContext(ctx, query, realEstateID, StatusFundraising, StatusPublished)
 	if err != nil {
 		return err
 	}

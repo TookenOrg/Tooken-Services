@@ -116,7 +116,9 @@ code**, so variables must be exported in the process environment. The committed
 VS Code `launch.json` injects `.env` (gitignored) only when debugging.
 
 Required/used vars: `DATABASE_URL`, `WS_RPC_URL` (Ethereum WS RPC), `PRIVATE_KEY`
-(signer), `CORS_ALLOWED_ORIGINS` (comma-separated), `LOG_TRACE`.
+(signer), `CORS_ALLOWED_ORIGINS` (comma-separated), `LOG_TRACE`,
+`ORDER_RESERVATION_TTL` (Go duration, default `15m`: how long an unpaid order
+holds its shares).
 
 ## Git / PR conventions
 

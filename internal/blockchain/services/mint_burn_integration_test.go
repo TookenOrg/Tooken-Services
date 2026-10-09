@@ -12,7 +12,7 @@
 //
 //   - a mint towards a wallet that is not verified fails, and it fails *inside* the
 //     goroutine: the caller of POST /contract/token/mint has already been told 202.
-//     This is the debt the pre-flight check of TICKET-M2-1 morceau 4 will close;
+//     This is the debt the planned pre-flight verification check will close;
 //   - a burn does NOT require the holder to be verified. That was asserted nowhere,
 //     and it matters: the pre-flight check must therefore apply to the mint only.
 //

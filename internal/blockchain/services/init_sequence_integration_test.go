@@ -263,7 +263,7 @@ func TestInitSequenceIntegration(t *testing.T) {
 	})
 
 	t.Run("CreateToken refuses a salt already spent", func(t *testing.T) {
-		// The guard written for TICKET-13. It fired for real during the manual demo,
+		// The spent-salt guard. It fired for real during the manual demo,
 		// after the timeout above had left a suite on-chain with no row in blk.token.
 		_, err := svc.CreateToken(ctx, server.CreateTokenRequest{
 			TokenName: "Tooken Init Sequence",

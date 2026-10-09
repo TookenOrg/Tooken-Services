@@ -2,9 +2,9 @@ package database
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/TookenOrg/tooken-services/internal/api/server"
 	"github.com/TookenOrg/tooken-services/internal/globals"
@@ -43,7 +43,13 @@ SELECT
 	sts.code,
 	sts.label,
 	sts.is_final,
-	ass.title
+	ass.title,
+	ord.unit_price,
+	ord.currency_code,
+	ord.gross_amount,
+	ord.fee_amount,
+	ord.amount_due,
+	ord.reservation_expires_at
 FROM  iss.issuance_orders ord
 LEFT JOIN iss.issuance_order_statuses sts on sts.id = ord.status_id
 LEFT JOIN  ass.real_estate ass ON ass.id = ord.asset_id
@@ -57,7 +63,10 @@ func scanIssuanceOrder(scanner interface {
 	var e server.IssuanceOrder
 
 	var (
-		title *string
+		title     *string
+		isFinal   *bool
+		amounts   [5]sql.NullString // unit_price, currency_code, gross, fee, due
+		expiresAt sql.NullTime
 	)
 
 	err := scanner.Scan(
@@ -71,46 +80,58 @@ func scanIssuanceOrder(scanner interface {
 		&e.StatusId,
 		&e.StatusCode,
 		&e.StatusLabel,
-		&e.StatusIfFinal,
+		&isFinal,
 		&title,
+		&amounts[0], &amounts[1], &amounts[2], &amounts[3], &amounts[4],
+		&expiresAt,
 	)
 	if err != nil {
 		return e, err
 	}
 
+	// All five amounts are set or none is (issuance_orders_amounts_ck): an
+	// order created before M3-3 has none and keeps empty strings.
+	e.UnitPrice = amounts[0].String
+	e.CurrencyCode = amounts[1].String
+	e.GrossAmount = amounts[2].String
+	e.FeeAmount = amounts[3].String
+	e.AmountDue = amounts[4].String
+	if expiresAt.Valid {
+		e.ReservationExpiresAt = expiresAt.Time
+	}
+
 	return e, nil
 }
 
-func InsertIssuranceOrder(ctx context.Context, realEstateId, quantity, userId int, orderReference string) (id int, createdAt time.Time, err error) {
-	query := `
-		INSERT INTO iss.issuance_orders (
-			user_id,
-			asset_id,
-			quantity,
-			status_id,
-			order_reference
-		)
-		VALUES (
-			$1,  
-			$2, 
-			$3,  
-			$4,
-			$5
-		)
-		RETURNING id, created_at;
-    `
+// getIssuanceOrderFees reads the fee lines of an order. The result is never
+// nil, so the API answers "fees": [] rather than null when there is no fee.
+func getIssuanceOrderFees(ctx context.Context, orderID int) ([]server.IssuanceOrderFee, error) {
+	const query = `
+SELECT fee_code, rate, base_amount, amount
+FROM iss.issuance_order_fees
+WHERE order_id = $1
+ORDER BY id
+`
 
-	err = globals.DB.QueryRowContext(ctx, query, userId, realEstateId, quantity, 1, orderReference).Scan(&id, &createdAt)
+	rows, err := globals.DB.QueryContext(ctx, query, orderID)
 	if err != nil {
-		if isDuplicateReferenceErr(err) {
-			return 0, time.Time{}, ErrDuplicateOrderReference
+		return nil, fmt.Errorf("read fees of order %d: %w", orderID, err)
+	}
+	defer rows.Close()
+
+	fees := []server.IssuanceOrderFee{}
+	for rows.Next() {
+		var f server.IssuanceOrderFee
+		if err := rows.Scan(&f.Code, &f.Rate, &f.BaseAmount, &f.Amount); err != nil {
+			return nil, fmt.Errorf("scan fee of order %d: %w", orderID, err)
 		}
-		return 0, time.Time{}, fmt.Errorf("failed to insert issuance order: %w", err)
+		fees = append(fees, f)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read fees of order %d: %w", orderID, err)
 	}
 
-	logger.LogInfo("Issuance order inserted. ID=%d Ref=%s", id, orderReference)
-
-	return
+	return fees, nil
 }
 
 func GetIssuanceOrderByRef(ctx context.Context, orderRef string) (order server.IssuanceOrder, err error) {
@@ -124,6 +145,13 @@ func GetIssuanceOrderByRef(ctx context.Context, orderRef string) (order server.I
 	order, err = scanIssuanceOrder(row)
 	if err != nil {
 		return server.IssuanceOrder{}, err
+	}
+
+	if order.Id != nil {
+		order.Fees, err = getIssuanceOrderFees(ctx, *order.Id)
+		if err != nil {
+			return server.IssuanceOrder{}, err
+		}
 	}
 
 	logger.LogDebug("Real Estate found [%s]", utils.Dump(order))
