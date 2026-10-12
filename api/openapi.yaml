@@ -1464,6 +1464,12 @@ paths:
         - bearerAuth: []
       operationId: fetchIssuanceOrder
       summary: Fetch a order in primary market
+      description: |
+        Returns a single primary-market order by its reference.
+
+        A USER can only read their own orders. Managers and admins can read
+        any order. An order owned by someone else answers 404, exactly like
+        an unknown reference, so that its existence is not disclosed.
       tags:
         - Issuance
       parameters:
@@ -1486,7 +1492,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/APIResponse"
         "404":
-          description: Order not found
+          description: Order not found, or owned by another user (USER role)
           content:
             application/json:
               schema:
@@ -3040,7 +3046,6 @@ components:
         - reservationExpiresAt
         - createdAt
         - updatedAt
-        - createdBy
       properties:
         id:
           type: integer

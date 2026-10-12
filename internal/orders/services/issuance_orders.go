@@ -118,7 +118,7 @@ func (s *Service) CreateIssuanceOrder(ctx context.Context, req server.CreateIssu
 		err = fmt.Errorf("read placed order %s: %w", placed.OrderReference, err)
 		return
 	}
-	order.CreatedBy = userId
+	order.CreatedBy = &userId
 
 	return
 }

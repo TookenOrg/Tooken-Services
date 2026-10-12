@@ -101,12 +101,7 @@ func (h *Handler) FetchIssuanceOrder(gCtx *gin.Context, orderRef string) {
 		return
 	}
 
-	resp := server.CreateIssuanceOrderResponse{
-		Data:    &order,
-		Message: "Order fetched",
-	}
-
-	gCtx.JSON(http.StatusOK, resp)
+	gCtx.JSON(http.StatusOK, order)
 }
 
 // respondIssuanceOrderError maps the service sentinels onto status codes.

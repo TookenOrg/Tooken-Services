@@ -242,6 +242,23 @@ func decodeOrder(t *testing.T, body string) server.IssuanceOrder {
 	return *resp.Data
 }
 
+// decodeOrderDetail decodes the body of GET /issuance/orders/{orderRef}, which
+// returns a bare IssuanceOrder. Unknown fields are rejected so that a return to
+// the {data, message} envelope fails loudly instead of decoding to zero values.
+func decodeOrderDetail(t *testing.T, body string) server.IssuanceOrder {
+	t.Helper()
+	var order server.IssuanceOrder
+	dec := json.NewDecoder(strings.NewReader(body))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&order); err != nil {
+		t.Fatalf("decoding %s: %v", body, err)
+	}
+	if order.OrderRef == "" {
+		t.Fatalf("no order in %s", body)
+	}
+	return order
+}
+
 func (h *orderHarness) count(t *testing.T, query string, args ...any) int {
 	t.Helper()
 	var n int
@@ -461,7 +478,7 @@ func TestIssuanceOrderEndpoint(t *testing.T) {
 			w := httptest.NewRecorder()
 			h.r.ServeHTTP(w, req)
 			expectCode(t, w.Code, w.Body.String(), http.StatusOK)
-			if got := decodeOrder(t, w.Body.String()); got.AmountDue != "2040.00" || len(got.Fees) != 1 {
+			if got := decodeOrderDetail(t, w.Body.String()); got.AmountDue != "2040.00" || len(got.Fees) != 1 {
 				t.Fatalf("read back = %+v", got)
 			}
 		})
@@ -869,12 +886,16 @@ func TestIssuanceOrderReadEndpoints(t *testing.T) {
 		t.Run("16 a user reads his own order", func(t *testing.T) {
 			code, body := h.get(paul.token, ordersPath+"/"+paulRefs[0])
 			expectCode(t, code, body, http.StatusOK)
-			o := decodeOrder(t, body)
+			o := decodeOrderDetail(t, body)
 			if o.OrderRef != paulRefs[0] || o.UserId != paul.id {
 				t.Fatalf("want order %s of user %d, got %s of user %d", paulRefs[0], paul.id, o.OrderRef, o.UserId)
 			}
 			if len(o.Fees) != 1 || o.RealEstateTitle == nil {
 				t.Fatalf("want fees and title, got %s", body)
+			}
+			// createdBy is not persisted: it must be absent on read, never 0.
+			if o.CreatedBy != nil {
+				t.Fatalf("want no createdBy on read, got %d", *o.CreatedBy)
 			}
 		})
 
@@ -890,7 +911,7 @@ func TestIssuanceOrderReadEndpoints(t *testing.T) {
 			manager := h.newUser(t, authUtils.RoleManager, "verified", "NULL")
 			code, body := h.get(manager.token, ordersPath+"/"+marieRef)
 			expectCode(t, code, body, http.StatusOK)
-			if o := decodeOrder(t, body); o.OrderRef != marieRef {
+			if o := decodeOrderDetail(t, body); o.OrderRef != marieRef {
 				t.Fatalf("want order %s, got %s", marieRef, o.OrderRef)
 			}
 		})
