@@ -61,17 +61,17 @@ func (h *Handler) ListIssuanceOrders(gCtx *gin.Context) {
 	logger.LogInfo("🚀 Starting list issuance orders for the authenticated user.")
 
 	isStaff := utils.IsStaff(gCtx)
-	logger.LogInfo("Fetching issuance orders for isStaff = %v", isStaff)
 
 	claims, exists := middleware.GetUserClaims(gCtx)
-	var userID int
-	if exists {
-		userID = claims.UserID
+	if !exists {
+		gCtx.JSON(http.StatusUnauthorized, server.APIResponse{Message: "JWT not valid"})
+		return
 	}
+	userID := claims.UserID
 
 	orders, err := h.orderSvc.ListIssuanceOrders(gCtx.Request.Context(), isStaff, userID)
 	if err != nil {
-		respondIssuanceOrderError(gCtx, err, "list issuance orders failed")
+		respondIssuanceOrderError(gCtx, err, "Unable to list issuance orders")
 		return
 	}
 
@@ -87,17 +87,17 @@ func (h *Handler) FetchIssuanceOrder(gCtx *gin.Context, orderRef string) {
 	logger.LogInfo("🚀 Starting fetch one issuance order for orderRef = [%s]", orderRef)
 
 	isStaff := utils.IsStaff(gCtx)
-	logger.LogInfo("Fetching issuance orders for isStaff = %v", isStaff)
 
 	claims, exists := middleware.GetUserClaims(gCtx)
-	var userID int
-	if exists {
-		userID = claims.UserID
+	if !exists {
+		gCtx.JSON(http.StatusUnauthorized, server.APIResponse{Message: "JWT not valid"})
+		return
 	}
+	userID := claims.UserID
 
 	order, err := h.orderSvc.FetchIssuanceOrder(gCtx.Request.Context(), orderRef, isStaff, userID)
 	if err != nil {
-		respondIssuanceOrderError(gCtx, err, "fetch issuance order failed")
+		respondIssuanceOrderError(gCtx, err, "Unable to fetch issuance order")
 		return
 	}
 
