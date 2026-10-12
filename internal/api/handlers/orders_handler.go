@@ -8,6 +8,7 @@ import (
 	authUtils "github.com/TookenOrg/tooken-services/internal/auth/utils"
 	"github.com/TookenOrg/tooken-services/internal/middleware"
 	"github.com/TookenOrg/tooken-services/internal/orders/services"
+	"github.com/TookenOrg/tooken-services/internal/utils"
 	"github.com/TookenOrg/tooken-services/pkg/logger"
 	"github.com/gin-gonic/gin"
 )
@@ -56,29 +57,58 @@ func (h *Handler) CreateIssuanceOrder(gCtx *gin.Context, params server.CreateIss
 	}
 }
 
-func (h *Handler) FetchIssuanceOrder(gCtx *gin.Context, orderRef string) {
-	logger.LogInfo("🚀 Starting fetch one issuance order for orderRef = [%s]", orderRef)
+func (h *Handler) ListIssuanceOrders(gCtx *gin.Context) {
+	logger.LogInfo("🚀 Starting list issuance orders for the authenticated user.")
 
-	order, err := h.orderSvc.FetchIssuanceOrder(gCtx.Request.Context(), orderRef)
+	isStaff := utils.IsStaff(gCtx)
+
+	claims, exists := middleware.GetUserClaims(gCtx)
+	if !exists {
+		gCtx.JSON(http.StatusUnauthorized, server.APIResponse{Message: "JWT not valid"})
+		return
+	}
+	userID := claims.UserID
+
+	orders, err := h.orderSvc.ListIssuanceOrders(gCtx.Request.Context(), isStaff, userID)
 	if err != nil {
-		gCtx.JSON(http.StatusBadRequest, server.APIResponse{
-			Message: err.Error(),
-		})
+		respondIssuanceOrderError(gCtx, err, "Unable to list issuance orders")
 		return
 	}
 
-	resp := server.CreateIssuanceOrderResponse{
-		Data:    &order,
-		Message: "Order fetched",
+	resp := server.IssuanceOrderListResponse{
+		Data:    orders,
+		Message: "Orders fetched",
 	}
 
 	gCtx.JSON(http.StatusOK, resp)
 }
 
+func (h *Handler) FetchIssuanceOrder(gCtx *gin.Context, orderRef string) {
+	logger.LogInfo("🚀 Starting fetch one issuance order for orderRef = [%s]", orderRef)
+
+	isStaff := utils.IsStaff(gCtx)
+
+	claims, exists := middleware.GetUserClaims(gCtx)
+	if !exists {
+		gCtx.JSON(http.StatusUnauthorized, server.APIResponse{Message: "JWT not valid"})
+		return
+	}
+	userID := claims.UserID
+
+	order, err := h.orderSvc.FetchIssuanceOrder(gCtx.Request.Context(), orderRef, isStaff, userID)
+	if err != nil {
+		respondIssuanceOrderError(gCtx, err, "Unable to fetch issuance order")
+		return
+	}
+
+	gCtx.JSON(http.StatusOK, order)
+}
+
 // respondIssuanceOrderError maps the service sentinels onto status codes.
 func respondIssuanceOrderError(gCtx *gin.Context, err error, fallback string) {
 	switch {
-	case errors.Is(err, services.ErrRealEstateNotFound):
+	case errors.Is(err, services.ErrRealEstateNotFound),
+		errors.Is(err, services.ErrOrderNotFound):
 		gCtx.JSON(http.StatusNotFound, server.APIResponse{Message: err.Error()})
 	case errors.Is(err, services.ErrQuantityInvalid):
 		gCtx.JSON(http.StatusBadRequest, server.APIResponse{Message: err.Error()})

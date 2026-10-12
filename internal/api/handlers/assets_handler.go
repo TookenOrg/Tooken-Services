@@ -8,23 +8,10 @@ import (
 	"github.com/TookenOrg/tooken-services/internal/assets_managements/services"
 	authUtils "github.com/TookenOrg/tooken-services/internal/auth/utils"
 	"github.com/TookenOrg/tooken-services/internal/middleware"
+	"github.com/TookenOrg/tooken-services/internal/utils"
 	"github.com/TookenOrg/tooken-services/pkg/logger"
 	"github.com/gin-gonic/gin"
 )
-
-// isStaff reports whether the caller manages the catalogue.
-//
-// The two real estate read endpoints are declared with an optional security
-// block, so claims are present only when a token was supplied: no token means
-// an anonymous visitor, and the public view.
-func isStaff(gCtx *gin.Context) bool {
-	claims, ok := middleware.GetUserClaims(gCtx)
-	if !ok {
-		return false
-	}
-
-	return claims.HasRole(authUtils.RoleManager, authUtils.RoleAdmin)
-}
 
 // respondRealEstateError maps the service sentinels onto status codes.
 //
@@ -47,7 +34,7 @@ func respondRealEstateError(gCtx *gin.Context, err error, fallback string) {
 func (h *Handler) GetActiveRealEstates(gCtx *gin.Context) {
 	logger.LogDebug("🚀 Starting get real estates")
 
-	realEstates, err := h.realEstateSvc.GetRealEstates(gCtx.Request.Context(), isStaff(gCtx))
+	realEstates, err := h.realEstateSvc.GetRealEstates(gCtx.Request.Context(), utils.IsStaff(gCtx))
 
 	if err != nil {
 		logger.LogError("Failed to retrieve active real estates: %v", err)
@@ -63,7 +50,7 @@ func (h *Handler) GetActiveRealEstates(gCtx *gin.Context) {
 func (h *Handler) GetRealEstateById(gCtx *gin.Context, id int) {
 	logger.LogDebug("🚀 Starting get one real estate id %d", id)
 
-	realEstate, err := h.realEstateSvc.GetRealEstateById(gCtx.Request.Context(), id, isStaff(gCtx))
+	realEstate, err := h.realEstateSvc.GetRealEstateById(gCtx.Request.Context(), id, utils.IsStaff(gCtx))
 
 	if err != nil {
 		respondRealEstateError(gCtx, err, "Unable to retrieve real estate.")

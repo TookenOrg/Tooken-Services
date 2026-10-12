@@ -235,8 +235,8 @@ WHERE re.id = $1
 
 // Order statuses written by PlaceIssuanceOrder (iss.issuance_order_statuses).
 const (
-	statusCreated         = 1
-	statusAwaitingPayment = 2
+	statusCreated         int = 1
+	statusAwaitingPayment int = 2
 )
 
 // readReservedShares returns the shares held on the asset by every investor,

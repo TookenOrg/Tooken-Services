@@ -186,7 +186,7 @@ func TestKycVerificationDecisionRoutes(t *testing.T) {
 	t.Run("approve validates caller, body, status and projects approved user state", func(t *testing.T) {
 		owner := newApplicant(t, "approve")
 		kycID := insertSubmitted(t, owner, "approve")
-		path := fmt.Sprintf("/kyc/verifications/%d/approve", kycID)
+		path := fmt.Sprintf("/users/kyc/verifications/%d/approve", kycID)
 		future := time.Now().UTC().Add(24 * time.Hour).Format(time.RFC3339)
 
 		if code, body := doJSON(t, http.MethodPost, path, user.token, fmt.Sprintf(`{"expires_at":%q}`, future)); code != http.StatusForbidden {
@@ -199,7 +199,7 @@ func TestKycVerificationDecisionRoutes(t *testing.T) {
 		if code, body := doJSON(t, http.MethodPost, path, admin.token, fmt.Sprintf(`{"expires_at":%q}`, past)); code != http.StatusBadRequest {
 			t.Fatalf("past expires_at: got %d %s, want 400", code, body)
 		}
-		if code, body := doJSON(t, http.MethodPost, "/kyc/verifications/999999999/approve", admin.token, fmt.Sprintf(`{"expires_at":%q}`, future)); code != http.StatusNotFound {
+		if code, body := doJSON(t, http.MethodPost, "/users/kyc/verifications/999999999/approve", admin.token, fmt.Sprintf(`{"expires_at":%q}`, future)); code != http.StatusNotFound {
 			t.Fatalf("missing id: got %d %s, want 404", code, body)
 		}
 
@@ -235,7 +235,7 @@ func TestKycVerificationDecisionRoutes(t *testing.T) {
 	t.Run("reject validates caller, reason, status and projects rejected user state", func(t *testing.T) {
 		owner := newApplicant(t, "reject")
 		kycID := insertSubmitted(t, owner, "reject")
-		path := fmt.Sprintf("/kyc/verifications/%d/reject", kycID)
+		path := fmt.Sprintf("/users/kyc/verifications/%d/reject", kycID)
 
 		if code, body := doJSON(t, http.MethodPost, path, user.token, `{"reason":"Document illisible"}`); code != http.StatusForbidden {
 			t.Fatalf("user reject: got %d %s, want 403", code, body)
@@ -246,7 +246,7 @@ func TestKycVerificationDecisionRoutes(t *testing.T) {
 		if code, body := doJSON(t, http.MethodPost, path, admin.token, `{"reason":"   "}`); code != http.StatusBadRequest {
 			t.Fatalf("blank reason: got %d %s, want 400", code, body)
 		}
-		if code, body := doJSON(t, http.MethodPost, "/kyc/verifications/999999999/reject", admin.token, `{"reason":"Document illisible"}`); code != http.StatusNotFound {
+		if code, body := doJSON(t, http.MethodPost, "/users/kyc/verifications/999999999/reject", admin.token, `{"reason":"Document illisible"}`); code != http.StatusNotFound {
 			t.Fatalf("missing id: got %d %s, want 404", code, body)
 		}
 
@@ -278,7 +278,7 @@ func TestKycVerificationDecisionRoutes(t *testing.T) {
 	t.Run("revoke validates caller, reason, status and projects revoked user state", func(t *testing.T) {
 		owner := newApplicant(t, "revoke")
 		kycID := insertApproved(t, owner, "revoke")
-		path := fmt.Sprintf("/kyc/verifications/%d/revoke", kycID)
+		path := fmt.Sprintf("/users/kyc/verifications/%d/revoke", kycID)
 
 		if code, body := doJSON(t, http.MethodPost, path, user.token, `{"reason":"Document frauduleux"}`); code != http.StatusForbidden {
 			t.Fatalf("user revoke: got %d %s, want 403", code, body)
@@ -289,18 +289,18 @@ func TestKycVerificationDecisionRoutes(t *testing.T) {
 		if code, body := doJSON(t, http.MethodPost, path, admin.token, `{"reason":"   "}`); code != http.StatusBadRequest {
 			t.Fatalf("blank reason: got %d %s, want 400", code, body)
 		}
-		if code, body := doJSON(t, http.MethodPost, "/kyc/verifications/999999999/revoke", admin.token, `{"reason":"Document frauduleux"}`); code != http.StatusNotFound {
+		if code, body := doJSON(t, http.MethodPost, "/users/kyc/verifications/999999999/revoke", admin.token, `{"reason":"Document frauduleux"}`); code != http.StatusNotFound {
 			t.Fatalf("missing id: got %d %s, want 404", code, body)
 		}
 
 		submittedOwner := newApplicant(t, "revoke-submitted")
 		submittedID := insertSubmitted(t, submittedOwner, "revoke-submitted")
-		if code, body := doJSON(t, http.MethodPost, fmt.Sprintf("/kyc/verifications/%d/revoke", submittedID), admin.token, `{"reason":"Trop tôt"}`); code != http.StatusConflict {
+		if code, body := doJSON(t, http.MethodPost, fmt.Sprintf("/users/kyc/verifications/%d/revoke", submittedID), admin.token, `{"reason":"Trop tôt"}`); code != http.StatusConflict {
 			t.Fatalf("revoke submitted: got %d %s, want 409", code, body)
 		}
 		rejectedOwner := newApplicant(t, "revoke-rejected")
 		rejectedID := insertRejected(t, rejectedOwner, "revoke-rejected")
-		if code, body := doJSON(t, http.MethodPost, fmt.Sprintf("/kyc/verifications/%d/revoke", rejectedID), admin.token, `{"reason":"Déjà rejeté"}`); code != http.StatusConflict {
+		if code, body := doJSON(t, http.MethodPost, fmt.Sprintf("/users/kyc/verifications/%d/revoke", rejectedID), admin.token, `{"reason":"Déjà rejeté"}`); code != http.StatusConflict {
 			t.Fatalf("revoke rejected: got %d %s, want 409", code, body)
 		}
 

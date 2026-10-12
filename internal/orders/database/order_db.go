@@ -39,7 +39,7 @@ SELECT
 	ord.created_at,
 	ord.updated_at,
 	ord.order_reference,
-	ord.status_id,
+	sts.id,
 	sts.code,
 	sts.label,
 	sts.is_final,
@@ -50,10 +50,16 @@ SELECT
 	ord.fee_amount,
 	ord.amount_due,
 	ord.reservation_expires_at
-FROM  iss.issuance_orders ord
-LEFT JOIN iss.issuance_order_statuses sts on sts.id = ord.status_id
-LEFT JOIN  ass.real_estate ass ON ass.id = ord.asset_id
-    %s
+FROM iss.issuance_orders ord
+CROSS JOIN LATERAL (
+     SELECT CASE
+         WHEN ord.status_id = 2 AND ord.reservation_expires_at <= now() THEN 7
+         ELSE ord.status_id
+     END AS status_id
+ ) shown
+ LEFT JOIN iss.issuance_order_statuses sts ON sts.id = shown.status_id
+ LEFT JOIN ass.real_estate ass ON ass.id = ord.asset_id
+     %s
 `
 
 func scanIssuanceOrder(scanner interface {
@@ -88,6 +94,9 @@ func scanIssuanceOrder(scanner interface {
 	if err != nil {
 		return e, err
 	}
+
+	// Real estate title
+	e.RealEstateTitle = title
 
 	// All five amounts are set or none is (issuance_orders_amounts_ck): an
 	// order created before M3-3 has none and keeps empty strings.
@@ -134,13 +143,64 @@ ORDER BY id
 	return fees, nil
 }
 
-func GetIssuanceOrderByRef(ctx context.Context, orderRef string) (order server.IssuanceOrder, err error) {
-	query := fmt.Sprintf(
-		baseIssuanceOrderQuery,
-		"WHERE ord.order_reference = $1",
-	)
+func ListIssuanceOrders(ctx context.Context, viewAll bool, userId int) (orders []server.IssuanceOrder, err error) {
 
-	row := globals.DB.QueryRowContext(ctx, query, orderRef)
+	var rows *sql.Rows
+
+	query := baseIssuanceOrderQuery
+	if !viewAll {
+		query = fmt.Sprintf(
+			query,
+			"WHERE ord.user_id = $1 ORDER BY ord.created_at DESC, ord.id DESC",
+		)
+		rows, err = globals.DB.QueryContext(ctx, query, userId)
+	} else {
+		query = fmt.Sprintf(query, "ORDER BY ord.created_at DESC, ord.id DESC")
+		rows, err = globals.DB.QueryContext(ctx, query)
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("list issuance orders for user %d: %w", userId, err)
+	}
+	defer rows.Close()
+
+	orders = []server.IssuanceOrder{}
+	for rows.Next() {
+		order, err := scanIssuanceOrder(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan issuance order for user %d: %w", userId, err)
+		}
+		if order.Id != nil {
+			order.Fees, err = getIssuanceOrderFees(ctx, *order.Id)
+			if err != nil {
+				return nil, fmt.Errorf("read fees of order %d: %w", *order.Id, err)
+			}
+		}
+		orders = append(orders, order)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate issuance orders for user %d: %w", userId, err)
+	}
+
+	return
+}
+
+func GetIssuanceOrderByRef(ctx context.Context, orderRef string, viewAll bool, userID int) (order server.IssuanceOrder, err error) {
+
+	var row *sql.Row
+
+	query := baseIssuanceOrderQuery
+
+	if !viewAll {
+		query = fmt.Sprintf(
+			query,
+			"WHERE ord.order_reference = $1 AND ord.user_id = $2",
+		)
+		row = globals.DB.QueryRowContext(ctx, query, orderRef, userID)
+	} else {
+		query = fmt.Sprintf(query, "WHERE ord.order_reference = $1 ")
+		row = globals.DB.QueryRowContext(ctx, query, orderRef)
+	}
 
 	order, err = scanIssuanceOrder(row)
 	if err != nil {
@@ -154,7 +214,7 @@ func GetIssuanceOrderByRef(ctx context.Context, orderRef string) (order server.I
 		}
 	}
 
-	logger.LogDebug("Real Estate found [%s]", utils.Dump(order))
+	logger.LogDebug("Issuance order found [%s]", utils.Dump(order))
 
 	return order, nil
 }
