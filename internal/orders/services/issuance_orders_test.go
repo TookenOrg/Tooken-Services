@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/TookenOrg/tooken-services/internal/locks"
 	"github.com/TookenOrg/tooken-services/internal/orders/database"
 )
 
@@ -101,7 +102,7 @@ func TestPlacementRefusalsReachTheHandler(t *testing.T) {
 		db      error
 		service error
 	}{
-		{database.ErrOrderAssetNotFound, ErrRealEstateNotFound},
+		{locks.ErrOrderAssetNotFound, ErrRealEstateNotFound},
 		{database.ErrOrderAssetNotOpen, ErrRealEstateNotAvailable},
 		{database.ErrOrderNotEnoughShares, ErrNotEnoughShares},
 		{database.ErrOrderStakeLimit, ErrStakeLimit},

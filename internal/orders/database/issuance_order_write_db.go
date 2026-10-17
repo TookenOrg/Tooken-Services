@@ -8,6 +8,7 @@ import (
 	"time"
 
 	assetsDb "github.com/TookenOrg/tooken-services/internal/assets_managements/database"
+	"github.com/TookenOrg/tooken-services/internal/locks"
 	"github.com/TookenOrg/tooken-services/internal/orders/pricing"
 	"github.com/TookenOrg/tooken-services/internal/utils"
 	"github.com/lib/pq"
@@ -17,12 +18,13 @@ import (
 // Refusals of PlaceIssuanceOrder. The service exposes them under its own names
 // (aliases, same values): this package cannot import services (import cycle).
 var (
-	ErrOrderAssetNotFound       = errors.New("real estate not found")        // 404
+	ErrOrderAssetNotFound       = locks.ErrOrderAssetNotFound                // 404
 	ErrOrderAssetNotOpen        = errors.New("fundraising is not open")      // 409
 	ErrOrderIdempotencyKeyReuse = errors.New("idempotency key reused")       // 422
 	ErrOrderInvestorNotEligible = errors.New("investor not eligible")        // 403
 	ErrOrderNotEnoughShares     = errors.New("not enough shares left")       // 409
 	ErrOrderStakeLimit          = errors.New("investor stake limit reached") // 409
+	ErrOrderNotFound            = locks.ErrOrderNotFound                     // 404
 )
 
 // PlaceOrderDTO is what the caller knows before the transaction. Nothing in it
@@ -44,21 +46,6 @@ type PlacedOrderDTO struct {
 	Replayed       bool
 }
 
-// lockedRealEstateDTO is the asset as it is once the lock is held. Every
-// business check of the order reads it, never an earlier read.
-type lockedRealEstateDTO struct {
-	StatusID             int
-	Active               bool
-	Deleted              bool
-	Tokenized            bool
-	HasSharesConfig      bool
-	TotalShares          int64
-	PricePerShare        decimal.Decimal
-	CurrencyCode         string
-	EntryFeeRate         decimal.NullDecimal // NULL: no entry fee
-	MaxSharesPerInvestor sql.NullInt64       // NULL: no cap (U8)
-}
-
 // PlaceIssuanceOrder reserves shares for an investor in one transaction.
 //
 // The asset row is locked first and every check runs after: two orders on the
@@ -67,7 +54,7 @@ type lockedRealEstateDTO struct {
 func PlaceIssuanceOrder(ctx context.Context, in PlaceOrderDTO) (placed PlacedOrderDTO, err error) {
 	err = utils.InTransaction(ctx, func(tx *sql.Tx) error {
 		// 1 - Lock first, nothing else.
-		if err := lockRealEstate(ctx, tx, in.RealEstateID); err != nil {
+		if err := locks.LockRealEstate(ctx, tx, in.RealEstateID); err != nil {
 			return err
 		}
 
@@ -86,7 +73,7 @@ func PlaceIssuanceOrder(ctx context.Context, in PlaceOrderDTO) (placed PlacedOrd
 		}
 
 		// 3 - The asset, read under the lock.
-		asset, err := readLockedRealEstate(ctx, tx, in.RealEstateID)
+		asset, err := locks.ReadLockedRealEstate(ctx, tx, in.RealEstateID)
 		if err != nil {
 			return err
 		}
@@ -144,25 +131,6 @@ func PlaceIssuanceOrder(ctx context.Context, in PlaceOrderDTO) (placed PlacedOrd
 	return placed, nil
 }
 
-// lockRealEstate takes the row lock on the asset.
-//
-// The query reads nothing else on purpose: when FOR UPDATE has to wait,
-// PostgreSQL refreshes the locked row but not the rows of a joined table, which
-// stay as they were when the statement started (proven by an integration test).
-func lockRealEstate(ctx context.Context, tx *sql.Tx, realEstateID int) error {
-	const query = `SELECT 1 FROM ass.real_estate WHERE id = $1 FOR UPDATE`
-
-	var one int
-	if err := tx.QueryRowContext(ctx, query, realEstateID).Scan(&one); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return ErrOrderAssetNotFound
-		}
-		return fmt.Errorf("lock real estate %d: %w", realEstateID, err)
-	}
-
-	return nil
-}
-
 type idempotentOrder struct {
 	id           int64
 	reference    string
@@ -191,48 +159,6 @@ WHERE user_id = $1 AND idempotency_key = $2
 	return o, true, nil
 }
 
-// readLockedRealEstate reads what the order checks, in a statement of its own
-// issued after the lock, so it sees every change committed before the lock
-// was granted. The join is safe here: no FOR UPDATE, fresh snapshot.
-func readLockedRealEstate(ctx context.Context, tx *sql.Tx, realEstateID int) (lockedRealEstateDTO, error) {
-	const query = `
-SELECT
-    re.status_id,
-    re.active,
-    re.deleted_at IS NOT NULL,
-    re.token_id IS NOT NULL,
-    sc.id IS NOT NULL,
-    COALESCE(sc.total_shares, 0),
-    COALESCE(sc.price_per_share, 0),
-    COALESCE(sc.currency_code, ''),
-    sc.entry_fee_rate,
-    sc.max_shares_per_investor
-FROM ass.real_estate re
-LEFT JOIN ass.real_estate_shares_config sc
-    ON sc.real_estate_id = re.id
-WHERE re.id = $1
-`
-
-	var a lockedRealEstateDTO
-	err := tx.QueryRowContext(ctx, query, realEstateID).Scan(
-		&a.StatusID,
-		&a.Active,
-		&a.Deleted,
-		&a.Tokenized,
-		&a.HasSharesConfig,
-		&a.TotalShares,
-		&a.PricePerShare,
-		&a.CurrencyCode,
-		&a.EntryFeeRate,
-		&a.MaxSharesPerInvestor,
-	)
-	if err != nil {
-		return lockedRealEstateDTO{}, fmt.Errorf("read locked real estate %d: %w", realEstateID, err)
-	}
-
-	return a, nil
-}
-
 // Order statuses written by PlaceIssuanceOrder (iss.issuance_order_statuses).
 const (
 	statusCreated         int = 1
@@ -259,7 +185,7 @@ SELECT
 
 // checkSharesAvailable refuses an order the asset cannot serve, then one that
 // would take the investor above the cap. The messages say what to do.
-func checkSharesAvailable(a lockedRealEstateDTO, onAsset, byUser int64, quantity int) error {
+func checkSharesAvailable(a locks.LockedRealEstateDTO, onAsset, byUser int64, quantity int) error {
 	requested := int64(quantity)
 
 	remaining := a.TotalShares - onAsset
@@ -282,7 +208,7 @@ func checkSharesAvailable(a lockedRealEstateDTO, onAsset, byUser int64, quantity
 
 // checkRealEstateOpen applies U7: an asset the public cannot see is a 404, a
 // visible one that does not take orders yet (or any more) is a 409.
-func checkRealEstateOpen(a lockedRealEstateDTO) error {
+func checkRealEstateOpen(a locks.LockedRealEstateDTO) error {
 	if a.Deleted || !a.Active {
 		return ErrOrderAssetNotFound
 	}

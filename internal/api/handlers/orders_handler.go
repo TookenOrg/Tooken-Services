@@ -8,6 +8,7 @@ import (
 	authUtils "github.com/TookenOrg/tooken-services/internal/auth/utils"
 	"github.com/TookenOrg/tooken-services/internal/middleware"
 	"github.com/TookenOrg/tooken-services/internal/orders/services"
+	paymentService "github.com/TookenOrg/tooken-services/internal/payments/services"
 	"github.com/TookenOrg/tooken-services/internal/utils"
 	"github.com/TookenOrg/tooken-services/pkg/logger"
 	"github.com/gin-gonic/gin"
@@ -114,7 +115,9 @@ func respondIssuanceOrderError(gCtx *gin.Context, err error, fallback string) {
 		gCtx.JSON(http.StatusBadRequest, server.APIResponse{Message: err.Error()})
 	case errors.Is(err, services.ErrNotEnoughShares),
 		errors.Is(err, services.ErrRealEstateNotAvailable),
-		errors.Is(err, services.ErrStakeLimit):
+		errors.Is(err, services.ErrStakeLimit),
+		errors.Is(err, paymentService.ErrOrderNotAwaitingPayment),
+		errors.Is(err, paymentService.ErrOrderReservationExpired):
 		gCtx.JSON(http.StatusConflict, server.APIResponse{Message: err.Error()})
 	case errors.Is(err, services.ErrIdempotencyKeyReused):
 		gCtx.JSON(http.StatusUnprocessableEntity, server.APIResponse{Message: err.Error()})

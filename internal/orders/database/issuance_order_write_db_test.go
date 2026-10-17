@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"errors"
 	"testing"
+
+	"github.com/TookenOrg/tooken-services/internal/locks"
 )
 
 // TestCheckSharesAvailable covers the decision of step 5; the SQL that feeds
@@ -35,7 +37,7 @@ func TestCheckSharesAvailable(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			asset := lockedRealEstateDTO{TotalShares: c.total, MaxSharesPerInvestor: c.cap}
+			asset := locks.LockedRealEstateDTO{TotalShares: c.total, MaxSharesPerInvestor: c.cap}
 
 			err := checkSharesAvailable(asset, c.onAsset, c.byUser, c.quantity)
 
