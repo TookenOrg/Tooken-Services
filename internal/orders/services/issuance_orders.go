@@ -24,12 +24,12 @@ var (
 	// which cannot import this package. Aliasing keeps their detailed message
 	// ("only 5 shares left, 10 requested") for the 409.
 	ErrRealEstateNotFound     = database.ErrOrderAssetNotFound       // 404
+	ErrOrderNotFound          = database.ErrOrderNotFound            // 404
 	ErrRealEstateNotAvailable = database.ErrOrderAssetNotOpen        // 409
 	ErrNotEnoughShares        = database.ErrOrderNotEnoughShares     // 409
 	ErrStakeLimit             = database.ErrOrderStakeLimit          // 409
 	ErrInvestorNotEligible    = database.ErrOrderInvestorNotEligible // 403
 	ErrIdempotencyKeyReused   = database.ErrOrderIdempotencyKeyReuse // 422
-	ErrOrderNotFound          = errors.New("order not found")
 )
 
 // defaultReservationTTL is how long an unpaid order holds its shares when

@@ -1504,6 +1504,68 @@ paths:
               schema:
                 $ref: "#/components/schemas/APIResponse"
 
+  # Order Payment
+  /assets/real-estate/issuance/orders/{orderRef}/confirm-payment:
+    post:
+      security:
+        - bearerAuth: []
+      operationId: confirmIssuanceOrderPayment
+      summary: Confirm payment for a primary-market order
+      description: |
+        Confirms the payment for a primary-market order identified by its reference.
+
+        For the POC, only ADMIN user can confirm payment for primary-market orders.
+        This restriction is only for the proof of concept (POC) implementation.
+      tags:
+        - Issuance
+        - Payments
+      parameters:
+        - in: path
+          name: orderRef
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Payment confirmed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateIssuanceOrderResponse"
+        "401":
+          description: Missing or invalid token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "403":
+          description: The caller is not an ADMIN
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "404":
+          description: Order not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "409":
+          description: |
+            The order cannot be confirmed: it is not awaiting payment (cancelled,
+            expired, delivered...), or its reservation has lapsed. An order
+            already PAYMENT_CONFIRMED is not a conflict: it answers 200.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "500":
+          description: "Internal Server Error"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+
   # Users actions
   /users/{userId}/favorites/real-estates/{realEstateId}:
     post:
@@ -1868,17 +1930,6 @@ paths:
               schema:
                 $ref: "#/components/schemas/BurnTokenResponse"
 
-  /payments/add:
-    post:
-      tags:
-        - Payments
-      summary: Add a payment
-      operationId: paymentAdd
-      responses:
-        "200":
-          description: Payment added
-        "500":
-          description: Internal server error
 components:
   securitySchemes:
     bearerAuth:
@@ -1926,6 +1977,54 @@ components:
           format: date-time
         user:
           $ref: "#/components/schemas/User"
+
+    IssuanceOrderStatusId:
+      type: integer
+      enum:
+        - 1
+        - 2
+        - 4
+        - 5
+        - 6
+        - 7
+        - 8
+        - 9
+        - 10
+        - 11
+        - 12
+        - 13
+        - 14
+      x-enum-varnames:
+        - IssuanceOrderStatusIdCreated
+        - IssuanceOrderStatusIdAwaitingPayment
+        - IssuanceOrderStatusIdPaymentConfirmed
+        - IssuanceOrderStatusIdClosed
+        - IssuanceOrderStatusIdCancelled
+        - IssuanceOrderStatusIdExpired
+        - IssuanceOrderStatusIdDeliveryInProgress
+        - IssuanceOrderStatusIdDeliveryFailed
+        - IssuanceOrderStatusIdDelivered
+        - IssuanceOrderStatusIdReversalInProgress
+        - IssuanceOrderStatusIdReversalFailed
+        - IssuanceOrderStatusIdRefundPending
+        - IssuanceOrderStatusIdRefunded
+
+    IssuanceOrderStatusCode:
+      type: string
+      enum:
+        - CREATED
+        - AWAITING_PAYMENT
+        - PAYMENT_CONFIRMED
+        - CLOSED
+        - CANCELLED
+        - EXPIRED
+        - DELIVERY_IN_PROGRESS
+        - DELIVERY_FAILED
+        - DELIVERED
+        - REVERSAL_IN_PROGRESS
+        - REVERSAL_FAILED
+        - REFUND_PENDING
+        - REFUNDED
 
     SignUpRequest:
       type: object
