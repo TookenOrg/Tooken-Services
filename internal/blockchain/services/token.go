@@ -47,6 +47,20 @@ func (s *Service) CreateTokenWithSalt(ctx context.Context, req server.CreateToke
 		return
 	}
 
+	baseTotalShares, err := sharesToBaseUnits(req.TotalShares, req.NbDecimal)
+	if err != nil {
+		return
+	}
+	baseMaxSharesPerInvestor, err := sharesToBaseUnits(req.MaxSharesPerInvestor, req.NbDecimal)
+	if err != nil {
+		return
+	}
+
+	if baseMaxSharesPerInvestor.Cmp(baseTotalShares) > 0 {
+		err = errors.New("maxSharesPerInvestor must not exceed totalShares")
+		return
+	}
+
 	// An empty salt would send every token to the same factory address, so the second
 	// deployment would revert on a salt already taken.
 	if salt == "" {
@@ -86,25 +100,40 @@ func (s *Service) CreateTokenWithSalt(ctx context.Context, req server.CreateToke
 	}
 	claimIssuerAddr := common.HexToAddress(claimIssuerDetails.Address)
 
-	moduleAddr, found, err := database.FindModuleByName(ctx, globals.TransferRestrictionModuleName)
+	transferRestrictModule, err := ensureSharedComplianceModule(ctx, globals.TransferRestrictionModuleName)
 	if err != nil {
+		err = fmt.Errorf("ensure shared transfer restriction module: %w", err)
 		return
 	}
-	if !found {
-		err = fmt.Errorf("shared compliance module %s not found", globals.TransferRestrictionModuleName)
+	maxBalanceModule, err := ensureSharedComplianceModule(ctx, globals.MaxBalanceModuleName)
+	if err != nil {
+		err = fmt.Errorf("ensure shared max balance module: %w", err)
+		return
+	}
+	supplyLimitModule, err := ensureSharedComplianceModule(ctx, globals.SupplyLimitModuleName)
+	if err != nil {
+		err = fmt.Errorf("ensure shared supply limit module: %w", err)
 		return
 	}
 
+	complianceModules := []common.Address{maxBalanceModule, supplyLimitModule, transferRestrictModule}
+	maxBalanceBytes, supplyLimitBytes, err := encodeCapSettings(baseMaxSharesPerInvestor, baseTotalShares)
+	if err != nil {
+		err = fmt.Errorf("encode cap settings: %w", err)
+		return
+	}
+	complianceSettings := [][]byte{maxBalanceBytes, supplyLimitBytes}
 	// 3 - Resolve the shared IRS (shared investor whitelist). Zero address => first
 	//     token: the factory deploys a fresh IRS that we persist for the next tokens.
 	sharedIRS, err := resolveSharedIRS(ctx)
 	if err != nil {
+		err = fmt.Errorf("resolve shared IRS: %w", err)
 		return
 	}
 
 	// 4 - Build the suite parameters (owner & agents = the single platform manager)
 	ethFrom := utils.GetEthFrom()
-	tokenDetails := buildTokenDetails(ethFrom, req.TokenName, req.Symbol, req.NbDecimal, sharedIRS, []common.Address{moduleAddr})
+	tokenDetails := buildTokenDetails(ethFrom, req.TokenName, req.Symbol, req.NbDecimal, sharedIRS, complianceModules, complianceSettings)
 	claimDetails := defineClaimSuiteDetails(claimIssuerAddr)
 
 	// 5 - Deploy the token suite through the shared TREX factory
@@ -185,7 +214,10 @@ func resolveSharedIRS(ctx context.Context) (common.Address, error) {
 // buildTokenDetails assembles the ITREXFactoryTokenDetails for a single token.
 // irs is the shared IRS (zero lets the factory deploy a fresh one); ONCHAINID is left
 // zero so the factory creates the token ONCHAINID through the IdFactory.
-func buildTokenDetails(owner common.Address, name, symbol string, decimals int, irs common.Address, modules []common.Address) contracts.ITREXFactoryTokenDetails {
+//
+// The factory calls settings[i] on modules[i] for every i < len(settings), so the
+// modules that need a setting must come first, in the same order (B1).
+func buildTokenDetails(owner common.Address, name, symbol string, decimals int, irs common.Address, modules []common.Address, settings [][]byte) contracts.ITREXFactoryTokenDetails {
 	return contracts.ITREXFactoryTokenDetails{
 		Owner:              owner,
 		Name:               name,
@@ -196,7 +228,7 @@ func buildTokenDetails(owner common.Address, name, symbol string, decimals int, 
 		IrAgents:           []common.Address{owner},
 		TokenAgents:        []common.Address{owner},
 		ComplianceModules:  modules,
-		ComplianceSettings: [][]byte{},
+		ComplianceSettings: settings,
 	}
 }
 

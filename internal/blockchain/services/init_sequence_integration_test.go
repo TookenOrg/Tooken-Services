@@ -248,6 +248,9 @@ func TestInitSequenceIntegration(t *testing.T) {
 			TokenName: "Tooken Init Sequence",
 			Symbol:    "TKIS",
 			NbDecimal: 18,
+			// The caps are part of every token since M3-6.
+			TotalShares:          "1000",
+			MaxSharesPerInvestor: "100",
 		})
 		if err != nil {
 			t.Fatalf("CreateToken: %v", err)
@@ -269,6 +272,9 @@ func TestInitSequenceIntegration(t *testing.T) {
 			TokenName: "Tooken Init Sequence",
 			Symbol:    "TKIS",
 			NbDecimal: 18,
+			// The caps are part of every token since M3-6.
+			TotalShares:          "1000",
+			MaxSharesPerInvestor: "100",
 		})
 		if err == nil {
 			t.Fatal("deploying twice under the same salt must be refused")

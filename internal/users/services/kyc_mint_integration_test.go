@@ -229,6 +229,10 @@ func deployM25Token(ctx context.Context, t *testing.T, chainSvc *blkServices.Ser
 		TokenName: "Tooken Villa Belair #12",
 		Symbol:    "TVB12",
 		NbDecimal: 18,
+		// Alice is minted 125 shares below: the per-investor cap must leave room for
+		// them, since this test is about KYC, not about caps.
+		TotalShares:          "1500",
+		MaxSharesPerInvestor: "200",
 	}, "re-12")
 	if err != nil {
 		t.Fatalf("CreateTokenWithSalt: %v", err)

@@ -207,9 +207,16 @@ type deployedSuite struct {
 // here instead of quietly diverging from it.
 func (f *trexFixture) DeploySuite(t *testing.T, salt, name, symbol string, irs common.Address) *deployedSuite {
 	t.Helper()
+	return f.DeploySuiteWith(t, salt, name, symbol, irs, []common.Address{}, nil)
+}
+
+// DeploySuiteWith is DeploySuite with compliance modules, and the settings the factory
+// replays on them: settings[i] is called on modules[i] (B1).
+func (f *trexFixture) DeploySuiteWith(t *testing.T, salt, name, symbol string, irs common.Address, modules []common.Address, settings [][]byte) *deployedSuite {
+	t.Helper()
 	f.suiteCounter++
 
-	tokenDetails := buildTokenDetails(f.Deployer, name, symbol, 18, irs, []common.Address{})
+	tokenDetails := buildTokenDetails(f.Deployer, name, symbol, 18, irs, modules, settings)
 	claimDetails := defineClaimSuiteDetails(f.ClaimIssuer)
 
 	tx, err := f.Factory.DeployTREXSuite(f.Auth, salt, tokenDetails, claimDetails)
