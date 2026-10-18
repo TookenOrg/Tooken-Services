@@ -103,7 +103,12 @@ graph LR
         MC["ModularCompliance"]
         CTR["ClaimTopicsRegistry"]
         TIR["TrustedIssuersRegistry"]
-        MOD["TransferRestrictModule"]
+    end
+
+    subgraph MODS["Compliance modules (shared by every token)"]
+        MB["MaxBalanceModule<br/>cap per investor"]
+        SL["SupplyLimitModule<br/>cap on total supply"]
+        TRM["TransferRestrictModule"]
     end
 
     TOK --> IR
@@ -111,7 +116,9 @@ graph LR
     IR --> IRS
     IR --> CTR
     IR --> TIR
-    MC --> MOD
+    MC --> MB
+    MC --> SL
+    MC --> TRM
     CI["ClaimIssuer"] -. "trusted for topic 7 (KYC)" .-> TIR
     ID["Identity / IdentityProxy<br/>per investor"] -. "registered in" .-> IR
 ```
@@ -119,6 +126,10 @@ graph LR
 Most concrete contracts are **proxies** pointing at shared *implementations*; the
 `TREXImplementationAuthority` is the single source of truth for which
 implementation version every proxy uses.
+
+The three compliance modules are **singletons**: one instance of each, bound to every
+token's `ModularCompliance`. They keep their state **per compliance**, so one shared
+`MaxBalanceModule` still holds a different cap for each token.
 
 ---
 
@@ -202,10 +213,11 @@ sequenceDiagram
     participant Chain as EVM
 
     H->>T: CreateToken(req)
-    T->>T: validate decimals + isIdempotentToken (blk.token by name)
-    T->>DB: resolve shared TREX_FACTORY / CLAIM_ISSUER / module / SHARED_IRS
-    T->>F: DeployTREXSuite(salt, tokenDetails{irs: shared, ONCHAINID: 0}, claimDetails{topic 7})
-    F->>Chain: deploy IR/TIR/CTR/MC + Token (reusing the shared IRS)
+    T->>T: validate decimals, shares and caps + isIdempotentToken (blk.token by name)
+    T->>DB: resolve shared TREX_FACTORY / CLAIM_ISSUER / SHARED_IRS
+    T->>DB: ensureSharedComplianceModule ×3 (deploy + Initialize on first use)
+    T->>F: DeployTREXSuite(salt, tokenDetails{irs: shared, ONCHAINID: 0, modules, settings}, claimDetails{topic 7})
+    F->>Chain: deploy IR/TIR/CTR/MC + Token (reusing the shared IRS), bind modules, replay settings
     F-->>T: TREXSuiteDeployed event (token, ir, irs, mc)
     T->>DB: persist SHARED_IRS (first token only) + token (blk.token)
     T->>Chain: Token.Unpause()
@@ -219,6 +231,40 @@ shared across all tokens) — while the factory deploys a per-token IR/TIR/CTR/M
 to that shared issuer/topic/IRS. The token ONCHAINID is created by the factory
 (`ONCHAINID: 0`). The token is deployed **paused**; `unpauseToken` enables transfers.
 The sub-transactions are returned as `OnbehalfTransactions`.
+
+#### Caps: `totalShares` and `maxSharesPerInvestor`
+
+Every token is born capped, in the **same** `DeployTREXSuite` transaction (M3-6).
+
+- **Validation before any I/O.** Both fields are whole-share strings
+  (`sharesToBaseUnits`, `services/caps.go`): `0`, negatives, signs, decimals,
+  exponents and empty strings are refused, as is `maxSharesPerInvestor >
+  totalShares`. Nothing is read or sent before these checks.
+- **Base units.** Caps are compared with token balances, so they are multiplied by
+  `10^NbDecimal`: 1 500 shares at 18 decimals is `1500e18`.
+- **Order matters.** `TREXFactory` replays `ComplianceSettings[i]` on
+  `ComplianceModules[i]`, so the modules that need a setting come **first**:
+
+  | i | `ComplianceModules[i]` | `ComplianceSettings[i]` (`encodeCapSettings`) |
+  |---|---|---|
+  | 0 | `MaxBalanceModule` | `setMaxBalance(maxSharesPerInvestor)` |
+  | 1 | `SupplyLimitModule` | `setSupplyLimit(totalShares)` |
+  | 2 | `TransferRestrictModule` | — |
+
+  Swapping them reverts the whole deployment, because `TransferRestrictModule` has
+  no fallback for an unknown selector. The setters are `onlyComplianceCall`, so this
+  is the only point where the platform can set them without an extra transaction.
+- **An unset cap is 0**, which blocks every mint. A token deployed without settings
+  can never be minted.
+- **Shared modules** (`ensureSharedComplianceModule`, `services/compliance.go`):
+  read from `blk.contract_role` by name; deployed only on
+  `ErrContractRoleNotFound`, any other error stops. Deployment goes through
+  `deployComplianceModule`: deploy, then `Initialize` (these UUPS modules are
+  otherwise claimable by anyone), then `DEPLOY_<name>` / `INITIALIZE_<name>` rows in
+  `blk.eth_transaction`, then the role row. A failed role insert is **fatal**. If
+  two requests race, the loser's insert hits the unique name
+  (`database.IsContractRoleNameTaken`) and it re-reads the winner's address.
+- A mint that breaks a cap reverts with `Compliance not followed`.
 
 ### 5.4 Mint / Burn — `Mint`, `Burn` (`services/mint_token.go`, `burn_token.go`)
 
@@ -390,7 +436,15 @@ module or extending it.
 - The handlers `GetTrexSuiteInfos` and `GetTokenInfos` are still stubs returning an
   empty payload.
 - `contracts/bindings/*` are abigen-generated — regenerate from the Solidity
-  sources, never hand-edit.
+  sources, never hand-edit. `MaxBalanceModule` and `SupplyLimitModule` come from
+  T-REX **4.1.6**, the version the existing bindings match.
+- **Re-running `DeployTrexSuite` on an installed environment fails**: the module
+  role insert is fatal and `TRANSFER_RESTRICTION_MODULE` already exists. A useless
+  module is deployed first.
+- **Modules deployed before M3-6 are not initialized**, so anyone can still claim
+  their ownership. For `TransferRestrictModule` this has no effect: every write is
+  `onlyComplianceCall`, and `upgradeTo` refuses a non-proxy call.
+- **Tokens deployed before M3-6 have no caps.** They are not patched (decision M6-7).
 
 ---
 
@@ -399,7 +453,15 @@ module or extending it.
 - **Unit tests** (no chain/DB; run in CI via `go test ./...`): pure helpers in
   `utils/` (`ConvertFloatToWei`, `FindContractByName`) and `services/`
   (`buildTokenDetails`, `defineClaimSuiteDetails`, `controlInputMintBurn`,
-  `defineAuthorityVersion`, and the ONCHAINID claim signature / key derivation).
+  `defineAuthorityVersion`, the ONCHAINID claim signature / key derivation, and the
+  caps: `sharesToBaseUnits`, `encodeCapSettings`, and `CreateTokenWithSalt` refusing
+  bad shares before any I/O).
+- **Caps on a real chain + DB** (`services/caps_integration_test.go`, integration
+  tag, needs `TEST_DATABASE_URL`): caps read back in base units, reached and
+  exceeded (per investor across wallets, per token, on the total supply), a wrong
+  module order that reverts, an unset cap that blocks mints, setters refused to the
+  platform key, `DEPLOY_` / `INITIALIZE_` rows and module ownership, modules reused
+  by a second token, nothing deployed when the database is down.
 - **Integration tests** (gated by the `integration` build tag, **skipped by default
   CI**) deploy a real contract on a local EVM and exercise `GenerateTransactOpts` +
   `WaitDeployedTransaction`. A minimal Hardhat harness lives in `tools/hardhat/`:

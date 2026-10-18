@@ -12,7 +12,7 @@ func TestBuildTokenDetails(t *testing.T) {
 	irs := common.HexToAddress("0xAbC0000000000000000000000000000000000002")
 	module := common.HexToAddress("0xAbC0000000000000000000000000000000000003")
 
-	td := buildTokenDetails(owner, "MyToken", "MTK", 6, irs, []common.Address{module})
+	td := buildTokenDetails(owner, "MyToken", "MTK", 6, irs, []common.Address{module}, nil)
 
 	// ERC-3643 conformance: the token ONCHAINID must be the zero address so the
 	// TREX factory creates it via the IdFactory (never an EOA).

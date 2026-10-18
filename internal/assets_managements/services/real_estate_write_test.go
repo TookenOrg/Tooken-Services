@@ -480,3 +480,221 @@ func TestPaymentRhythmRequiredOnCreateOnly(t *testing.T) {
 		}
 	})
 }
+
+// The per-investor cap becomes the MaxBalance setting of the token, so every
+// value the module could not hold is refused here, as a 400 naming the field.
+// Letting it through would end on constraint I10 — a 500 — or, for a
+// fractional value, on NUMERIC(20,0) rounding it away without a word.
+func TestMaxSharesPerInvestorValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		value   *string
+		valid   bool
+		want    string // stored value, "" when absent
+		message string // part of the error, when refused
+	}{
+		{"absent means no cap", nil, true, "", ""},
+		{"blank means no cap", strPtrT(""), true, "", ""},
+		{"a cap under the total", strPtrT("50"), true, "50", ""},
+		{"a cap equal to the total", strPtrT("1500"), true, "1500", ""},
+		{"zero", strPtrT("0"), false, "", "greater than zero"},
+		{"negative", strPtrT("-1"), false, "", "greater than zero"},
+		{"half a share", strPtrT("1.5"), false, "", "whole number"},
+		{"not a number", strPtrT("abc"), false, "", "max_shares_per_investor"},
+		{"above the total", strPtrT("1501"), false, "", "cannot exceed total shares"},
+	}
+
+	for _, tt := range tests {
+		for _, mode := range []writeMode{writeCreate, writePatch} {
+			t.Run(tt.name, func(t *testing.T) {
+				req := completeRequest()
+				req.Configuration.TotalShares = "1500"
+				req.Configuration.MaxSharesPerInvestor = tt.value
+
+				in, err := toWriteDTO(req, mode)
+
+				if !tt.valid {
+					if !errors.Is(err, ErrInvalidRealEstate) {
+						t.Fatalf("want ErrInvalidRealEstate, got %v", err)
+					}
+					if !strings.Contains(err.Error(), tt.message) {
+						t.Errorf("error %q does not say %q", err, tt.message)
+					}
+					return
+				}
+
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				got := in.SharesConfig.MaxSharesPerInvestor
+				if tt.want == "" {
+					if got.Valid {
+						t.Errorf("an absent cap was stored as %s", got.Decimal)
+					}
+					return
+				}
+				if !got.Valid || got.Decimal.String() != tt.want {
+					t.Errorf("cap = %v; want %s", got, tt.want)
+				}
+			})
+		}
+	}
+}
+
+func capConfig(totalShares, maxSharesPerInvestor string) *database.RealEstateSharesConfigWriteDTO {
+	c := config(totalShares)
+	if maxSharesPerInvestor != "" {
+		c.MaxSharesPerInvestor = nullDec(maxSharesPerInvestor)
+	}
+
+	return c
+}
+
+// The cap lives on-chain once the token is deployed, like total_shares: a
+// change in the database alone would make it disagree with the module that
+// actually refuses the transfers.
+func TestCheckSharesConfigChangeFreezesTheCap(t *testing.T) {
+	tokenID := 42
+
+	tests := []struct {
+		name     string
+		state    database.RealEstateGuardStateDTO
+		in       *database.RealEstateSharesConfigWriteDTO
+		conflict bool
+	}{
+		{
+			name:  "a draft can change its cap",
+			state: database.RealEstateGuardStateDTO{TotalShares: nullDec("1500"), MaxSharesPerInvestor: nullDec("50")},
+			in:    capConfig("1500", "60"),
+		},
+		{
+			name:  "a draft can drop its cap",
+			state: database.RealEstateGuardStateDTO{TotalShares: nullDec("1500"), MaxSharesPerInvestor: nullDec("50")},
+			in:    capConfig("1500", ""),
+		},
+		{
+			name:  "an asset with orders but no token can still change it",
+			state: database.RealEstateGuardStateDTO{ReservedShares: 10, TotalShares: nullDec("1500"), MaxSharesPerInvestor: nullDec("50")},
+			in:    capConfig("1500", "60"),
+		},
+		{
+			name:     "a tokenized asset cannot raise it",
+			state:    database.RealEstateGuardStateDTO{TokenId: &tokenID, TotalShares: nullDec("1500"), MaxSharesPerInvestor: nullDec("50")},
+			in:       capConfig("1500", "60"),
+			conflict: true,
+		},
+		{
+			name:     "a tokenized asset cannot drop it",
+			state:    database.RealEstateGuardStateDTO{TokenId: &tokenID, TotalShares: nullDec("1500"), MaxSharesPerInvestor: nullDec("50")},
+			in:       capConfig("1500", ""),
+			conflict: true,
+		},
+		{
+			name:  "a tokenized asset accepts the same cap sent back",
+			state: database.RealEstateGuardStateDTO{TokenId: &tokenID, TotalShares: nullDec("1500"), MaxSharesPerInvestor: nullDec("50")},
+			in:    capConfig("1500", "50.0"),
+		},
+		{
+			// Tokens deployed before the cap existed carry none: they must stay
+			// patchable as long as the patch does not invent one.
+			name:  "a legacy tokenized asset without cap stays editable",
+			state: database.RealEstateGuardStateDTO{TokenId: &tokenID, TotalShares: nullDec("1500")},
+			in:    capConfig("1500", ""),
+		},
+		{
+			name:     "a legacy tokenized asset cannot gain a cap off-chain",
+			state:    database.RealEstateGuardStateDTO{TokenId: &tokenID, TotalShares: nullDec("1500")},
+			in:       capConfig("1500", "50"),
+			conflict: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := checkSharesConfigChange(tt.state, tt.in)
+
+			if tt.conflict {
+				if !errors.Is(err, ErrRealEstateConflict) {
+					t.Fatalf("want ErrRealEstateConflict, got %v", err)
+				}
+				if !strings.Contains(err.Error(), "max_shares_per_investor") {
+					t.Errorf("the frozen field is not named: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+// Every write path rebuilds the asset from what is stored: a patch merges onto
+// toWriteRequest(current), and publication reads its requirements from the
+// same. A cap that does not survive the round trip is erased by the first
+// unrelated patch, and makes every publication answer 409.
+func TestCapSurvivesTheWritePaths(t *testing.T) {
+	stored := database.RealEstateDTO{
+		Title: strPtrT("Villa Belair"),
+		SharesConfig: &database.RealEstateSharesConfigDTO{
+			TotalShares:          nullDec("1500"),
+			PricePerShare:        nullDec("199.99"),
+			CurrencyCode:         strPtrT("EUR"),
+			MaxSharesPerInvestor: nullDec("50"),
+		},
+	}
+
+	t.Run("toWriteRequest carries it", func(t *testing.T) {
+		got := toWriteRequest(stored).Configuration.MaxSharesPerInvestor
+		if got == nil || *got != "50" {
+			t.Fatalf("cap = %v; want \"50\"", got)
+		}
+	})
+
+	t.Run("an absent cap stays absent", func(t *testing.T) {
+		none := database.RealEstateDTO{SharesConfig: &database.RealEstateSharesConfigDTO{TotalShares: nullDec("1500")}}
+		if got := toWriteRequest(none).Configuration.MaxSharesPerInvestor; got != nil {
+			t.Fatalf("a cap was invented: %q", *got)
+		}
+	})
+
+	t.Run("the read model exposes it", func(t *testing.T) {
+		got := toServerRealEstateSummary(stored).Configuration.MaxSharesPerInvestor
+		if got == nil || *got != "50" {
+			t.Fatalf("cap = %v; want \"50\"", got)
+		}
+	})
+
+	current := toWriteRequest(stored)
+
+	t.Run("a patch that never mentions it keeps it", func(t *testing.T) {
+		got := applyPatch(current, server.RealEstatePatchRequest{
+			Configuration: &server.RealEstateConfigurationPatch{PricePerShare: strPtrT("250")},
+		})
+		if c := got.Configuration.MaxSharesPerInvestor; c == nil || *c != "50" {
+			t.Fatalf("cap lost by an unrelated patch: %v", c)
+		}
+	})
+
+	t.Run("a patch can change it", func(t *testing.T) {
+		got := applyPatch(current, server.RealEstatePatchRequest{
+			Configuration: &server.RealEstateConfigurationPatch{MaxSharesPerInvestor: strPtrT("60")},
+		})
+		if c := got.Configuration.MaxSharesPerInvestor; c == nil || *c != "60" {
+			t.Fatalf("cap not applied: %v", c)
+		}
+	})
+
+	t.Run("an empty string removes it", func(t *testing.T) {
+		got := applyPatch(current, server.RealEstatePatchRequest{
+			Configuration: &server.RealEstateConfigurationPatch{MaxSharesPerInvestor: strPtrT("")},
+		})
+		in, err := toWriteDTO(got, writePatch)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if in.SharesConfig.MaxSharesPerInvestor.Valid {
+			t.Errorf("cap not removed: %s", in.SharesConfig.MaxSharesPerInvestor.Decimal)
+		}
+	})
+}

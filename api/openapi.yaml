@@ -2423,6 +2423,8 @@ components:
         - tokenName
         - symbol
         - nbDecimal
+        - totalShares
+        - maxSharesPerInvestor
       properties:
         tokenName:
           type: string
@@ -2438,6 +2440,20 @@ components:
           type: integer
           description: Number of decimals
           example: 18
+        totalShares:
+          type: string
+          description: >
+            Number of shares the token may ever issue, as an exact positive
+            integer. Sets SupplyLimitModule to totalShares x 10^nbDecimal.
+            A string because JSON numbers lose precision above 2^53.
+          example: "1500"
+        maxSharesPerInvestor:
+          type: string
+          description: >
+            Number of shares a single investor identity may hold, as an exact
+            positive integer not above totalShares. Sets MaxBalanceModule to
+            maxSharesPerInvestor x 10^nbDecimal.
+          example: "50"
 
     CreateTokenResponse:
       allOf:
@@ -2640,6 +2656,10 @@ components:
           type: integer
         payment_frequency_type:
           type: string
+        max_shares_per_investor:
+          type: string
+          description: Exact integer count, NUMERIC(20,0)
+          example: "100"
 
     RealEstateProgression:
       type: object
@@ -2990,6 +3010,10 @@ components:
           type: string
         compartment_ref:
           type: string
+        max_shares_per_investor:
+          type: string
+          description: Exact integer count, NUMERIC(20,0)
+          example: "100"
 
     RealEstateSpecificationInput:
       type: object
@@ -3088,6 +3112,10 @@ components:
         compartment_ref:
           type: string
           description: Luxembourg compartment reference, unique across assets
+        max_shares_per_investor:
+          type: string
+          description: Exact integer count, NUMERIC(20,0)
+          example: "100"
 
     RealEstateMediaInput:
       type: object

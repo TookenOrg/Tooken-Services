@@ -9,6 +9,7 @@ import (
 
 	"github.com/TookenOrg/tooken-services/internal/api/server"
 	"github.com/TookenOrg/tooken-services/internal/globals"
+	"github.com/lib/pq"
 )
 
 // ErrContractRoleNotFound is returned (wrapped) by GetContractRoleByName when no row
@@ -116,4 +117,15 @@ func InsertContractRole(ctx context.Context, txHash, address, contractName strin
 	}
 
 	return
+}
+
+// contractRoleNameConstraint is the UNIQUE constraint on blk.contract_role
+// (contract_name): one address per role.
+const contractRoleNameConstraint = "contract_role_contract_name_key"
+
+// IsContractRoleNameTaken reports whether err comes from InsertContractRole
+// hitting a role that is already registered, i.e. another writer got there first.
+func IsContractRoleNameTaken(err error) bool {
+	var pqErr *pq.Error
+	return errors.As(err, &pqErr) && pqErr.Code == "23505" && pqErr.Constraint == contractRoleNameConstraint
 }

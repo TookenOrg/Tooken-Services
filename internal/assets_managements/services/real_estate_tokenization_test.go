@@ -7,6 +7,13 @@ import (
 	"unicode/utf8"
 
 	"github.com/TookenOrg/tooken-services/internal/api/server"
+	"github.com/shopspring/decimal"
+)
+
+// Villa Belair #12 as configured: 1 500 shares, at most 50 per investor.
+var (
+	villaBelairShares = decimal.NewFromInt(1500)
+	villaBelairCap    = decimal.NewFromInt(50)
 )
 
 func TestDefineTokenName(t *testing.T) {
@@ -109,7 +116,7 @@ func TestTokenForPublicationKeepsAnExistingToken(t *testing.T) {
 	s := NewService(deployer)
 	existing := 7
 
-	got, err := s.tokenForPublication(context.Background(), 12, "Villa Belair", &existing)
+	got, err := s.tokenForPublication(context.Background(), 12, "Villa Belair", &existing, villaBelairShares, villaBelairCap)
 	if err != nil {
 		t.Fatalf("tokenForPublication returned an unexpected error: %v", err)
 	}
@@ -130,7 +137,7 @@ func TestTokenForPublicationDeploysWhenTheAssetHasNoToken(t *testing.T) {
 	deployer := &fakeTokenDeployer{tokenID: 42}
 	s := NewService(deployer)
 
-	got, err := s.tokenForPublication(context.Background(), 12, "Villa Belair", nil)
+	got, err := s.tokenForPublication(context.Background(), 12, "Villa Belair", nil, villaBelairShares, villaBelairCap)
 	if err != nil {
 		t.Fatalf("tokenForPublication returned an unexpected error: %v", err)
 	}
@@ -170,6 +177,14 @@ func TestTokenForPublicationDeploysWhenTheAssetHasNoToken(t *testing.T) {
 	if deployer.gotReq.NbDecimal != tokenDecimals {
 		t.Errorf("decimals = %d; want %d", deployer.gotReq.NbDecimal, tokenDecimals)
 	}
+	// Both ceilings are set in the deployment itself: one that does not reach
+	// the deployer reads as zero on-chain and refuses every mint.
+	if want := "1500"; deployer.gotReq.TotalShares != want {
+		t.Errorf("total shares = %q; want %q", deployer.gotReq.TotalShares, want)
+	}
+	if want := "50"; deployer.gotReq.MaxSharesPerInvestor != want {
+		t.Errorf("max shares per investor = %q; want %q", deployer.gotReq.MaxSharesPerInvestor, want)
+	}
 }
 
 // A chain failure must leave nothing behind for the caller to bind, so that the
@@ -179,7 +194,7 @@ func TestTokenForPublicationPropagatesADeploymentFailure(t *testing.T) {
 	deployer := &fakeTokenDeployer{tokenID: 42, err: wantErr}
 	s := NewService(deployer)
 
-	got, err := s.tokenForPublication(context.Background(), 12, "Villa Belair", nil)
+	got, err := s.tokenForPublication(context.Background(), 12, "Villa Belair", nil, villaBelairShares, villaBelairCap)
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("tokenForPublication error = %v; want %v", err, wantErr)
 	}
@@ -200,7 +215,7 @@ func TestTokenForPublicationAdoptsAnInterruptedDeployment(t *testing.T) {
 	}
 	s := NewService(deployer)
 
-	got, err := s.tokenForPublication(context.Background(), 12, "Villa Belair", nil)
+	got, err := s.tokenForPublication(context.Background(), 12, "Villa Belair", nil, villaBelairShares, villaBelairCap)
 	if err != nil {
 		t.Fatalf("tokenForPublication returned an unexpected error: %v", err)
 	}
@@ -230,7 +245,7 @@ func TestTokenForPublicationAdoptsEvenAfterTheTitleChanged(t *testing.T) {
 	}
 	s := NewService(deployer)
 
-	got, err := s.tokenForPublication(context.Background(), 12, "Renamed Since The Failure", nil)
+	got, err := s.tokenForPublication(context.Background(), 12, "Renamed Since The Failure", nil, villaBelairShares, villaBelairCap)
 	if err != nil {
 		t.Fatalf("tokenForPublication returned an unexpected error: %v", err)
 	}
@@ -254,7 +269,7 @@ func TestTokenForPublicationDoesNotDeployWhenTheLookupFails(t *testing.T) {
 	deployer := &fakeTokenDeployer{tokenID: 42, saltErr: wantErr}
 	s := NewService(deployer)
 
-	got, err := s.tokenForPublication(context.Background(), 12, "Villa Belair", nil)
+	got, err := s.tokenForPublication(context.Background(), 12, "Villa Belair", nil, villaBelairShares, villaBelairCap)
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("tokenForPublication error = %v; want %v", err, wantErr)
 	}

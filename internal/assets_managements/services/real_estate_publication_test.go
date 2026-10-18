@@ -21,6 +21,8 @@ func completeRequest() server.RealEstateWriteRequest {
 		CurrencyCode:  "EUR",
 		Yield:         strPtrT("4.25"),
 
+		MaxSharesPerInvestor: strPtrT("50"),
+
 		PaymentFrequency:       1,
 		PaymentFrequencyTypeId: 1,
 	}
@@ -57,6 +59,10 @@ func TestPublicationRequirements(t *testing.T) {
 		{"no payment rhythm", func(r *server.RealEstateWriteRequest) { r.Configuration.PaymentFrequency = 0 }, "configuration.payment_frequency"},
 		{"no payment period", func(r *server.RealEstateWriteRequest) { r.Configuration.PaymentFrequencyTypeId = 0 }, "configuration.payment_frequency_type_id"},
 		{"blank yield", func(r *server.RealEstateWriteRequest) { r.Configuration.Yield = strPtrT("") }, "configuration.yield"},
+		// Without a cap the MaxBalance module would read zero and refuse every
+		// mint: an asset that cannot be sold must not be put on sale.
+		{"no per-investor cap", func(r *server.RealEstateWriteRequest) { r.Configuration.MaxSharesPerInvestor = nil }, "configuration.max_shares_per_investor"},
+		{"blank per-investor cap", func(r *server.RealEstateWriteRequest) { r.Configuration.MaxSharesPerInvestor = strPtrT("") }, "configuration.max_shares_per_investor"},
 	}
 
 	for _, tc := range tests {

@@ -100,6 +100,7 @@ type RealEstateSharesConfigWriteDTO struct {
 	EntryFeeRate           decimal.NullDecimal
 	MgmtFeeRate            decimal.NullDecimal
 	ExitFeeRate            decimal.NullDecimal
+	MaxSharesPerInvestor   decimal.NullDecimal
 	CompartmentRef         *string
 }
 
@@ -117,12 +118,13 @@ type RealEstateMediaWriteDTO struct {
 // Deleted is separate from StatusId because a cancelled asset and a deleted one
 // are not the same thing: the first can be reopened, the second is gone.
 type RealEstateGuardStateDTO struct {
-	Id             int
-	StatusId       int
-	TokenId        *int
-	Deleted        bool
-	ReservedShares int64
-	TotalShares    decimal.NullDecimal
+	Id                   int
+	StatusId             int
+	TokenId              *int
+	Deleted              bool
+	ReservedShares       int64
+	TotalShares          decimal.NullDecimal
+	MaxSharesPerInvestor decimal.NullDecimal
 }
 
 // GetRealEstateGuardState reads the state a write must be checked against.
@@ -137,7 +139,8 @@ SELECT re.id,
        re.token_id,
        re.deleted_at IS NOT NULL AS deleted,
        COALESCE(sold.reserved, 0)::bigint AS reserved,
-       conf.total_shares
+       conf.total_shares,
+       conf.max_shares_per_investor
 FROM ass.real_estate re
 LEFT JOIN ass.real_estate_shares_config conf
     ON conf.real_estate_id = re.id
@@ -147,7 +150,7 @@ WHERE re.id = $1
 
 	var s RealEstateGuardStateDTO
 	err := globals.DB.QueryRowContext(ctx, query, id).Scan(
-		&s.Id, &s.StatusId, &s.TokenId, &s.Deleted, &s.ReservedShares, &s.TotalShares,
+		&s.Id, &s.StatusId, &s.TokenId, &s.Deleted, &s.ReservedShares, &s.TotalShares, &s.MaxSharesPerInvestor,
 	)
 	if err != nil {
 		return RealEstateGuardStateDTO{}, err
@@ -344,14 +347,14 @@ func insertSharesConfig(ctx context.Context, tx *sql.Tx, id int, c *RealEstateSh
 INSERT INTO ass.real_estate_shares_config
     (real_estate_id, total_shares, price_per_share, currency_code, yield,
      payment_frequency, payment_frequency_type, min_investment, max_investment,
-     entry_fee_rate, mgmt_fee_rate, exit_fee_rate, compartment_ref)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+     entry_fee_rate, mgmt_fee_rate, exit_fee_rate, compartment_ref, max_shares_per_investor)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 `
 
 	_, err := tx.ExecContext(ctx, query,
 		id, c.TotalShares, c.PricePerShare, c.CurrencyCode, c.Yield,
 		c.PaymentFrequency, c.PaymentFrequencyTypeId, c.MinInvestment, c.MaxInvestment,
-		c.EntryFeeRate, c.MgmtFeeRate, c.ExitFeeRate, c.CompartmentRef,
+		c.EntryFeeRate, c.MgmtFeeRate, c.ExitFeeRate, c.CompartmentRef, c.MaxSharesPerInvestor,
 	)
 	if err != nil {
 		return fmt.Errorf("insert shares config: %w", err)

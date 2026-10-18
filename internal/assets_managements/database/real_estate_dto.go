@@ -105,6 +105,7 @@ type RealEstateSharesConfigDTO struct {
 	EntryFeeRate             decimal.NullDecimal
 	MgmtFeeRate              decimal.NullDecimal
 	ExitFeeRate              decimal.NullDecimal
+	MaxSharesPerInvestor     decimal.NullDecimal
 }
 
 // RealEstateAddressDTO maps ass.real_estate_address (1-1).

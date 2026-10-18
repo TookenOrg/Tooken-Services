@@ -20,6 +20,12 @@ const (
 	ImplTrexAuthorityName           = "TREX_AUTHORITY"
 )
 
+// Modules
+const (
+	MaxBalanceModuleName  = "MAX_BALANCE_MODULE"
+	SupplyLimitModuleName = "SUPPLY_LIMIT_MODULE"
+)
+
 const (
 	IdentityFactoryName = "IDENTITY_FACTORY"
 	ClaimIssuerName     = "CLAIM_ISSUER"

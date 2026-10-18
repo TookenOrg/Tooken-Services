@@ -58,6 +58,7 @@ func publicationRequirements(in database.RealEstateWriteDTO) []string {
 	if c == nil {
 		return append(missing,
 			"configuration.total_shares",
+			"configuration.max_shares_per_investor",
 			"configuration.price_per_share",
 			"configuration.currency_code",
 			"configuration.yield",
@@ -70,6 +71,9 @@ func publicationRequirements(in database.RealEstateWriteDTO) []string {
 	// refuses zero and negative. What is checked here is that they are there.
 	if !c.TotalShares.IsPositive() {
 		missing = append(missing, "configuration.total_shares")
+	}
+	if !c.MaxSharesPerInvestor.Decimal.IsPositive() {
+		missing = append(missing, "configuration.max_shares_per_investor")
 	}
 	if !c.PricePerShare.IsPositive() {
 		missing = append(missing, "configuration.price_per_share")
@@ -291,7 +295,8 @@ func (s *Service) PublishRealEstate(ctx context.Context, id int) (server.RealEst
 
 	// Deploy onchain first to avoid inconsistencies between the onchain state and the database.
 	// if the token deployment fails, we should not proceed with publishing in the database and real estate stays draft.
-	tokenID, err := s.tokenForPublication(ctx, id, in.Title, state.TokenId)
+	tokenID, err := s.tokenForPublication(ctx, id, in.Title, state.TokenId,
+		in.SharesConfig.TotalShares, in.SharesConfig.MaxSharesPerInvestor.Decimal)
 	if err != nil {
 		return server.RealEstate{}, err
 	}
