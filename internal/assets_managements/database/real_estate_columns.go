@@ -96,6 +96,7 @@ var realEstateCoreColumns = []realEstateColumn{
 	{"conf.entry_fee_rate", func(d *RealEstateDTO) any { return &d.SharesConfig.EntryFeeRate }},
 	{"conf.mgmt_fee_rate", func(d *RealEstateDTO) any { return &d.SharesConfig.MgmtFeeRate }},
 	{"conf.exit_fee_rate", func(d *RealEstateDTO) any { return &d.SharesConfig.ExitFeeRate }},
+	{"conf.max_shares_per_investor", func(d *RealEstateDTO) any { return &d.SharesConfig.MaxSharesPerInvestor }},
 
 	{"COALESCE(sold.reserved, 0)::bigint AS tokens_sold",
 		func(d *RealEstateDTO) any { return &d.Progression.TokensSold }},

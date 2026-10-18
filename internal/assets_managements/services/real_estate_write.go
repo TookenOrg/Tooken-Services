@@ -279,6 +279,7 @@ func toWriteRequest(dto database.RealEstateDTO) server.RealEstateWriteRequest {
 			MgmtFeeRate:            nullDecimalToString(c.MgmtFeeRate),
 			ExitFeeRate:            nullDecimalToString(c.ExitFeeRate),
 			CompartmentRef:         c.CompartmentRef,
+			MaxSharesPerInvestor:   nullDecimalToString(c.MaxSharesPerInvestor),
 		}
 		if c.TotalShares.Valid {
 			config.TotalShares = c.TotalShares.Decimal.String()
@@ -412,6 +413,7 @@ func applyPatch(current server.RealEstateWriteRequest, patch server.RealEstatePa
 		}
 		setIfPresent(&target.MinInvestment, c.MinInvestment)
 		setIfPresent(&target.MaxInvestment, c.MaxInvestment)
+		setIfPresent(&target.MaxSharesPerInvestor, c.MaxSharesPerInvestor)
 		setIfPresent(&target.EntryFeeRate, c.EntryFeeRate)
 		setIfPresent(&target.MgmtFeeRate, c.MgmtFeeRate)
 		setIfPresent(&target.ExitFeeRate, c.ExitFeeRate)
@@ -611,11 +613,15 @@ func checkSharesConfigChange(state database.RealEstateGuardStateDTO, in *databas
 		return nil
 	}
 
-	current := state.TotalShares.Decimal
+	currentTotalShares := state.TotalShares.Decimal
+	currentMaxSharesPerInvestor := state.MaxSharesPerInvestor.Decimal
 
 	if tokenized {
-		if !in.TotalShares.Equal(current) {
+		if !in.TotalShares.Equal(currentTotalShares) {
 			return conflict("total_shares is fixed by the deployed token and cannot be changed")
+		}
+		if !in.MaxSharesPerInvestor.Decimal.Equal(currentMaxSharesPerInvestor) {
+			return conflict("max_shares_per_investor is fixed by the deployed token and cannot be changed")
 		}
 	} else if in.TotalShares.LessThan(decimal.NewFromInt(state.ReservedShares)) {
 		return conflict("total_shares cannot be lowered to %s: %d shares are already reserved",
@@ -909,6 +915,27 @@ func toSharesConfigWriteDTO(c server.RealEstateConfigurationInput, mode writeMod
 	}
 	out.MinInvestment = minInvestment
 	out.MaxInvestment = maxInvestment
+
+	maxSharesPerInvestor, err := parseOptionalDecimal("configuration.max_shares_per_investor", c.MaxSharesPerInvestor)
+	if err != nil {
+		return out, err
+	}
+	// The cap is optional: absent means no per-investor limit.
+	if maxSharesPerInvestor.Valid {
+		if !maxSharesPerInvestor.Decimal.IsPositive() {
+			return out, invalid("configuration.max_shares_per_investor must be greater than zero")
+		}
+		// A share is the unit an investor buys: half of one cannot be issued, and
+		// NUMERIC(20,0) would round it away without saying so.
+		if !maxSharesPerInvestor.Decimal.Equal(maxSharesPerInvestor.Decimal.Truncate(0)) {
+			return out, invalid("configuration.max_shares_per_investor must be a whole number, got %q", maxSharesPerInvestor.Decimal)
+		}
+		if maxSharesPerInvestor.Decimal.GreaterThan(out.TotalShares) {
+			return out, invalid("configuration.max_shares_per_investor cannot exceed total shares")
+		}
+	}
+
+	out.MaxSharesPerInvestor = maxSharesPerInvestor
 
 	// The payment rhythm goes with the yield: "4.25 %" without saying how often
 	// it is paid cannot be compared to another offer. Both columns are

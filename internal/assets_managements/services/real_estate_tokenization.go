@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/TookenOrg/tooken-services/internal/api/server"
+	"github.com/shopspring/decimal"
 )
 
 const tokenDecimals = 18
@@ -65,7 +66,13 @@ func defineSalt(realEstateID int) string {
 // Deploying here, before the asset is written as published, is what makes a
 // chain failure harmless: the asset stays a draft, and no investor is ever
 // shown an offer backed by nothing.
-func (s *Service) tokenForPublication(ctx context.Context, realEstateID int, realEstateName string, existingTokenID *int) (int, error) {
+//
+// totalShares and maxSharesPerInvestor travel with the request because they
+// become on-chain ceilings set in the very deployment that creates the token
+// (SupplyLimitModule, MaxBalanceModule): a ceiling left unset reads as zero
+// and would refuse every mint. publicationRequirements guarantees both are
+// present before this point is reached.
+func (s *Service) tokenForPublication(ctx context.Context, realEstateID int, realEstateName string, existingTokenID *int, totalShares, maxSharesPerInvestor decimal.Decimal) (int, error) {
 	if existingTokenID != nil {
 		return *existingTokenID, nil
 	}
@@ -80,9 +87,11 @@ func (s *Service) tokenForPublication(ctx context.Context, realEstateID int, rea
 	}
 
 	req := server.CreateTokenRequest{
-		TokenName: defineTokenName(realEstateName, realEstateID),
-		Symbol:    defineSymbol(realEstateID),
-		NbDecimal: tokenDecimals,
+		TokenName:            defineTokenName(realEstateName, realEstateID),
+		Symbol:               defineSymbol(realEstateID),
+		NbDecimal:            tokenDecimals,
+		TotalShares:          totalShares.String(),
+		MaxSharesPerInvestor: maxSharesPerInvestor.String(),
 	}
 
 	tokenID, _, err := s.deployer.CreateTokenWithSalt(ctx, req, salt)

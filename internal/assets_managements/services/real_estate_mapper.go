@@ -75,6 +75,7 @@ func toServerRealEstateSummary(dto database.RealEstateDTO) server.RealEstateSumm
 			PaymentFrequency:       c.PaymentFrequency,
 			PaymentFrequencyTypeId: c.PaymentFrequencyTypeId,
 			PaymentFrequencyType:   c.PaymentFrequencyTypeName,
+			MaxSharesPerInvestor:   nullDecimalToString(c.MaxSharesPerInvestor),
 		}
 	}
 

@@ -242,7 +242,7 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
       "issuer_id": 1,
       "address": {"street":"12 rue de la Gare","postal_code":"L-1611","city":"Luxembourg","country_code":"lu","latitude":"49.611622","longitude":"6.131935"},
       "specification": {"surface_area":"128.50","bedroom_number":4,"energy_class":"c"},
-      "configuration": {"total_shares":"1500","price_per_share":"199.99","currency_code":"eur","yield":"4.25","payment_frequency":1,"payment_frequency_type_id":1,"entry_fee_rate":"2.5"},
+      "configuration": {"total_shares":"1500","price_per_share":"199.99","currency_code":"eur","yield":"4.25","payment_frequency":1,"payment_frequency_type_id":1,"entry_fee_rate":"2.5","max_shares_per_investor":"50"},
       "media": [{"url":"https://x/1.jpg","is_cover":true},{"url":"https://x/2.jpg"}]
     }`
 
@@ -277,6 +277,9 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 		cfg := re["configuration"].(map[string]any)
 		if cfg["total_valuation"] != "299985" || cfg["price_per_share"] != "199.99" || cfg["currency_code"] != "EUR" {
 			t.Errorf("config: %v", cfg)
+		}
+		if cfg["max_shares_per_investor"] != "50" {
+			t.Errorf("per-investor cap not stored or not read back: %v", cfg["max_shares_per_investor"])
 		}
 		if re["address"] == nil {
 			t.Errorf("manager should see the address")
@@ -316,6 +319,12 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 		}
 		if want := "re-" + itoa(id); deployer.gotSalt != want {
 			t.Errorf("salt = %q; want %q", deployer.gotSalt, want)
+		}
+		// Both ceilings are read from the stored asset, not from the request
+		// that created it: publication is a separate call.
+		if deployer.gotReq.TotalShares != "1500" || deployer.gotReq.MaxSharesPerInvestor != "50" {
+			t.Errorf("ceilings sent to the deployer = %q / %q; want 1500 / 50",
+				deployer.gotReq.TotalShares, deployer.gotReq.MaxSharesPerInvestor)
 		}
 
 		// The asset carries the token the deployer wrote, and the trigger on
@@ -380,6 +389,87 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 		}
 	})
 
+	// The per-investor cap (M3-6): optional on a draft, an exact whole number
+	// between 1 and total_shares when given. Every refusal is a 400 decided
+	// before the database: constraint I10 would otherwise surface as a 500.
+	t.Run("per-investor cap", func(t *testing.T) {
+		title := "Cap case " + itoa(id)
+		withCap := func(value string) string {
+			return strings.NewReplacer(
+				`"title": "Villa Belair"`, `"title": "`+title+`"`,
+				`"max_shares_per_investor":"50"`, value,
+			).Replace(payload)
+		}
+		rowsTitled := func(t *testing.T) int {
+			t.Helper()
+			var n int
+			if err := db.QueryRow(`SELECT count(*) FROM ass.real_estate WHERE title = $1`, title).Scan(&n); err != nil {
+				t.Fatal(err)
+			}
+			return n
+		}
+
+		t.Run("an impossible value is refused before anything is written", func(t *testing.T) {
+			before := rowsTitled(t)
+			for _, v := range []string{"0", "-1", "1.5", "abc", "1501"} {
+				code, body := do("POST", "/assets/real-estates", mgr, withCap(`"max_shares_per_investor":"`+v+`"`))
+				if code != http.StatusBadRequest || !strings.Contains(body, "max_shares_per_investor") {
+					t.Errorf("%q: want 400 naming the cap, got %d: %s", v, code, body)
+				}
+			}
+			if after := rowsTitled(t); after != before {
+				t.Errorf("a refused create left %d row(s) behind", after-before)
+			}
+		})
+
+		var capID int
+		t.Run("a cap equal to the total is accepted", func(t *testing.T) {
+			code, body := do("POST", "/assets/real-estates", mgr, withCap(`"max_shares_per_investor":"1500"`))
+			if code != http.StatusCreated {
+				t.Fatalf("want 201 got %d: %s", code, body)
+			}
+			var re map[string]any
+			json.Unmarshal([]byte(body), &re)
+			capID = int(re["id"].(float64))
+			if got := re["configuration"].(map[string]any)["max_shares_per_investor"]; got != "1500" {
+				t.Errorf("cap read back as %v; want 1500", got)
+			}
+		})
+
+		t.Run("a draft can drop its cap", func(t *testing.T) {
+			if capID == 0 {
+				t.Skip("no draft to patch")
+			}
+			code, body := do("PATCH", "/assets/real-estates/"+itoa(capID), mgr, `{"configuration":{"max_shares_per_investor":""}}`)
+			if code != http.StatusOK {
+				t.Fatalf("want 200 got %d: %s", code, body)
+			}
+			var re map[string]any
+			json.Unmarshal([]byte(body), &re)
+			if got, present := re["configuration"].(map[string]any)["max_shares_per_investor"]; present {
+				t.Errorf("cap still exposed after removal: %v", got)
+			}
+			var stored sql.NullString
+			if err := db.QueryRow(`SELECT max_shares_per_investor::text FROM ass.real_estate_shares_config WHERE real_estate_id = $1`, capID).
+				Scan(&stored); err != nil {
+				t.Fatal(err)
+			}
+			if stored.Valid {
+				t.Errorf("cap still stored: %s", stored.String)
+			}
+
+			// And without it the draft can no longer be published.
+			before := deployer.calls
+			code, body = do("POST", "/assets/real-estates/"+itoa(capID)+"/publish", mgr, "")
+			if code != http.StatusConflict || !strings.Contains(body, "configuration.max_shares_per_investor") {
+				t.Errorf("publishing without a cap: want 409 naming it, got %d: %s", code, body)
+			}
+			if deployer.calls != before {
+				t.Errorf("a refused publication reached the deployer")
+			}
+		})
+	})
+
 	// The whole point of a PATCH: an editor that shows one section must not
 	// erase the sections it never displayed.
 	//
@@ -418,6 +508,9 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 		}
 		if cfg["currency_code"] != "EUR" {
 			t.Errorf("currency lost by the patch: %v", cfg["currency_code"])
+		}
+		if cfg["max_shares_per_investor"] != "50" {
+			t.Errorf("per-investor cap lost by the patch: %v", cfg["max_shares_per_investor"])
 		}
 
 		if re["specification"] == nil {
@@ -482,7 +575,11 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 	// and pulling it off the site over a mistyped field is worse than asking
 	// for the field back.
 	t.Run("a published asset cannot lose what investors rely on", func(t *testing.T) {
-		for _, patch := range []string{`{"description":""}`, `{"configuration":{"yield":""}}`} {
+		for _, patch := range []string{
+			`{"description":""}`,
+			`{"configuration":{"yield":""}}`,
+			`{"configuration":{"max_shares_per_investor":""}}`,
+		} {
 			code, body := do("PATCH", "/assets/real-estates/"+itoa(id), mgr, patch)
 			if code != http.StatusConflict {
 				t.Errorf("%s: want 409 got %d: %s", patch, code, body)
@@ -592,10 +689,29 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 		    VALUES ('0x' || lpad(md5(random()::text), 40, '0'),
 		            'Tooken Tokenized guard #' || $1, 'TKN' || $1, 0) RETURNING id`, assetID)
 		mustExec(t, `UPDATE ass.real_estate SET token_id = $1, status_id = 3 WHERE id = $2`, tokenID, assetID)
-		mustExec(t, `INSERT INTO ass.real_estate_shares_config (real_estate_id, total_shares, price_per_share) VALUES ($1, 1000, 10)`, assetID)
+		mustExec(t, `INSERT INTO ass.real_estate_shares_config (real_estate_id, total_shares, price_per_share, max_shares_per_investor) VALUES ($1, 1000, 10, 50)`, assetID)
+
+		// The cap is the MaxBalance setting of the deployed token: changing it
+		// here alone would leave the database promising what the chain refuses.
+		for _, p := range []string{
+			`{"configuration":{"max_shares_per_investor":"60"}}`,
+			`{"configuration":{"max_shares_per_investor":""}}`,
+		} {
+			code, body := do("PATCH", "/assets/real-estates/"+itoa(assetID), mgr, p)
+			t.Logf("%s on tokenized -> %d %s", p, code, body)
+			if code != http.StatusConflict || !strings.Contains(body, "max_shares_per_investor") {
+				t.Errorf("%s: want 409 naming the cap, got %d: %s", p, code, body)
+			}
+		}
+		// Sending the stored value back is no change, and must not be refused.
+		code, body := do("PATCH", "/assets/real-estates/"+itoa(assetID), mgr, `{"configuration":{"max_shares_per_investor":"50"}}`)
+		t.Logf("same cap on tokenized -> %d %s", code, body)
+		if code != http.StatusOK {
+			t.Errorf("re-sending the stored cap: want 200 got %d: %s", code, body)
+		}
 
 		p := `{"configuration":{"total_shares":"500"}}`
-		code, body := do("PATCH", "/assets/real-estates/"+itoa(assetID), mgr, p)
+		code, body = do("PATCH", "/assets/real-estates/"+itoa(assetID), mgr, p)
 		t.Logf("shrink shares on tokenized -> %d %s", code, body)
 		if code != http.StatusConflict {
 			t.Errorf("want 409 got %d", code)
@@ -892,6 +1008,7 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 				"configuration.total_shares", "configuration.price_per_share",
 				"configuration.currency_code", "configuration.yield",
 				"configuration.payment_frequency", "configuration.payment_frequency_type_id",
+				"configuration.max_shares_per_investor",
 			} {
 				if !strings.Contains(body, field) {
 					t.Errorf("%s is required but not named: %s", field, body)
@@ -920,7 +1037,7 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 			complete := `{"description":"Now browsable","issuer_id":1,
 			  "media":[{"url":"https://x/h.jpg","is_cover":true}],
 			  "configuration":{"total_shares":"800","price_per_share":"125","currency_code":"EUR","yield":"3.9",
-			    "payment_frequency":4,"payment_frequency_type_id":1}}`
+			    "payment_frequency":4,"payment_frequency_type_id":1,"max_shares_per_investor":"40"}}`
 
 			code, body := do("PATCH", "/assets/real-estates/"+itoa(draftID), mgr, complete)
 			if code != http.StatusOK {
@@ -938,6 +1055,12 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 			code, body = do("POST", "/assets/real-estates/"+itoa(draftID)+"/publish", mgr, "")
 			if code != http.StatusOK {
 				t.Fatalf("publish: want 200 got %d: %s", code, body)
+			}
+			// The cap came in through a patch: it must reach the token as the
+			// stored asset holds it.
+			if deployer.gotReq.TotalShares != "800" || deployer.gotReq.MaxSharesPerInvestor != "40" {
+				t.Errorf("ceilings sent to the deployer = %q / %q; want 800 / 40",
+					deployer.gotReq.TotalShares, deployer.gotReq.MaxSharesPerInvestor)
 			}
 
 			var published map[string]any
