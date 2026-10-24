@@ -1516,6 +1516,7 @@ paths:
 
         For the POC, only ADMIN user can confirm payment for primary-market orders.
         This restriction is only for the proof of concept (POC) implementation.
+        Delivery of the asset will be handled automatically in backend after payment confirmation.
       tags:
         - Issuance
         - Payments
@@ -3225,6 +3226,9 @@ components:
         realEstateTitle:
           type: string
           description: Title of the real estate associated with the order
+        deliveryTxHash:
+          type: string
+          description: Transaction hash of the delivery associated with the order
 
     KycVerification:
       type: object

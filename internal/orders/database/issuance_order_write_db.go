@@ -10,6 +10,7 @@ import (
 	assetsDb "github.com/TookenOrg/tooken-services/internal/assets_managements/database"
 	"github.com/TookenOrg/tooken-services/internal/locks"
 	"github.com/TookenOrg/tooken-services/internal/orders/pricing"
+	usrDb "github.com/TookenOrg/tooken-services/internal/users/database"
 	"github.com/TookenOrg/tooken-services/internal/utils"
 	"github.com/lib/pq"
 	"github.com/shopspring/decimal"
@@ -82,7 +83,7 @@ func PlaceIssuanceOrder(ctx context.Context, in PlaceOrderDTO) (placed PlacedOrd
 		}
 
 		// 4 - KYC of in.UserID must be "verified"
-		kycVerified, err := checkKYCisVerified(ctx, tx, in.UserID)
+		kycVerified, err := usrDb.CheckKYCisVerified(ctx, tx, in.UserID)
 		if err != nil {
 			return err
 		}
@@ -220,25 +221,6 @@ func checkRealEstateOpen(a locks.LockedRealEstateDTO) error {
 	return nil
 }
 
-func checkKYCisVerified(ctx context.Context, tx *sql.Tx, userID int) (bool, error) {
-	const query = `
-SELECT kyc_status
-FROM usr.users
-WHERE id = $1 and kyc_status = 'verified' and (kyc_expires_at IS NULL OR kyc_expires_at > now())
-`
-
-	var kycStatus string
-	err := tx.QueryRowContext(ctx, query, userID).Scan(&kycStatus)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return false, nil
-		}
-		return false, fmt.Errorf("check KYC for user %d: %w", userID, err)
-	}
-
-	return true, nil
-}
-
 const idempotencyKeyConstraint = "issuance_orders_idempotency_uidx"
 
 // isUniqueViolation reports whether err is a Postgres unique violation
@@ -300,7 +282,7 @@ VALUES ($1, $2, $3, $4, $5)
 }
 
 // insertCreationHistory records how the order came to be (D23): NULL -> CREATED,
-// then CREATED -> AWAITING_PAYMENT, both by the investor.
+// then CREATED -> AWAITING_PAYMENT, both by the investor (userID).
 //
 // One statement, so both rows get the same created_at (now() of the
 // transaction). A timeline must therefore order by (created_at, id), not by
@@ -314,6 +296,34 @@ VALUES ($1, NULL, $2, $4),
 
 	if _, err := tx.ExecContext(ctx, query, orderID, statusCreated, statusAwaitingPayment, userID); err != nil {
 		return fmt.Errorf("insert creation history of order %d: %w", orderID, err)
+	}
+
+	return nil
+}
+
+func InsertIssuanceOrderHistory(ctx context.Context, tx *sql.Tx, orderID int64, fromStatusID, toStatusID int, userID *int, reason string) error {
+	const query = `
+INSERT INTO iss.issuance_order_status_history (order_id, from_status_id, to_status_id, actor_user_id, reason)
+VALUES ($1, $2, $3, $4, $5)
+`
+
+	if _, err := tx.ExecContext(ctx, query, orderID, fromStatusID, toStatusID, userID, reason); err != nil {
+		return fmt.Errorf("insert issuance order history for order %d: %w", orderID, err)
+	}
+
+	return nil
+}
+
+func UpdateIssuanceOrderStatus(ctx context.Context, tx *sql.Tx, orderID int64, statusID int) error {
+	const query = `
+UPDATE iss.issuance_orders
+SET status_id = $2,
+    updated_at = now()
+WHERE id = $1
+`
+
+	if _, err := tx.ExecContext(ctx, query, orderID, statusID); err != nil {
+		return fmt.Errorf("update issuance order status for order %d: %w", orderID, err)
 	}
 
 	return nil

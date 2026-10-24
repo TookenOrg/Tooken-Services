@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/TookenOrg/tooken-services/internal/api/server"
@@ -31,6 +32,9 @@ func (h *Handler) ConfirmIssuanceOrderPayment(gCtx *gin.Context, orderRef string
 		return
 	}
 	logger.LogInfo("✅ Successfully confirmed issuance order payment for orderRef: %s", orderRef)
+
+	logger.LogInfo("Starting async delivery for orderRef %s ....", orderRef)
+	go h.deliverySvc.Deliver(context.WithoutCancel(gCtx.Request.Context()), orderRef)
 
 	gCtx.JSON(http.StatusOK, server.CreateIssuanceOrderResponse{
 		Data:    &order,

@@ -2,6 +2,8 @@ package database
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -357,4 +359,23 @@ func RevokeKycVerification(ctx context.Context, verificationId int, reason strin
 		return kycVerification, fmt.Errorf("failed to revoke kyc verification: %w", err)
 	}
 	return kycVerification, nil
+}
+
+func CheckKYCisVerified(ctx context.Context, tx *sql.Tx, userID int) (bool, error) {
+	const query = `
+SELECT kyc_status
+FROM usr.users
+WHERE id = $1 and kyc_status = 'verified' and (kyc_expires_at IS NULL OR kyc_expires_at > now())
+`
+
+	var kycStatus string
+	err := tx.QueryRowContext(ctx, query, userID).Scan(&kycStatus)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, fmt.Errorf("check KYC for user %d: %w", userID, err)
+	}
+
+	return true, nil
 }
