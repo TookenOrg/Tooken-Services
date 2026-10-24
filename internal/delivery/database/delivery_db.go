@@ -92,12 +92,12 @@ func StartDelivery(ctx context.Context, orderRef string) (DeliveryTargetDTO, err
 		// 5 - A refusal found here happens before anything is signed status is set to DELIVERY_FAILED and return
 		if refusal != "" {
 			return moveOrder(ctx, tx, order,
-				int(server.IssuanceOrderStatusIdDeliveryFailed), refusal)
+				int(server.IssuanceOrderStatusIdDeliveryFailed), refusal, nil)
 		}
 
 		// 6 - Move the order to DELIVERY_IN_PROGRESS as the delivery is now starting.
 		if err := moveOrder(ctx, tx, order,
-			int(server.IssuanceOrderStatusIdDeliveryInProgress), "delivery started"); err != nil {
+			int(server.IssuanceOrderStatusIdDeliveryInProgress), "delivery started", nil); err != nil {
 			return err
 		}
 
@@ -123,21 +123,75 @@ func StartDelivery(ctx context.Context, orderRef string) (DeliveryTargetDTO, err
 }
 
 // moveOrder writes a status change and the history row that goes with it. The
-// actor is NULL: the delivery is automatic, no human asked for it.
+// actor is NULL: the delivery is automatic, no human asked for it. txHash is
+// the transaction the transition is about, nil when there is none.
 func moveOrder(ctx context.Context, tx *sql.Tx, order locks.LockedIssuanceOrderDTO,
-	toStatusID int, reason string) error {
+	toStatusID int, reason string, txHash *string) error {
 
 	if err := ordrDb.UpdateIssuanceOrderStatus(ctx, tx, order.Id, toStatusID); err != nil {
 		return err
 	}
 
-	return ordrDb.InsertIssuanceOrderHistory(ctx, tx, order.Id, order.StatusId, toStatusID, nil, reason)
+	return ordrDb.InsertIssuanceOrderHistory(ctx, tx, order.Id, order.StatusId, toStatusID, nil, reason, txHash)
 }
 
-// FailDelivery marks the delivery as failed for a given order reference.
-// It records the reason for failure and optionally the transaction hash.
-func FailDelivery(ctx context.Context, orderRef, reason string, txHash *string) error {
-	return errors.New("not implemented")
+// FailDelivery records a delivery that failed after transaction A, once the
+// order was already DELIVERY_IN_PROGRESS and the chain had the last word. It
+// opens its own transaction and takes its own lock.
+//
+// txHash is the transaction to put on the timeline, nil when nothing was ever
+// signed. reachedNetwork says whether that transaction actually left for the
+// node: when it did not (§4.4), iss.issuance_orders.delivery_tx_hash is
+// cleared, so the column keeps answering one question only — what was
+// broadcast — and nothing later waits on a transaction the chain never saw.
+//
+// An order that is no longer DELIVERY_IN_PROGRESS yields
+// ErrOrderNotDeliverable and nothing is written: someone else settled it.
+func FailDelivery(ctx context.Context, orderRef, reason string, txHash *string, reachedNetwork bool) error {
+
+	return utils.InTransaction(ctx, func(tx *sql.Tx) error {
+		if err := locks.LockIssuanceOrder(ctx, tx, orderRef); err != nil {
+			return err
+		}
+
+		order, err := locks.ReadLockedIssuanceOrder(ctx, tx, orderRef)
+		if err != nil {
+			return err
+		}
+
+		if order.StatusId != int(server.IssuanceOrderStatusIdDeliveryInProgress) {
+			return ErrOrderNotDeliverable
+		}
+
+		if err := moveOrder(ctx, tx, order,
+			int(server.IssuanceOrderStatusIdDeliveryFailed), reason, txHash); err != nil {
+			return err
+		}
+
+		if !reachedNetwork {
+			return clearDeliveryTxHash(ctx, tx, order.Id)
+		}
+
+		return nil
+	})
+}
+
+// clearDeliveryTxHash takes back the hash recorded before sending, for the one
+// case where the send was refused and the node never saw the transaction. The
+// history row keeps it, so the attempt is not lost.
+func clearDeliveryTxHash(ctx context.Context, tx *sql.Tx, orderID int64) error {
+	const query = `
+UPDATE iss.issuance_orders
+SET delivery_tx_hash = NULL,
+    updated_at = now()
+WHERE id = $1
+`
+
+	if _, err := tx.ExecContext(ctx, query, orderID); err != nil {
+		return fmt.Errorf("clear delivery tx hash of order %d: %w", orderID, err)
+	}
+
+	return nil
 }
 
 // readWalletAndTokenAddressForMint reads, in one statement, where the tokens

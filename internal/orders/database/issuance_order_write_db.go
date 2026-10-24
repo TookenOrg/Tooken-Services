@@ -301,13 +301,16 @@ VALUES ($1, NULL, $2, $4),
 	return nil
 }
 
-func InsertIssuanceOrderHistory(ctx context.Context, tx *sql.Tx, orderID int64, fromStatusID, toStatusID int, userID *int, reason string) error {
+// InsertIssuanceOrderHistory appends one transition to the timeline of an
+// order. userID is NULL when the platform acted on its own, and txHash carries
+// the transaction the transition is about, when there is one (D16).
+func InsertIssuanceOrderHistory(ctx context.Context, tx *sql.Tx, orderID int64, fromStatusID, toStatusID int, userID *int, reason string, txHash *string) error {
 	const query = `
-INSERT INTO iss.issuance_order_status_history (order_id, from_status_id, to_status_id, actor_user_id, reason)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO iss.issuance_order_status_history (order_id, from_status_id, to_status_id, actor_user_id, reason, tx_hash)
+VALUES ($1, $2, $3, $4, $5, $6)
 `
 
-	if _, err := tx.ExecContext(ctx, query, orderID, fromStatusID, toStatusID, userID, reason); err != nil {
+	if _, err := tx.ExecContext(ctx, query, orderID, fromStatusID, toStatusID, userID, reason, txHash); err != nil {
 		return fmt.Errorf("insert issuance order history for order %d: %w", orderID, err)
 	}
 
