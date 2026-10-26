@@ -1,6 +1,6 @@
 //go:build integration
 
-// Integration tests of the T-REX caps (M3-6, lot B): the per-investor cap enforced by
+// Integration tests of the T-REX caps: the per-investor cap enforced by
 // MaxBalanceModule and the supply cap enforced by SupplyLimitModule.
 //
 // Tokens are created through CreateTokenWithSalt, against a node and a private
@@ -64,8 +64,8 @@ func TestCapsIntegration(t *testing.T) {
 	f := env.Fixture
 	svc := NewService()
 
-	// What an environment installed before lot B looks like to CreateTokenWithSalt: a
-	// factory and a claim issuer, and none of the capping modules.
+	// What an environment installed before the capping modules existed looks like to
+	// CreateTokenWithSalt: a factory and a claim issuer, and none of the capping modules.
 	env.SetContractRole(t, chainglobals.TrexFactoryName, f.FactoryAddr)
 
 	cappedModules := []string{chainglobals.MaxBalanceModuleName, chainglobals.SupplyLimitModuleName}
@@ -135,9 +135,9 @@ func TestCapsIntegration(t *testing.T) {
 	tokenA := createToken(t, "Tooken Caps A", "TKCA", "caps-a", "100", "10")
 	mcA := common.HexToAddress(*tokenA.ModularComplianceAddr)
 
-	// ---- B-h9: the first token brings the modules in, the next ones reuse them ----
+	// ---- the first token brings the modules in, the next ones reuse them ----------
 
-	t.Run("B-h9 the first token deploys, initializes and registers each capping module", func(t *testing.T) {
+	t.Run("the first token deploys, initializes and registers each capping module", func(t *testing.T) {
 		for _, name := range cappedModules {
 			if n := roleRows(t, name); n != 1 {
 				t.Fatalf("%s: want one contract_role row, found %d", name, n)
@@ -155,7 +155,7 @@ func TestCapsIntegration(t *testing.T) {
 			t.Fatalf("TRANSFER_RESTRICTION_MODULE: want one INITIALIZE_ row in eth_transaction, found %d", n)
 		}
 
-		// B8: initialized by the platform, so nobody else can claim the module.
+		// Initialized by the platform, so nobody else can claim the module.
 		trm, err := contracts.NewTransferRestrictModule(moduleAddr(t, chainglobals.TransferRestrictionModuleName), f.Client)
 		failOnErr(t, err, "bind TransferRestrictModule")
 		mb, err := contracts.NewMaxBalanceModule(moduleAddr(t, chainglobals.MaxBalanceModuleName), f.Client)
@@ -180,7 +180,7 @@ func TestCapsIntegration(t *testing.T) {
 	tokenB := createToken(t, "Tooken Caps B", "TKCB", "caps-b", "20", "15")
 	mcB := common.HexToAddress(*tokenB.ModularComplianceAddr)
 
-	t.Run("B-h9 a second token reuses the registered modules", func(t *testing.T) {
+	t.Run("a second token reuses the registered modules", func(t *testing.T) {
 		for _, name := range cappedModules {
 			if n := roleRows(t, name); n != 1 {
 				t.Fatalf("%s: want still one contract_role row, found %d", name, n)
@@ -196,7 +196,7 @@ func TestCapsIntegration(t *testing.T) {
 		}
 	})
 
-	t.Run("B-h9 a database that cannot answer deploys nothing", func(t *testing.T) {
+	t.Run("a database that cannot answer deploys nothing", func(t *testing.T) {
 		broken, err := sql.Open("postgres", "postgres://nobody@127.0.0.1:1/none?sslmode=disable")
 		failOnErr(t, err, "open")
 		broken.Close()
@@ -219,7 +219,7 @@ func TestCapsIntegration(t *testing.T) {
 		}
 	})
 
-	t.Run("B7 a second registration of a module is recognised as taken", func(t *testing.T) {
+	t.Run("a second registration of a module is recognised as taken", func(t *testing.T) {
 		// The constraint name lives in two places — the schema and the Go constant —
 		// and only the real schema can tell whether they still agree.
 		_, err := database.InsertContractRole(ctx, probeTxHash("caps-race"), common.Address{1}.Hex(), chainglobals.MaxBalanceModuleName)
@@ -231,7 +231,7 @@ func TestCapsIntegration(t *testing.T) {
 		}
 	})
 
-	// ---- B-h1: the caps are set on-chain, in base units ---------------------------
+	// ---- the caps are set on-chain, in base units ---------------------------------
 
 	investor1, identity1 := newInvestor(t)
 	mb, err := contracts.NewMaxBalanceModule(moduleAddr(t, chainglobals.MaxBalanceModuleName), f.Client)
@@ -239,7 +239,7 @@ func TestCapsIntegration(t *testing.T) {
 	sl, err := contracts.NewSupplyLimitModule(moduleAddr(t, chainglobals.SupplyLimitModuleName), f.Client)
 	failOnErr(t, err, "bind SupplyLimitModule")
 
-	t.Run("B-h1 the caps read back on-chain in base units", func(t *testing.T) {
+	t.Run("the caps read back on-chain in base units", func(t *testing.T) {
 		for _, c := range []struct {
 			mc   common.Address
 			want *big.Int
@@ -271,10 +271,10 @@ func TestCapsIntegration(t *testing.T) {
 		}
 	})
 
-	// ---- B-h2, B-h3: the per-investor cap -----------------------------------------
+	// ---- the per-investor cap -----------------------------------------------------
 
-	t.Run("B-h2 a mint up to the per-investor cap succeeds", func(t *testing.T) {
-		if _, err := svc.Mint(ctx, tokenA.Address, investor1.Hex(), 10); err != nil {
+	t.Run("a mint up to the per-investor cap succeeds", func(t *testing.T) {
+		if _, err := mintSharesForTest(ctx, svc, tokenA.Address, investor1.Hex(), 10); err != nil {
 			t.Fatalf("minting exactly the cap must succeed: %v", err)
 		}
 		if got := balanceOf(t, tokenA.Address, investor1); got.Cmp(shares(10)) != 0 {
@@ -282,8 +282,8 @@ func TestCapsIntegration(t *testing.T) {
 		}
 	})
 
-	t.Run("B-h3 one share above the cap reverts and changes nothing", func(t *testing.T) {
-		_, err := svc.Mint(ctx, tokenA.Address, investor1.Hex(), 1)
+	t.Run("one share above the cap reverts and changes nothing", func(t *testing.T) {
+		_, err := mintSharesForTest(ctx, svc, tokenA.Address, investor1.Hex(), 1)
 		if err == nil {
 			t.Fatal("a mint above the per-investor cap must be refused")
 		}
@@ -300,11 +300,11 @@ func TestCapsIntegration(t *testing.T) {
 		}
 	})
 
-	// ---- B-h4: the cap belongs to the identity, not to the wallet -----------------
+	// ---- the cap belongs to the identity, not to the wallet -----------------------
 
 	investor2, _ := newInvestor(t)
 
-	t.Run("B-h4 a second wallet of the same identity shares its cap", func(t *testing.T) {
+	t.Run("a second wallet of the same identity shares its cap", func(t *testing.T) {
 		key, err := crypto.GenerateKey()
 		failOnErr(t, err, "generate key")
 		secondWallet := crypto.PubkeyToAddress(key.PublicKey)
@@ -312,7 +312,7 @@ func TestCapsIntegration(t *testing.T) {
 			t.Fatalf("registering a second wallet for the same identity: %v", err)
 		}
 
-		if _, err := svc.Mint(ctx, tokenA.Address, secondWallet.Hex(), 1); err == nil {
+		if _, err := mintSharesForTest(ctx, svc, tokenA.Address, secondWallet.Hex(), 1); err == nil {
 			t.Fatal("the identity already holds its cap: its second wallet must be refused")
 		}
 		if got := balanceOf(t, tokenA.Address, secondWallet); got.Sign() != 0 {
@@ -321,16 +321,16 @@ func TestCapsIntegration(t *testing.T) {
 
 		// The control: on the same token, another identity is still free to buy.
 		// Without it, a token refusing everybody would pass the assertion above.
-		if _, err := svc.Mint(ctx, tokenA.Address, investor2.Hex(), 1); err != nil {
+		if _, err := mintSharesForTest(ctx, svc, tokenA.Address, investor2.Hex(), 1); err != nil {
 			t.Fatalf("another identity must not be bound by the first one's cap: %v", err)
 		}
 	})
 
-	// ---- B-h5: one cap per token ---------------------------------------------------
+	// ---- one cap per token ---------------------------------------------------------
 
-	t.Run("B-h5 the same investor has an independent cap on another token", func(t *testing.T) {
+	t.Run("the same investor has an independent cap on another token", func(t *testing.T) {
 		// Full on token A, yet token B lets them buy up to B's own cap.
-		if _, err := svc.Mint(ctx, tokenB.Address, investor1.Hex(), 15); err != nil {
+		if _, err := mintSharesForTest(ctx, svc, tokenB.Address, investor1.Hex(), 15); err != nil {
 			t.Fatalf("token B's cap must not be consumed by token A: %v", err)
 		}
 		if got := balanceOf(t, tokenB.Address, investor1); got.Cmp(shares(15)) != 0 {
@@ -338,11 +338,11 @@ func TestCapsIntegration(t *testing.T) {
 		}
 	})
 
-	// ---- B-h6: the supply cap ------------------------------------------------------
+	// ---- the supply cap ------------------------------------------------------------
 
-	t.Run("B-h6 mints add up to the total, and one share more reverts", func(t *testing.T) {
+	t.Run("mints add up to the total, and one share more reverts", func(t *testing.T) {
 		// 15 already minted on token B: investor2 takes the last 5.
-		if _, err := svc.Mint(ctx, tokenB.Address, investor2.Hex(), 5); err != nil {
+		if _, err := mintSharesForTest(ctx, svc, tokenB.Address, investor2.Hex(), 5); err != nil {
 			t.Fatalf("minting up to the total supply must succeed: %v", err)
 		}
 
@@ -358,7 +358,7 @@ func TestCapsIntegration(t *testing.T) {
 			t.Fatal("SupplyLimitModule must refuse a mint beyond the total supply")
 		}
 
-		if _, err := svc.Mint(ctx, tokenB.Address, investor2.Hex(), 1); err == nil {
+		if _, err := mintSharesForTest(ctx, svc, tokenB.Address, investor2.Hex(), 1); err == nil {
 			t.Fatal("a mint beyond the total supply must be refused")
 		}
 		token, err := contracts.NewToken(common.HexToAddress(tokenB.Address), f.Client)
@@ -370,7 +370,7 @@ func TestCapsIntegration(t *testing.T) {
 		}
 	})
 
-	// ---- B-h7, B-h8: what production must never build ------------------------------
+	// ---- what production must never build ------------------------------------------
 
 	sharedIRS := moduleAddr(t, chainglobals.SharedIdentityRegistryStorageName)
 	mbAddr := moduleAddr(t, chainglobals.MaxBalanceModuleName)
@@ -388,7 +388,7 @@ func TestCapsIntegration(t *testing.T) {
 		return sendAndWait(ctx, f.Client, tx, err)
 	}
 
-	t.Run("B-h7 the modules out of order make the deployment revert", func(t *testing.T) {
+	t.Run("the modules out of order make the deployment revert", func(t *testing.T) {
 		// The factory sends settings[0], setMaxBalance, to modules[0]: here the
 		// transfer restriction module, which has no such function and no fallback.
 		err := deployRaw("caps-b1", []common.Address{trmAddr, mbAddr, slAddr}, [][]byte{setMaxBalance, setSupplyLimit})
@@ -406,7 +406,7 @@ func TestCapsIntegration(t *testing.T) {
 		}
 	})
 
-	t.Run("B-h8 a capping module left without its setting blocks every mint", func(t *testing.T) {
+	t.Run("a capping module left without its setting blocks every mint", func(t *testing.T) {
 		mintOne := func(t *testing.T, suite *deployedSuite) error {
 			t.Helper()
 			tx, err := suite.Token.Mint(f.Auth, investor2, shares(1))
@@ -438,9 +438,9 @@ func TestCapsIntegration(t *testing.T) {
 		}
 	})
 
-	// ---- B-h10: the setters only answer the token's compliance ----------------------
+	// ---- the setters only answer the token's compliance -----------------------------
 
-	t.Run("B-h10 the platform key cannot set a cap directly", func(t *testing.T) {
+	t.Run("the platform key cannot set a cap directly", func(t *testing.T) {
 		mbTx, err := contracts.NewMaxBalanceModuleTransactor(mbAddr, f.Client)
 		failOnErr(t, err, "bind MaxBalanceModule transactor")
 		slTx, err := contracts.NewSupplyLimitModuleTransactor(slAddr, f.Client)
