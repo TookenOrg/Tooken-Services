@@ -186,7 +186,7 @@ func TestGetWalletByUserId(t *testing.T) {
 		cleanProbeRows(t, db)
 	})
 
-	// D7 allows only one active wallet per investor, so a deactivated one must
+	// Only one active wallet per investor is allowed, so a deactivated one must
 	// not be mistaken for a live one. Without this filter a retired wallet would
 	// keep an investor from ever getting a new identity.
 	t.Run("a deactivated wallet is invisible", func(t *testing.T) {

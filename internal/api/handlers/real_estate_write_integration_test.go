@@ -389,9 +389,9 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 		}
 	})
 
-	// The per-investor cap (M3-6): optional on a draft, an exact whole number
-	// between 1 and total_shares when given. Every refusal is a 400 decided
-	// before the database: constraint I10 would otherwise surface as a 500.
+	// The per-investor cap: optional on a draft, an exact whole number between
+	// 1 and total_shares when given. Every refusal is a 400 decided before the
+	// database: constraint I10 would otherwise surface as a 500.
 	t.Run("per-investor cap", func(t *testing.T) {
 		title := "Cap case " + itoa(id)
 		withCap := func(value string) string {
@@ -1136,7 +1136,7 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 	})
 
 	// Opening the fundraising is the only way into the one status that will
-	// accept orders (D34). Every case starts from an asset that went through the
+	// accept orders. Every case starts from an asset that went through the
 	// real publication path, so the token it carries is bound the way production
 	// binds it; only the states the API cannot reach yet (funded, closed, a
 	// suspended issuer) are forced in SQL.

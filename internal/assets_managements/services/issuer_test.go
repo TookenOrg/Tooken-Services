@@ -20,7 +20,7 @@ func validIssuerRequest() server.IssuerWriteRequest {
 
 // Every value a client can get wrong has to come back named. An issuer stored
 // with a jurisdiction nobody typed is exactly the class of plausible-and-false
-// record the currency default produced (§11.20).
+// record the currency default produced.
 func TestToIssuerWriteDTORejectsInvalidPayloads(t *testing.T) {
 	tests := []struct {
 		name string
@@ -206,7 +206,7 @@ func TestCheckIssuerStatusChange(t *testing.T) {
 			in:    registered(database.IssuerStatusDissolved),
 		},
 		{
-			// The freeze trap of §11.20: a legacy row stored without a
+			// The freeze trap: a legacy row stored without a
 			// registration number must stay editable, or it could never be
 			// corrected — not even its name.
 			name:  "patching a legacy active row without a registration number",
@@ -390,7 +390,7 @@ func TestTranslateIssuerWriteError(t *testing.T) {
 
 // A primary key collision is the sequence lagging behind the data, never
 // something the caller sent: answering 409 sent a manager hunting for a
-// duplicate value in a payload that never carried one (§11.17).
+// duplicate value in a payload that never carried one.
 func TestPrimaryKeyCollisionIsNotAConflict(t *testing.T) {
 	err := translateIssuerWriteError(&pq.Error{Code: "23505", Constraint: "issuer_pkey"})
 
@@ -526,7 +526,7 @@ func TestIssuerBoundaryValuesAreAccepted(t *testing.T) {
 }
 
 // A row whose registration number was stored as an empty string rather than a
-// NULL must stay editable — the freeze trap of §11.24, reached the other way.
+// NULL must stay editable — the freeze trap, reached the other way.
 //
 // The two sides of the comparison do not go through the same normalisation: the
 // stored row is mapped verbatim by storedIssuerWriteDTO, while the merged one

@@ -13,8 +13,8 @@ import (
 // shares of.
 //
 // The table was created by migration 000007 but stayed reachable only as a
-// sub-object of an asset. Since publication demands an issuer_id (§11.18), the
-// only way to fill it was a direct SQL INSERT: this file closes that gap.
+// sub-object of an asset. Since publication demands an issuer_id, the only way
+// to fill it was a direct SQL INSERT: this file closes that gap.
 
 // The four statuses seeded by migration 000007. They are hardcoded here for the
 // same reason the asset statuses are: the flow is decided by the code, and a
@@ -159,8 +159,7 @@ func GetIssuerStatus(ctx context.Context, id int) (int, error) {
 // the detail queries filter on (real_estate_db.go). Counting is_public here
 // would block an issuer over assets nobody can see.
 //
-// That divergence is inherited debt, not a decision taken here — see
-// PROGRESS.md §11.23.
+// That divergence is inherited debt, not a decision taken here.
 func GetIssuerGuardState(ctx context.Context, id int) (IssuerGuardStateDTO, error) {
 	const query = `
 SELECT i.id,

@@ -60,7 +60,7 @@ func TestGenerateIssuanceOrderReference(t *testing.T) {
 	})
 }
 
-// TestReservationTTL covers the fallbacks around ORDER_RESERVATION_TTL (U1).
+// TestReservationTTL covers the fallbacks around ORDER_RESERVATION_TTL.
 func TestReservationTTL(t *testing.T) {
 	tests := []struct {
 		name  string

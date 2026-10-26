@@ -419,7 +419,7 @@ func TestPlaceIssuanceOrder(t *testing.T) {
 			wantLines int
 		}{
 			{"no entry fee (NULL rate)", "100", nil, 3, "0.00", 0},
-			{"zero entry fee writes no line (U4)", "100", strPtr("0"), 3, "0.00", 0},
+			{"zero entry fee writes no line", "100", strPtr("0"), 3, "0.00", 0},
 			{"fee rounding to zero writes no line", "0.01", strPtr("2"), 1, "0.00", 0},
 			{"fee on the rounded gross (0.195 -> 0.20 -> 0.01)", "0.195", strPtr("2.5"), 1, "0.01", 1},
 			{"100 % fee", "10", strPtr("100"), 1, "10.00", 1},
@@ -530,7 +530,7 @@ func TestPlaceIssuanceOrder(t *testing.T) {
 			})
 		}
 
-		t.Run("same key, other quantity is refused (U5, 422)", func(t *testing.T) {
+		t.Run("same key, other quantity is refused (422)", func(t *testing.T) {
 			asset := newAsset(t, db, fundraising())
 			in := placeInput(newInvestor(t, db, kycVerified), asset, 3)
 			if _, err := PlaceIssuanceOrder(ctx, in); err != nil {
@@ -645,7 +645,7 @@ func TestPlaceIssuanceOrder(t *testing.T) {
 		})
 	})
 
-	t.Run("asset visibility and status (U7)", func(t *testing.T) {
+	t.Run("asset visibility and status", func(t *testing.T) {
 		alice := newInvestor(t, db, kycVerified)
 		cases := []struct {
 			name  string
@@ -679,7 +679,7 @@ func TestPlaceIssuanceOrder(t *testing.T) {
 		})
 	})
 
-	t.Run("KYC (U7, 403)", func(t *testing.T) {
+	t.Run("KYC (403)", func(t *testing.T) {
 		asset := newAsset(t, db, fundraising())
 		cases := []struct {
 			name string
@@ -774,7 +774,7 @@ func TestPlaceIssuanceOrder(t *testing.T) {
 		})
 	})
 
-	t.Run("per-investor cap (U8)", func(t *testing.T) {
+	t.Run("per-investor cap", func(t *testing.T) {
 		type existing struct {
 			mine     bool
 			quantity int64
@@ -829,7 +829,7 @@ func TestPlaceIssuanceOrder(t *testing.T) {
 	})
 
 	t.Run("concurrency", func(t *testing.T) {
-		// Case 17 (P7), repeated: one test that passes once proves nothing.
+		// Repeated on purpose: one test that passes once proves nothing.
 		t.Run("two investors race for the last 5 shares", func(t *testing.T) {
 			for i := 0; i < 20; i++ {
 				asset := newAsset(t, db, fundraising())
@@ -895,7 +895,7 @@ func TestPlaceIssuanceOrder(t *testing.T) {
 			}
 		})
 
-		// Case 21: the fundraising closes while the order waits.
+		// The fundraising closes while the order waits.
 		t.Run("a fundraising closed while waiting refuses the order", func(t *testing.T) {
 			asset := newAsset(t, db, fundraising())
 			manager, err := db.Begin()

@@ -9,7 +9,7 @@ type PricedOrder struct {
 	GrossAmount decimal.Decimal // round(quantity × unitPrice, 2)
 	FeeAmount   decimal.Decimal // sum of Fees[i].Amount; zero when there is no fee
 	AmountDue   decimal.Decimal // GrossAmount + FeeAmount
-	Fees        []PricedFee     // empty when there is no fee (U4), never nil
+	Fees        []PricedFee     // empty when there is no fee, never nil
 }
 
 // PricedFee is one line of iss.issuance_order_fees.

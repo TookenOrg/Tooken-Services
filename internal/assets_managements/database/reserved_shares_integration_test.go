@@ -60,7 +60,7 @@ func TestReservedSharesHaveOneDefinition(t *testing.T) {
 		{1, 2, "10 minutes", true},    // AWAITING_PAYMENT, reservation running
 		{1000, 2, "-1 second", false}, // AWAITING_PAYMENT, reservation lapsed
 		{20, 4, "-1 hour", true},      // PAYMENT_CONFIRMED: paid, the date no longer matters
-		{300, 5, "-1 hour", true},     // CLOSED (U8)
+		{300, 5, "-1 hour", true},     // CLOSED
 		{40, 6, "-1 hour", false},     // CANCELLED
 		{50, 7, "-1 hour", false},     // EXPIRED
 	}

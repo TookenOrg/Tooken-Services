@@ -248,7 +248,7 @@ func TestInitSequenceIntegration(t *testing.T) {
 			TokenName: "Tooken Init Sequence",
 			Symbol:    "TKIS",
 			NbDecimal: 18,
-			// The caps are part of every token since M3-6.
+			// The caps are part of every token.
 			TotalShares:          "1000",
 			MaxSharesPerInvestor: "100",
 		})
@@ -272,7 +272,7 @@ func TestInitSequenceIntegration(t *testing.T) {
 			TokenName: "Tooken Init Sequence",
 			Symbol:    "TKIS",
 			NbDecimal: 18,
-			// The caps are part of every token since M3-6.
+			// The caps are part of every token.
 			TotalShares:          "1000",
 			MaxSharesPerInvestor: "100",
 		})
