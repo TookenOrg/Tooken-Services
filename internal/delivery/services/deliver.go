@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 
 	"github.com/TookenOrg/tooken-services/internal/delivery/database"
@@ -81,6 +82,43 @@ func (s *Service) Deliver(ctx context.Context, orderRef string) {
 	}
 
 	logger.LogInfo("✅ Order %s delivered and closed, %d shares minted to %s", orderRef, target.Shares, target.Wallet)
+
+	s.markFundedIfSoldOut(ctx, target)
+}
+
+// markFundedIfSoldOut runs after a delivery is closed: when every share of the
+// asset exists on chain, the asset is funded. It never fails the delivery, the
+// shares are already in the wallet: every problem is logged and the asset
+// stays as it is.
+func (s *Service) markFundedIfSoldOut(ctx context.Context, target database.DeliveryTargetDTO) {
+
+	cmp, err := s.minter.CompareTotalSupply(ctx, target.TokenAddress, target.TotalShares)
+	if err != nil {
+		_ = logger.LogError("Failed to read the total supply of token %s, real estate %d is left as it is: %s",
+			target.TokenAddress, target.RealEstateID, err.Error())
+		return
+	}
+
+	switch {
+	case cmp < 0:
+		return
+	case cmp > 0:
+		// More shares than the asset offers: not a sale to celebrate.
+		_ = logger.LogError("Token %s supply exceeds the %d shares of real estate %d: not marking it funded",
+			target.TokenAddress, target.TotalShares, target.RealEstateID)
+		return
+	}
+
+	if err := s.markFunded(ctx, target.RealEstateID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			logger.LogInfo("🆗 Real estate %d is not fundraising any more", target.RealEstateID)
+			return
+		}
+		_ = logger.LogError("Failed to mark real estate %d as funded: %s", target.RealEstateID, err.Error())
+		return
+	}
+
+	logger.LogInfo("✅ Real estate %d is funded: all %d shares are on chain", target.RealEstateID, target.TotalShares)
 }
 
 // reportMintNotSent decides what to do when the mint never reached the network.

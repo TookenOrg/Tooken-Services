@@ -161,6 +161,7 @@ type seededOrder struct {
 	OrderID      int64
 	OrderRef     string
 	UserID       int
+	AssetID      int
 	Wallet       string
 	TokenAddress string
 }
@@ -242,6 +243,12 @@ func (e *deliveryEnv) seed(t *testing.T, f orderFixture) seededOrder {
 		t.Fatalf("insert real estate: %v", err)
 	}
 
+	if _, err := e.DB.Exec(`
+		INSERT INTO ass.real_estate_shares_config (real_estate_id, total_shares, price_per_share)
+		VALUES ($1, 1500, 204.00)`, assetID); err != nil {
+		t.Fatalf("insert shares config: %v", err)
+	}
+
 	orderRef := fmt.Sprintf("ISS-%d", unique)
 
 	// issuance_orders_delivered_hash_ck: statuses 5, 10, 11 and 12 all claim
@@ -269,6 +276,7 @@ func (e *deliveryEnv) seed(t *testing.T, f orderFixture) seededOrder {
 		OrderID:      orderID,
 		OrderRef:     orderRef,
 		UserID:       userID,
+		AssetID:      assetID,
 		Wallet:       wallet,
 		TokenAddress: tokenAddress,
 	}

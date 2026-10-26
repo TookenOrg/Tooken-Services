@@ -36,6 +36,10 @@ const StatusPublished = 3
 // StatusFundraising is the status of an asset that is currently raising funds from investors.
 const StatusFundraising = 4
 
+// StatusFunded is the status of an asset whose shares are all issued: the
+// primary market is over and no order is accepted any more.
+const StatusFunded = 5
+
 // StatusCancelled is the status a soft-deleted asset carries. Constraint
 // real_estate_deleted_status_ck (migration 000011) forbids any other.
 const StatusCancelled = 7
@@ -441,6 +445,37 @@ WHERE id = $1
 `
 
 	res, err := globals.DB.ExecContext(ctx, query, realEstateID, StatusFundraising, StatusPublished)
+	if err != nil {
+		return err
+	}
+
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return sql.ErrNoRows
+	}
+
+	return nil
+}
+
+// MarkRealEstateFunded moves a fundraising asset to funded.
+//
+// Same contract as OpenFundraisingRealEstate: the status condition lives in the
+// WHERE clause, so a second call, or a call on an asset in any other state,
+// writes nothing and returns sql.ErrNoRows.
+func MarkRealEstateFunded(ctx context.Context, realEstateID int) error {
+	const query = `
+UPDATE ass.real_estate
+SET status_id = $2,
+    updated_at = now()
+WHERE id = $1
+  AND deleted_at IS NULL
+  AND status_id = $3
+`
+
+	res, err := globals.DB.ExecContext(ctx, query, realEstateID, StatusFunded, StatusFundraising)
 	if err != nil {
 		return err
 	}

@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"testing"
 
@@ -24,6 +25,11 @@ type fakeMinter struct {
 	receiptErr error
 
 	panicOnSend bool
+
+	supplyCmp   int
+	supplyErr   error
+	supplyCalls int
+	supplyShare int64
 }
 
 // SendMintShares always calls record, like the real one: the hash reaches the
@@ -44,6 +50,12 @@ func (f *fakeMinter) SendMintShares(_ context.Context, _, _ string, _ int,
 	}
 
 	return f.txHash, f.sent, f.sendErr
+}
+
+func (f *fakeMinter) CompareTotalSupply(_ context.Context, _ string, shares int64) (int, error) {
+	f.supplyCalls++
+	f.supplyShare = shares
+	return f.supplyCmp, f.supplyErr
 }
 
 func (f *fakeMinter) MintReceipt(_ context.Context, _, _ string, _ int) (bool, bool, error) {
@@ -68,6 +80,11 @@ type deliveryProbe struct {
 	failReached    bool
 	completeCalls  int
 	completeTxHash string
+	completeErr    error
+
+	fundedCalls int
+	fundedID    int
+	fundedErr   error
 }
 
 func (p *deliveryProbe) start(context.Context, string) (database.DeliveryTargetDTO, error) {
@@ -90,7 +107,13 @@ func (p *deliveryProbe) fail(_ context.Context, _, _ string, txHash *string, rea
 func (p *deliveryProbe) complete(_ context.Context, _, txHash string) error {
 	p.completeCalls++
 	p.completeTxHash = txHash
-	return nil
+	return p.completeErr
+}
+
+func (p *deliveryProbe) markFunded(_ context.Context, realEstateID int) error {
+	p.fundedCalls++
+	p.fundedID = realEstateID
+	return p.fundedErr
 }
 
 // run wires the probe into a Service and delivers one order.
@@ -102,6 +125,7 @@ func (p *deliveryProbe) run(minter TokenMinter, orderRef string) {
 	svc.recordTxHash = p.record
 	svc.failDelivery = p.fail
 	svc.completeDelivery = p.complete
+	svc.markFunded = p.markFunded
 
 	svc.Deliver(context.Background(), orderRef)
 }
@@ -113,6 +137,8 @@ func aTarget() database.DeliveryTargetDTO {
 		Shares:       10,
 		Wallet:       "0x1111111111111111111111111111111111111111",
 		TokenAddress: "0x2222222222222222222222222222222222222222",
+		RealEstateID: 12,
+		TotalShares:  100,
 	}
 }
 
@@ -302,5 +328,92 @@ func TestDeliverFailsAMinedMintThatCreatedNothing(t *testing.T) {
 	}
 	if probe.completeCalls != 0 {
 		t.Fatal("an order whose mint created nothing must not be closed")
+	}
+}
+
+// Once an order is closed, the asset is funded exactly when the token holds
+// every share the asset offers, and never otherwise. Whatever happens on the
+// way, the order that was just closed stays closed.
+func TestDeliverMarksTheAssetFundedOnlyWhenSoldOut(t *testing.T) {
+	cases := []struct {
+		name       string
+		supplyCmp  int
+		supplyErr  error
+		fundedErr  error
+		wantFunded int
+	}{
+		{"supply below the total", -1, nil, nil, 0},
+		{"supply equals the total", 0, nil, nil, 1},
+		{"supply above the total", 1, nil, nil, 0},
+		{"the supply cannot be read", 0, errors.New("node is down"), nil, 0},
+		{"the asset is not fundraising any more", 0, nil, sql.ErrNoRows, 1},
+		{"the database refuses the update", 0, nil, errors.New("connection refused"), 1},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			minter := &fakeMinter{txHash: "0xabc", sent: true, found: true, succeeded: true,
+				supplyCmp: tc.supplyCmp, supplyErr: tc.supplyErr}
+			probe := &deliveryProbe{t: t, target: aTarget(), fundedErr: tc.fundedErr}
+
+			probe.run(minter, "ISS-TEST-0010")
+
+			if probe.fundedCalls != tc.wantFunded {
+				t.Fatalf("markFunded was called %d time(s), want %d", probe.fundedCalls, tc.wantFunded)
+			}
+			if tc.wantFunded == 1 && probe.fundedID != 12 {
+				t.Fatalf("markFunded got real estate %d, want 12", probe.fundedID)
+			}
+			if probe.failCalls != 0 {
+				t.Fatal("a delivery that was closed must never be failed afterwards")
+			}
+			if minter.supplyShare != 100 {
+				t.Fatalf("the supply was compared to %d shares, want the 100 of the asset", minter.supplyShare)
+			}
+		})
+	}
+}
+
+// The supply is only worth reading when this very delivery has just closed its
+// order: before that, the shares may not exist, and after a failure someone
+// else settled the order.
+func TestDeliverDoesNotLookAtTheSupplyUnlessTheOrderWasClosed(t *testing.T) {
+	cases := []struct {
+		name   string
+		minter *fakeMinter
+		probe  func(t *testing.T) *deliveryProbe
+	}{
+		{"the order was settled by someone else",
+			&fakeMinter{txHash: "0xabc", sent: true, found: true, succeeded: true},
+			func(t *testing.T) *deliveryProbe {
+				return &deliveryProbe{t: t, target: aTarget(), completeErr: database.ErrOrderNotDeliverable}
+			}},
+		{"the order could not be closed",
+			&fakeMinter{txHash: "0xabc", sent: true, found: true, succeeded: true},
+			func(t *testing.T) *deliveryProbe {
+				return &deliveryProbe{t: t, target: aTarget(), completeErr: errors.New("connection refused")}
+			}},
+		{"the mint reverted",
+			&fakeMinter{txHash: "0xabc", sent: true, found: true, succeeded: false},
+			func(t *testing.T) *deliveryProbe { return &deliveryProbe{t: t, target: aTarget()} }},
+		{"the mint is not mined yet",
+			&fakeMinter{txHash: "0xabc", sent: true, found: false},
+			func(t *testing.T) *deliveryProbe { return &deliveryProbe{t: t, target: aTarget()} }},
+		{"the mint was never sent",
+			&fakeMinter{txHash: "0xabc", sent: false, sendErr: errors.New("refused")},
+			func(t *testing.T) *deliveryProbe { return &deliveryProbe{t: t, target: aTarget()} }},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			probe := tc.probe(t)
+
+			probe.run(tc.minter, "ISS-TEST-0011")
+
+			if tc.minter.supplyCalls != 0 || probe.fundedCalls != 0 {
+				t.Fatalf("supply read %d time(s), markFunded %d time(s): both must be 0",
+					tc.minter.supplyCalls, probe.fundedCalls)
+			}
+		})
 	}
 }

@@ -35,6 +35,9 @@ func TestStartDeliveryHandsBackTheMintTarget(t *testing.T) {
 	if target.OrderID != order.OrderID || target.UserID != order.UserID || target.Shares != 10 {
 		t.Fatalf("target identifies the wrong order: %+v", target)
 	}
+	if target.RealEstateID != order.AssetID || target.TotalShares != 1500 {
+		t.Fatalf("asset = %d with %d shares, want %d with 1500", target.RealEstateID, target.TotalShares, order.AssetID)
+	}
 	if target.Wallet != order.Wallet {
 		t.Fatalf("wallet = %q, want %q", target.Wallet, order.Wallet)
 	}

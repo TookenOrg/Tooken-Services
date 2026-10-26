@@ -214,9 +214,20 @@ func (f *trexFixture) DeploySuite(t *testing.T, salt, name, symbol string, irs c
 // replays on them: settings[i] is called on modules[i] (B1).
 func (f *trexFixture) DeploySuiteWith(t *testing.T, salt, name, symbol string, irs common.Address, modules []common.Address, settings [][]byte) *deployedSuite {
 	t.Helper()
+	return f.deploySuiteDecimals(t, salt, name, symbol, 18, irs, modules, settings)
+}
+
+// DeploySuiteDecimals is DeploySuite for a token that counts in decimals places.
+func (f *trexFixture) DeploySuiteDecimals(t *testing.T, salt, name, symbol string, decimals int) *deployedSuite {
+	t.Helper()
+	return f.deploySuiteDecimals(t, salt, name, symbol, decimals, common.Address{}, []common.Address{}, nil)
+}
+
+func (f *trexFixture) deploySuiteDecimals(t *testing.T, salt, name, symbol string, decimals int, irs common.Address, modules []common.Address, settings [][]byte) *deployedSuite {
+	t.Helper()
 	f.suiteCounter++
 
-	tokenDetails := buildTokenDetails(f.Deployer, name, symbol, 18, irs, modules, settings)
+	tokenDetails := buildTokenDetails(f.Deployer, name, symbol, decimals, irs, modules, settings)
 	claimDetails := defineClaimSuiteDetails(f.ClaimIssuer)
 
 	tx, err := f.Factory.DeployTREXSuite(f.Auth, salt, tokenDetails, claimDetails)

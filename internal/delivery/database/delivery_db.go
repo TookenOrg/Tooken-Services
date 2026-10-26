@@ -36,6 +36,8 @@ type DeliveryTargetDTO struct {
 	Shares       int    // iss.issuance_orders.quantity
 	Wallet       string // blk.user_wallet.wallet_address (is_active)
 	TokenAddress string // ass.real_estate.contract_address
+	RealEstateID int    // iss.issuance_orders.asset_id
+	TotalShares  int64  // ass.real_estate_shares_config.total_shares
 }
 
 // StartDelivery runs transaction A: it locks the order, checks it is still
@@ -83,6 +85,15 @@ func StartDelivery(ctx context.Context, orderRef string) (DeliveryTargetDTO, err
 			refusal = "the asset carries no token contract address"
 		}
 
+		// 3A - Read the size of the offering, to know later whether it is sold out.
+		var totalShares int64
+		if refusal == "" {
+			totalShares, err = readTotalShares(ctx, tx, order.AssetId)
+			if err != nil {
+				return err
+			}
+		}
+
 		// 4 - Check KYC
 		if refusal == "" {
 			kycVerified, err := usrDb.CheckKYCisVerified(ctx, tx, order.UserId)
@@ -112,6 +123,8 @@ func StartDelivery(ctx context.Context, orderRef string) (DeliveryTargetDTO, err
 			Shares:       order.Quantity,
 			Wallet:       wallet,
 			TokenAddress: *tokenAddress,
+			RealEstateID: order.AssetId,
+			TotalShares:  totalShares,
 		}
 
 		return nil
@@ -224,6 +237,18 @@ WHERE o.id = $1
 	}
 
 	return wallet, &tokenAddress.String, nil
+}
+
+// readTotalShares reads how many shares the asset offers in total.
+func readTotalShares(ctx context.Context, tx *sql.Tx, realEstateID int) (int64, error) {
+	const query = `SELECT total_shares::bigint FROM ass.real_estate_shares_config WHERE real_estate_id = $1`
+
+	var total int64
+	if err := tx.QueryRowContext(ctx, query, realEstateID).Scan(&total); err != nil {
+		return 0, fmt.Errorf("read total shares of real estate %d: %w", realEstateID, err)
+	}
+
+	return total, nil
 }
 
 // RecordDeliveryTxHash is transaction B: it stores the hash of a mint that is

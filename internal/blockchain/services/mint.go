@@ -216,3 +216,42 @@ func mintTransferFound(ctx context.Context, receipt *types.Receipt, wallet commo
 
 	return false, nil
 }
+
+// supplyReadTimeout bounds the read of the total supply.
+const supplyReadTimeout = 10 * time.Second
+
+// CompareTotalSupply compares the total supply of the token, read on chain at
+// the latest block, with shares whole shares expressed in base units. It
+// returns -1, 0 or +1 like big.Int.Cmp: the answer says whether the token is
+// below, exactly at, or above shares. Everything is an integer.
+func (s *Service) CompareTotalSupply(ctx context.Context, tokenAddress string, shares int64) (int, error) {
+
+	if !common.IsHexAddress(tokenAddress) {
+		return 0, fmt.Errorf("not a valid token address: %s", tokenAddress)
+	}
+
+	token, err := database.GetTokenByAddress(ctx, tokenAddress)
+	if err != nil {
+		return 0, err
+	}
+
+	target, err := sharesToBaseUnits(strconv.FormatInt(shares, 10), int(token.NbDecimal))
+	if err != nil {
+		return 0, err
+	}
+
+	tokenInstance, err := contracts.NewToken(common.HexToAddress(tokenAddress), globals.EthClient)
+	if err != nil {
+		return 0, fmt.Errorf("bind token %s: %w", tokenAddress, err)
+	}
+
+	readCtx, cancel := context.WithTimeout(ctx, supplyReadTimeout)
+	defer cancel()
+
+	supply, err := tokenInstance.TotalSupply(&bind.CallOpts{Context: readCtx})
+	if err != nil {
+		return 0, fmt.Errorf("read total supply of token %s: %w", tokenAddress, err)
+	}
+
+	return supply.Cmp(target), nil
+}

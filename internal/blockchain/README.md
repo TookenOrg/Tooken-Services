@@ -298,6 +298,11 @@ transaction may land later and a second mint would then double the shares.
 `Transfer(0x0 → wallet, amount)` among its logs — a receipt alone only says the
 call did not revert.
 
+`CompareTotalSupply` answers whether the token's `totalSupply` (latest block,
+10 s timeout) is below, equal to or above a number of shares. The comparison is
+made on integers, in the token's own decimals read from `blk.token`. The
+delivery uses it to mark an asset funded once every share exists on chain.
+
 The lock is there because `GenerateTransactOpts` reads `PendingNonceAt`: two
 transactions prepared at the same instant — two mints, or a mint and a KYC
 registration — would claim the same nonce and one would be rejected. For a
