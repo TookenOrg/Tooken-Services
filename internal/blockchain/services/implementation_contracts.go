@@ -10,7 +10,9 @@ import (
 	"github.com/TookenOrg/tooken-services/internal/blockchain/globals"
 	"github.com/TookenOrg/tooken-services/internal/blockchain/utils"
 	"github.com/TookenOrg/tooken-services/pkg/logger"
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 )
 
 func (s *Service) DeployAllImplementations(ctx context.Context) (deployedContracts []server.ContractDetails, err error) {
@@ -118,11 +120,10 @@ func (s *Service) DeployAllImplementations(ctx context.Context) (deployedContrac
 
 func deployClaimTopicsRegistryImplementation(ctx context.Context) (ctrAddr common.Address, err error) {
 	logger.LogInfo("💌 Deploying ClaimTopicsRegistry Implementation...")
-	auth, err := utils.GenerateTransactOpts(ctx)
-	if err != nil {
+	tx, err := utils.Transact(ctx, func(auth *bind.TransactOpts) (tx *types.Transaction, err error) {
+		ctrAddr, tx, _, err = contracts.DeployClaimTopicsRegistry(auth, globals.EthClient)
 		return
-	}
-	ctrAddr, tx, _, err := contracts.DeployClaimTopicsRegistry(auth, globals.EthClient)
+	})
 	if err != nil {
 		return
 	}
@@ -149,11 +150,10 @@ func deployClaimTopicsRegistryImplementation(ctx context.Context) (ctrAddr commo
 
 func deployTrustedIssuersRegistryImplementation(ctx context.Context) (tirAddr common.Address, err error) {
 	logger.LogInfo("💌 Deploying TrustedIssuerRegistry Implementation...")
-	auth, err := utils.GenerateTransactOpts(ctx)
-	if err != nil {
+	tx, err := utils.Transact(ctx, func(auth *bind.TransactOpts) (tx *types.Transaction, err error) {
+		tirAddr, tx, _, err = contracts.DeployTrustedIssuersRegistry(auth, globals.EthClient)
 		return
-	}
-	tirAddr, tx, _, err := contracts.DeployTrustedIssuersRegistry(auth, globals.EthClient)
+	})
 	if err != nil {
 		return
 	}
@@ -179,11 +179,10 @@ func deployTrustedIssuersRegistryImplementation(ctx context.Context) (tirAddr co
 
 func deployIdentityRegistryStorageImplementation(ctx context.Context) (irsAddr common.Address, err error) {
 	logger.LogInfo("💌 Deploying IdentityRegistryStorage Implementation...")
-	auth, err := utils.GenerateTransactOpts(ctx)
-	if err != nil {
+	tx, err := utils.Transact(ctx, func(auth *bind.TransactOpts) (tx *types.Transaction, err error) {
+		irsAddr, tx, _, err = contracts.DeployIdentityRegistryStorage(auth, globals.EthClient)
 		return
-	}
-	irsAddr, tx, _, err := contracts.DeployIdentityRegistryStorage(auth, globals.EthClient)
+	})
 	if err != nil {
 		return
 	}
@@ -208,11 +207,10 @@ func deployIdentityRegistryStorageImplementation(ctx context.Context) (irsAddr c
 
 func deployIdentityRegistryImplementation(ctx context.Context) (irAddr common.Address, err error) {
 	logger.LogInfo("💌 Deploying IdentityRegistry Implementation...")
-	auth, err := utils.GenerateTransactOpts(ctx)
-	if err != nil {
+	tx, err := utils.Transact(ctx, func(auth *bind.TransactOpts) (tx *types.Transaction, err error) {
+		irAddr, tx, _, err = contracts.DeployIdentityRegistry(auth, globals.EthClient)
 		return
-	}
-	irAddr, tx, _, err := contracts.DeployIdentityRegistry(auth, globals.EthClient)
+	})
 	if err != nil {
 		return
 	}
@@ -237,11 +235,10 @@ func deployIdentityRegistryImplementation(ctx context.Context) (irAddr common.Ad
 
 func deployModularComplianceImplementation(ctx context.Context) (mcAddr common.Address, err error) {
 	logger.LogInfo("💌 Deploying ModularCompliance Implementation...")
-	auth, err := utils.GenerateTransactOpts(ctx)
-	if err != nil {
+	tx, err := utils.Transact(ctx, func(auth *bind.TransactOpts) (tx *types.Transaction, err error) {
+		mcAddr, tx, _, err = contracts.DeployModularCompliance(auth, globals.EthClient)
 		return
-	}
-	mcAddr, tx, _, err := contracts.DeployModularCompliance(auth, globals.EthClient)
+	})
 	if err != nil {
 		return
 	}
@@ -266,11 +263,10 @@ func deployModularComplianceImplementation(ctx context.Context) (mcAddr common.A
 
 func deployTokenImplementation(ctx context.Context) (tokenAddr common.Address, err error) {
 	logger.LogInfo("💌 Deploying Token Implementation...")
-	auth, err := utils.GenerateTransactOpts(ctx)
-	if err != nil {
+	tx, err := utils.Transact(ctx, func(auth *bind.TransactOpts) (tx *types.Transaction, err error) {
+		tokenAddr, tx, _, err = contracts.DeployToken(auth, globals.EthClient)
 		return
-	}
-	tokenAddr, tx, _, err := contracts.DeployToken(auth, globals.EthClient)
+	})
 	if err != nil {
 		return
 	}
@@ -294,11 +290,10 @@ func deployTokenImplementation(ctx context.Context) (tokenAddr common.Address, e
 
 func deployIdentityImplementation(ctx context.Context) (identityAddr common.Address, err error) {
 	logger.LogInfo("💌 Deploying Identity Implementation...")
-	auth, err := utils.GenerateTransactOpts(ctx)
-	if err != nil {
+	tx, err := utils.Transact(ctx, func(auth *bind.TransactOpts) (tx *types.Transaction, err error) {
+		identityAddr, tx, _, err = contracts.DeployIdentity(auth, globals.EthClient, auth.From, false)
 		return
-	}
-	identityAddr, tx, _, err := contracts.DeployIdentity(auth, globals.EthClient, auth.From, false)
+	})
 	if err != nil {
 		return
 	}
@@ -323,11 +318,10 @@ func deployIdentityImplementation(ctx context.Context) (identityAddr common.Addr
 
 func deployIdentityAuthorityImplementation(ctx context.Context, identity common.Address) (identityAuthAddr common.Address, err error) {
 	logger.LogInfo("💌 Deploying IdentityAuthority Implementation...")
-	auth, err := utils.GenerateTransactOpts(ctx)
-	if err != nil {
+	tx, err := utils.Transact(ctx, func(auth *bind.TransactOpts) (tx *types.Transaction, err error) {
+		identityAuthAddr, tx, _, err = contracts.DeployImplementationAuthority(auth, globals.EthClient, identity)
 		return
-	}
-	identityAuthAddr, tx, _, err := contracts.DeployImplementationAuthority(auth, globals.EthClient, identity)
+	})
 	if err != nil {
 		return
 	}
@@ -351,17 +345,16 @@ func deployIdentityAuthorityImplementation(ctx context.Context, identity common.
 
 func deployTREXImplementationAuthority(ctx context.Context) (authorityAddr common.Address, err error) {
 	logger.LogInfo("💌 Deploying TREXImplementationAuthority Implementation...")
-	auth, err := utils.GenerateTransactOpts(ctx)
-	if err != nil {
+	tx, err := utils.Transact(ctx, func(auth *bind.TransactOpts) (tx *types.Transaction, err error) {
+		authorityAddr, tx, _, err = contracts.DeployTREXImplementationAuthority(
+			auth,
+			globals.EthClient,
+			true,             // isReference - To use AddAndUseTREXVersion
+			common.Address{}, // trexFactory address
+			common.Address{}, // identityFactory address
+		)
 		return
-	}
-	authorityAddr, tx, _, err := contracts.DeployTREXImplementationAuthority(
-		auth,
-		globals.EthClient,
-		true,             // isReference - To use AddAndUseTREXVersion
-		common.Address{}, // trexFactory address
-		common.Address{}, // identityFactory address
-	)
+	})
 	if err != nil {
 		return
 	}

@@ -11,7 +11,9 @@ import (
 	"github.com/TookenOrg/tooken-services/internal/blockchain/globals"
 	"github.com/TookenOrg/tooken-services/internal/blockchain/utils"
 	"github.com/TookenOrg/tooken-services/pkg/logger"
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 )
 
 func (s *Service) DeployIdentityFactory(ctx context.Context) (details server.ContractDetails, err error) {
@@ -55,13 +57,11 @@ func (s *Service) DeployIdentityFactory(ctx context.Context) (details server.Con
 
 func deployIdentityFactory(ctx context.Context, implementationAuthorityAddrCommon common.Address) (idAddr common.Address, err error) {
 
-	auth, err := utils.GenerateTransactOpts(ctx)
-	if err != nil {
-		return
-	}
-
 	logger.LogInfo("💌 Deploying Identity Factory...")
-	idAddr, tx, _, err := contracts.DeployIdFactory(auth, globals.EthClient, implementationAuthorityAddrCommon)
+	tx, err := utils.Transact(ctx, func(auth *bind.TransactOpts) (tx *types.Transaction, err error) {
+		idAddr, tx, _, err = contracts.DeployIdFactory(auth, globals.EthClient, implementationAuthorityAddrCommon)
+		return
+	})
 	if err != nil {
 		return
 	}

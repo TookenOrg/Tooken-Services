@@ -6,6 +6,7 @@ import (
 	"math/big"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	contracts "github.com/TookenOrg/tooken-services/internal/blockchain/contracts/bindings"
@@ -18,6 +19,42 @@ import (
 	"github.com/shopspring/decimal"
 )
 
+// signerMu serialises every transaction signed with the platform key, from
+// the moment its nonce is read until it is broadcast. Two transactions built
+// side by side would otherwise read the same pending nonce, and one of them
+// would be rejected by the node.
+var signerMu sync.Mutex
+
+// sendTimeout bounds one pass under signerMu: building, signing and
+// broadcasting a transaction take seconds. A node that stops answering must
+// not hold the lock, and with it every other transaction, for good.
+var sendTimeout = time.Minute
+
+// Transact is the only way production code sends a transaction with the
+// platform key. It builds the options under signerMu and hands them to send,
+// which must broadcast at most one transaction with them and return it.
+//
+// send runs with the lock held and opts.Context bounded by sendTimeout: it
+// must not wait for mining, and must not call Transact itself, or it would
+// wait on its own lock forever.
+func Transact(ctx context.Context, send func(opts *bind.TransactOpts) (*types.Transaction, error)) (*types.Transaction, error) {
+	signerMu.Lock()
+	defer signerMu.Unlock()
+
+	sendCtx, cancel := context.WithTimeout(ctx, sendTimeout)
+	defer cancel()
+
+	opts, err := GenerateTransactOpts(sendCtx)
+	if err != nil {
+		return nil, err
+	}
+
+	return send(opts)
+}
+
+// GenerateTransactOpts builds options for the platform key, nonce included.
+// Outside tests, use Transact: options built here and sent outside its lock
+// race every other transaction for the same nonce.
 func GenerateTransactOpts(ctx context.Context) (opts *bind.TransactOpts, err error) {
 	privateKey, publicKey := getECDSAKeys()
 	fromAddress := crypto.PubkeyToAddress(*publicKey)
@@ -50,6 +87,9 @@ func GenerateTransactOpts(ctx context.Context) (opts *bind.TransactOpts, err err
 	}
 
 	opts.From = fromAddress
+	// bind estimates gas and broadcasts with this context; left nil, it falls
+	// back to context.Background() and a frozen node blocks it forever.
+	opts.Context = ctx
 	opts.Nonce = big.NewInt(int64(nonce))
 	opts.Value = big.NewInt(0) // in wei
 	opts.GasTipCap = gasTipCap
@@ -151,6 +191,10 @@ func txWaitTimeout() time.Duration {
 
 	return wait
 }
+
+// TxWaitTimeout exposes txWaitTimeout to the services that wait on their own,
+// so that every wait in the codebase answers to the same ETH_TX_WAIT.
+func TxWaitTimeout() time.Duration { return txWaitTimeout() }
 
 type txDetails struct {
 	Tx              *types.Transaction

@@ -20,7 +20,10 @@ PostgreSQL (raw SQL), and drives Ethereum smart contracts via go-ethereum.
   `go test -tags integration ./internal/blockchain/...`. Override with `ETH_TEST_RPC`
   / `PRIVATE_KEY`. See `internal/blockchain/services/integration_test.go` (deploy +
   tx helpers) and `e2e_test.go` (full T-REX lifecycle: deploy token → register a KYC
-  identity → mint succeeds; mint to a non-KYC wallet reverts).
+  identity → mint succeeds; mint to a non-KYC wallet reverts). Once
+  `TEST_DATABASE_URL` or `ETH_TEST_RPC` is set, an unreachable database or node
+  **fails** the chain/delivery integration tests instead of skipping them; run
+  the full suite with `-p 1` (packages share scratch databases).
 - `golangci-lint` is referenced in CI but **commented out / disabled** until the
   toolchain catches up to Go 1.25.3 — do not assume it runs.
 
@@ -71,8 +74,12 @@ blockchain, on-chain `services`/`contracts`).
 
 - Contract bindings in `internal/blockchain/contracts/bindings/` are abigen-
   generated — do not edit by hand.
-- Build transactions with `utils.GenerateTransactOpts(ctx)` (signs with the
-  `PRIVATE_KEY` env key); wait for mining with `utils.WaitDeployedTransaction` /
+- Send every transaction through `utils.Transact(ctx, func(opts) (*types.Transaction, error))`
+  (signs with the `PRIVATE_KEY` env key). It holds one lock for the key from
+  nonce read to broadcast and bounds that step with a timeout; calling
+  `GenerateTransactOpts` directly races other transactions for the nonce.
+  The callback must broadcast one transaction and never call `Transact` itself.
+  Wait for mining afterwards, outside it, with `utils.WaitDeployedTransaction` /
   `WaitTREXSuiteDeployment`.
 - Long-running deploy/mint/burn operations run in a goroutine and return
   `202 Accepted` immediately. Detach the context first

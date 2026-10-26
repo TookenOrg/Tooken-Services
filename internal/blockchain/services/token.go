@@ -236,11 +236,6 @@ func buildTokenDetails(owner common.Address, name, symbol string, decimals int, 
 // waits for the TREXSuiteDeployed event to retrieve the deployed addresses.
 func deployTokenSuiteViaFactory(ctx context.Context, factoryAddr common.Address, salt string, tokenDetails contracts.ITREXFactoryTokenDetails, claimDetails contracts.ITREXFactoryClaimDetails) (deployment *contracts.TREXFactoryTREXSuiteDeployed, txHash string, err error) {
 
-	auth, err := utils.GenerateTransactOpts(ctx)
-	if err != nil {
-		return
-	}
-
 	factoryInstance, err := contracts.NewTREXFactory(factoryAddr, globals.EthClient)
 	if err != nil {
 		return
@@ -261,7 +256,9 @@ func deployTokenSuiteViaFactory(ctx context.Context, factoryAddr common.Address,
 	}
 
 	logger.LogInfo("💌 Deploying token suite via TREX factory (salt=%s)...", salt)
-	tx, err := factoryInstance.DeployTREXSuite(auth, salt, tokenDetails, claimDetails)
+	tx, err := utils.Transact(ctx, func(auth *bind.TransactOpts) (*types.Transaction, error) {
+		return factoryInstance.DeployTREXSuite(auth, salt, tokenDetails, claimDetails)
+	})
 	if err != nil {
 		return
 	}
@@ -299,13 +296,10 @@ func createTokenInstance(tokenAddr common.Address) (instance contracts.Token, er
 }
 
 func unpauseToken(ctx context.Context, tokenInstance contracts.Token) (tx *types.Transaction, err error) {
-	auth, err := utils.GenerateTransactOpts(ctx)
-	if err != nil {
-		return
-	}
-
 	logger.LogInfo("💌 Unpause token...")
-	tx, err = tokenInstance.Unpause(auth)
+	tx, err = utils.Transact(ctx, func(auth *bind.TransactOpts) (*types.Transaction, error) {
+		return tokenInstance.Unpause(auth)
+	})
 	if err != nil {
 		return
 	}

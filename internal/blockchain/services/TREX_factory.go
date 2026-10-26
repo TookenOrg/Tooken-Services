@@ -11,7 +11,9 @@ import (
 	"github.com/TookenOrg/tooken-services/internal/blockchain/globals"
 	"github.com/TookenOrg/tooken-services/internal/blockchain/utils"
 	"github.com/TookenOrg/tooken-services/pkg/logger"
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 )
 
 // DeployAndInitTrexFactory deploys and configures the TREX Factory contract
@@ -54,13 +56,11 @@ func (s *Service) DeployAndInitTrexFactory(ctx context.Context) (err error) {
 
 func deployTrexFactory(ctx context.Context, authorityAddr, identityFactoryAddr common.Address) (factoryAddr common.Address, err error) {
 
-	auth, err := utils.GenerateTransactOpts(ctx)
-	if err != nil {
-		return
-	}
-
 	logger.LogInfo("💌 Deploying Trex Factory...")
-	factoryAddr, tx, _, err := contracts.DeployTREXFactory(auth, globals.EthClient, authorityAddr, identityFactoryAddr)
+	tx, err := utils.Transact(ctx, func(auth *bind.TransactOpts) (tx *types.Transaction, err error) {
+		factoryAddr, tx, _, err = contracts.DeployTREXFactory(auth, globals.EthClient, authorityAddr, identityFactoryAddr)
+		return
+	})
 	if err != nil {
 		return
 	}
@@ -108,12 +108,10 @@ func addTokenFactory(ctx context.Context, identityFactoryAddr, factoryAddr commo
 		return
 	}
 
-	auth, err := utils.GenerateTransactOpts(ctx)
-	if err != nil {
-		return
-	}
 	logger.LogInfo("💌 Send transaction to add token factory...")
-	tx, err := identityFactoryInstance.AddTokenFactory(auth, factoryAddr)
+	tx, err := utils.Transact(ctx, func(auth *bind.TransactOpts) (*types.Transaction, error) {
+		return identityFactoryInstance.AddTokenFactory(auth, factoryAddr)
+	})
 	if err != nil {
 		return
 	}
@@ -143,12 +141,10 @@ func setTREXFactory(ctx context.Context, authorityAddr, factoryAddr common.Addre
 		return
 	}
 
-	auth, err := utils.GenerateTransactOpts(ctx)
-	if err != nil {
-		return
-	}
 	logger.LogInfo("💌 Send transaction to set TREX factory in Authority...")
-	tx, err := authorityInstance.SetTREXFactory(auth, factoryAddr)
+	tx, err := utils.Transact(ctx, func(auth *bind.TransactOpts) (*types.Transaction, error) {
+		return authorityInstance.SetTREXFactory(auth, factoryAddr)
+	})
 	if err != nil {
 		return
 	}
@@ -248,11 +244,6 @@ func defineClaimSuiteDetails(claimIssuerAddr common.Address) contracts.ITREXFact
 
 func deployTrexSuite(ctx context.Context, tokenDetails contracts.ITREXFactoryTokenDetails, claimDetails contracts.ITREXFactoryClaimDetails) (deploySuiteAddr common.Address, err error) {
 
-	auth, err := utils.GenerateTransactOpts(ctx)
-	if err != nil {
-		return
-	}
-
 	trexFactoryDetails, err := database.GetContractRoleByName(ctx, globals.TrexFactoryName)
 	if err != nil {
 		return
@@ -268,12 +259,9 @@ func deployTrexSuite(ctx context.Context, tokenDetails contracts.ITREXFactoryTok
 	salt := "TookenSuiteV1Salt"
 
 	logger.LogInfo("💌 Deploying TREX Suite...")
-	txDeploySuite, err := trexFactoryInstance.DeployTREXSuite(
-		auth,
-		salt,
-		tokenDetails,
-		claimDetails,
-	)
+	txDeploySuite, err := utils.Transact(ctx, func(auth *bind.TransactOpts) (*types.Transaction, error) {
+		return trexFactoryInstance.DeployTREXSuite(auth, salt, tokenDetails, claimDetails)
+	})
 	if err != nil {
 		return
 	}
