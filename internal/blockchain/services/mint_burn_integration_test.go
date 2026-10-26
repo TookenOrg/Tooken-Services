@@ -10,11 +10,10 @@
 //
 // Two things are settled here that were open questions:
 //
-//   - a mint towards a wallet that is not verified fails, and it fails *inside* the
-//     goroutine: the caller of POST /contract/token/mint has already been told 202.
-//     This is the debt the planned pre-flight verification check will close;
-//   - a burn does NOT require the holder to be verified. That was asserted nowhere,
-//     and it matters: the pre-flight check must therefore apply to the mint only.
+//   - a mint towards a wallet that is not verified fails on chain, so the
+//     delivery checks the KYC before it signs anything;
+//   - a burn does NOT require the holder to be verified, so that check applies
+//     to the mint only.
 //
 // Requires both a node and a database:
 //
@@ -30,6 +29,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/TookenOrg/tooken-services/internal/blockchain/utils"
+	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	_ "github.com/lib/pq"
 )
@@ -60,24 +61,47 @@ func TestMintAndBurnIntegration(t *testing.T) {
 
 	// ---- the input guard, before anything reaches the chain --------------------
 
-	t.Run("an unknown token is refused as a bad request", func(t *testing.T) {
+	t.Run("an unknown token is refused before anything is signed", func(t *testing.T) {
 		unknown := common.HexToAddress("0x00000000000000000000000000000000000B0B0B")
 
-		err := svc.ValidateMintInput(ctx, unknown.Hex(), holder.Hex(), 1)
+		txHash, sent, err := svc.SendMintShares(ctx, unknown.Hex(), holder.Hex(), 1, func(string) error { return nil })
 		if err == nil {
 			t.Fatal("an unknown token must be refused")
 		}
-		// The handler branches on this sentinel to answer 400 rather than 500.
-		if !errors.Is(err, ErrInvalidMintInput) {
-			t.Fatalf("the refusal must be marked as a bad request, got: %v", err)
+		// The whole safety of the delivery rests on this: no hash means nothing
+		// was ever broadcast.
+		if txHash != "" || sent {
+			t.Fatalf("nothing must have been signed or sent, got hash %q sent=%v", txHash, sent)
 		}
 	})
 
-	t.Run("a known token with sane inputs passes the guard", func(t *testing.T) {
+	t.Run("a mint of zero shares is refused", func(t *testing.T) {
 		// Asserted so the test above cannot pass through a guard wired to refuse
-		// everything.
-		if err := svc.ValidateMintInput(ctx, tokenAddr, holder.Hex(), 1); err != nil {
-			t.Fatalf("a valid mint request must pass the guard, got: %v", err)
+		// everything for the wrong reason.
+		if _, _, err := svc.SendMintShares(ctx, tokenAddr, holder.Hex(), 0, func(string) error { return nil }); err == nil {
+			t.Fatal("a mint of zero shares must be refused")
+		}
+	})
+
+	t.Run("a failing record stops the mint before it is sent", func(t *testing.T) {
+		recordErr := errors.New("database is down")
+
+		txHash, sent, err := svc.SendMintShares(ctx, tokenAddr, holder.Hex(), 1, func(string) error { return recordErr })
+		if !errors.Is(err, recordErr) {
+			t.Fatalf("the record failure must surface, got: %v", err)
+		}
+		if sent {
+			t.Fatal("nothing must be sent when the hash could not be recorded")
+		}
+		// The hash still comes back: the attempt is real, and the caller may
+		// put it on the timeline.
+		if txHash == "" {
+			t.Fatal("the signed transaction hash must be returned even when the record failed")
+		}
+		// And the node must never have seen it: a sent=false that had in fact
+		// broadcast would be the double mint this rule exists to prevent.
+		if _, _, err := fixture.Client.TransactionByHash(ctx, common.HexToHash(txHash)); !errors.Is(err, ethereum.NotFound) {
+			t.Fatalf("the node must not know a mint whose hash was not recorded, got: %v", err)
 		}
 	})
 
@@ -87,12 +111,12 @@ func TestMintAndBurnIntegration(t *testing.T) {
 		before, err := suite.Token.BalanceOf(fixture.Call, holder)
 		failOnErr(t, err, "BalanceOf before")
 
-		result, err := svc.Mint(ctx, tokenAddr, holder.Hex(), 1000)
+		txHash, err := mintSharesForTest(ctx, svc, tokenAddr, holder.Hex(), 1000)
 		if err != nil {
 			t.Fatalf("Mint: %v", err)
 		}
-		if result.OperationName != "Mint" || result.TransactionHash == "" {
-			t.Fatalf("Mint must report what it did, got %+v", result)
+		if txHash == "" {
+			t.Fatal("Mint must report the transaction it sent")
 		}
 
 		after, err := suite.Token.BalanceOf(fixture.Call, holder)
@@ -105,19 +129,13 @@ func TestMintAndBurnIntegration(t *testing.T) {
 			t.Fatalf("minted amount: expected %s, got %s", expected, gained)
 		}
 
-		var count int
-		if err := env.DB.QueryRow(
-			`SELECT count(*) FROM blk.eth_transaction WHERE tx_hash = $1 AND tx_name = $2`,
-			result.TransactionHash, "MINT_TOKEN").Scan(&count); err != nil {
-			t.Fatal(err)
-		}
-		if count != 1 {
-			t.Fatalf("the mint must be traced in blk.eth_transaction, found %d rows", count)
-		}
+		// blk.eth_transaction is no longer written for a mint: the hash now
+		// lives on the order itself, in iss.issuance_orders.delivery_tx_hash
+		// and on its timeline.
 	})
 
 	t.Run("Mint towards a wallet that is not verified fails", func(t *testing.T) {
-		_, err := svc.Mint(ctx, tokenAddr, stranger.Hex(), 1)
+		_, err := mintSharesForTest(ctx, svc, tokenAddr, stranger.Hex(), 1)
 		if err == nil {
 			t.Fatal("minting to a non-verified wallet must fail")
 		}
@@ -131,21 +149,73 @@ func TestMintAndBurnIntegration(t *testing.T) {
 			t.Fatalf("the non-verified wallet must hold nothing, got %s", balance)
 		}
 
-		// The point of this sub-test is *where* the failure happens. Mint runs in a
-		// goroutine after the handler has answered 202, so this error never reaches
-		// the caller: the pre-flight guard has to catch it first.
-		preflight := svc.ValidateMintInput(ctx, tokenAddr, stranger.Hex(), 1)
-		if preflight == nil {
-			t.Fatal("the pre-flight guard must refuse a non-verified recipient, before the 202")
+		// The point of this sub-test is *where* the failure happens. The chain
+		// refuses at gas estimation, which is before the transaction is signed,
+		// so no hash ever exists for this attempt. That is what lets the
+		// delivery read "no hash" as "nothing was broadcast".
+		txHash, sent, err := svc.SendMintShares(ctx, tokenAddr, stranger.Hex(), 1, func(string) error { return nil })
+		if err == nil {
+			t.Fatal("a non-verified recipient must be refused")
 		}
-		// The handler branches on this sentinel to answer 400 rather than 500: an
-		// unverified recipient is a bad request, not a server failure.
-		if !errors.Is(preflight, ErrInvalidMintInput) {
-			t.Fatalf("the refusal must be marked as a bad request, got: %v", preflight)
+		if txHash != "" || sent {
+			t.Fatalf("the refusal must happen before signing, got hash %q sent=%v", txHash, sent)
 		}
-		// Naming the wallet is what makes the answer actionable for the operator.
-		if !strings.Contains(preflight.Error(), stranger.Hex()) {
-			t.Fatalf("the refusal must name the wallet, got: %v", preflight)
+		// Naming the reason is what makes the failure actionable for the operator.
+		if !strings.Contains(err.Error(), "Identity is not verified") {
+			t.Fatalf("the refusal must name the reason, got: %v", err)
+		}
+	})
+
+	// ---- what MintReceipt makes of a transaction ---------------------------------
+	//
+	// found=false is what keeps an order from being failed, so it must only ever
+	// mean "not mined yet"; succeeded must require the exact Transfer.
+
+	t.Run("MintReceipt does not find a hash the chain never saw", func(t *testing.T) {
+		unknown := "0x" + strings.Repeat("ab", 32)
+		found, succeeded, err := svc.MintReceipt(ctx, unknown, holder.Hex(), 1)
+		if err != nil || found || succeeded {
+			t.Fatalf("an unknown hash is undecided: want (false, false, nil), got (%v, %v, %v)", found, succeeded, err)
+		}
+	})
+
+	t.Run("MintReceipt requires the Transfer to this wallet, for this amount", func(t *testing.T) {
+		txHash, err := mintSharesForTest(ctx, svc, tokenAddr, holder.Hex(), 1)
+		if err != nil {
+			t.Fatalf("Mint: %v", err)
+		}
+
+		for _, tc := range []struct {
+			name   string
+			wallet string
+			shares int
+		}{
+			{"another wallet", stranger.Hex(), 1},
+			{"another amount", holder.Hex(), 2},
+		} {
+			found, succeeded, err := svc.MintReceipt(ctx, txHash, tc.wallet, tc.shares)
+			if err != nil || !found || succeeded {
+				t.Fatalf("%s: a mined mint that does not match is a failure: want (true, false, nil), got (%v, %v, %v)",
+					tc.name, found, succeeded, err)
+			}
+		}
+	})
+
+	t.Run("MintReceipt reports a mined mint that reverted", func(t *testing.T) {
+		// A fixed gas limit skips the estimation that would refuse the
+		// non-verified wallet, so the mint is mined and reverts on chain.
+		opts, err := utils.GenerateTransactOpts(ctx)
+		failOnErr(t, err, "GenerateTransactOpts")
+		opts.NoSend = true
+		opts.GasLimit = 500_000
+		tx, err := suite.Token.Mint(opts, stranger, oneToken)
+		failOnErr(t, err, "sign reverting mint")
+		// Hardhat reports the revert as a send error, but mines the transaction.
+		_ = fixture.Client.SendTransaction(ctx, tx)
+
+		found, succeeded, err := svc.MintReceipt(ctx, tx.Hash().Hex(), stranger.Hex(), 1)
+		if err != nil || !found || succeeded {
+			t.Fatalf("a reverted mint is a failure: want (true, false, nil), got (%v, %v, %v)", found, succeeded, err)
 		}
 	})
 
@@ -153,8 +223,8 @@ func TestMintAndBurnIntegration(t *testing.T) {
 		// Same wallet, same moment: refused for a mint, accepted for a burn. Taking
 		// shares back from someone who has just been struck off is the whole point of
 		// a permissioned security, so the identity check must stay on the mint side.
-		if err := svc.ValidateMintInput(ctx, tokenAddr, stranger.Hex(), 1); err == nil {
-			t.Fatal("the mint guard must refuse a non-verified recipient")
+		if _, _, err := svc.SendMintShares(ctx, tokenAddr, stranger.Hex(), 1, func(string) error { return nil }); err == nil {
+			t.Fatal("the mint must refuse a non-verified recipient")
 		}
 		if err := svc.ValidateBurnInput(ctx, tokenAddr, stranger.Hex(), 1); err != nil {
 			t.Fatalf("the burn guard must not check the identity, got: %v", err)
@@ -212,7 +282,7 @@ func TestMintAndBurnIntegration(t *testing.T) {
 		// the holder has just been struck off the registry.
 		//
 		// Measured rather than assumed, because it decides a design point: the
-		// pre-flight isVerified check of morceau 4 must apply to the mint only.
+		// pre-flight isVerified check must apply to the mint only.
 		tx, err := suite.IR.DeleteIdentity(fixture.Auth, holder)
 		failOnErr(t, err, "IR.deleteIdentity")
 		fixture.Mine(tx, "IR.deleteIdentity")
@@ -242,7 +312,7 @@ func TestMintAndBurnIntegration(t *testing.T) {
 
 		// And the counterpart, on the same wallet in the same state: minting to it is
 		// refused. Same wallet, same moment, opposite answers — that is the asymmetry.
-		if _, err := svc.Mint(ctx, tokenAddr, holder.Hex(), 1); err == nil {
+		if _, err := mintSharesForTest(ctx, svc, tokenAddr, holder.Hex(), 1); err == nil {
 			t.Fatal("minting to a struck-off holder must fail")
 		}
 	})

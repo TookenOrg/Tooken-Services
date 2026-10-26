@@ -6,17 +6,17 @@
 // Everything here is written in plain SQL, on purpose: what is under test is the
 // schema, not the Go that will one day write to it. A constraint that only holds
 // because today's service happens to respect it is not a constraint, and the
-// services of M3-3 onwards will be written against what these tests pin down.
+// services that follow will be written against what these tests pin down.
 //
 // Every case runs inside its own transaction, rolled back at the end. That is not
 // a convenience, it is the only clean way out: the order history is append-only
-// (I1) and references its order with RESTRICT, so once a case has written one
+// and references its order with RESTRICT, so once a case has written one
 // history row, neither the row nor its order can ever be deleted again. A
 // rollback leaves nothing behind, needs no cleanup order, and makes two
 // consecutive runs on the same database give the same result.
 //
-// Each case also creates its own investors, issuer and asset (PROGRESS.md §45.3:
-// never rely on ids that happen to exist).
+// Each case also creates its own investors, issuer and asset: never rely on ids
+// that happen to exist.
 //
 // Run it against a database that carries the migrations:
 //
@@ -33,8 +33,8 @@ import (
 	"github.com/lib/pq"
 )
 
-// Two transaction hashes that pass I2. Their exact value does not matter, only
-// that they are well formed and distinct.
+// Two transaction hashes the schema accepts. Their exact value does not matter,
+// only that they are well formed and distinct.
 var (
 	hashA = "0x" + strings.Repeat("a", 64)
 	hashB = "0x" + strings.Repeat("b", 64)
@@ -202,7 +202,7 @@ func execInSavepoint(tx *sql.Tx, query string, args ...any) error {
 }
 
 // The insert most cases start from. Columns not listed stay NULL, which is a
-// draft order, as the pre-M3-3 insert used to write it.
+// draft order, as the earlier insert used to write it.
 const insertBareOrder = `
     INSERT INTO iss.issuance_orders (user_id, asset_id, quantity, status_id, order_reference)
     VALUES ($1, $2, $3, $4, $5)`
@@ -301,7 +301,7 @@ func TestOrderModel(t *testing.T) {
 		})
 	})
 
-	// 4 and 5 — I4: a reservation has an end, and the end is after the start.
+	// 4 and 5 — a reservation has an end, and the end is after the start.
 	t.Run("04 AWAITING_PAYMENT without reservation_expires_at is refused", func(t *testing.T) {
 		withFixture(t, db, func(t *testing.T, f orderFixture) {
 			expectRefused(t, f.tx, codeCheckViolation, "issuance_orders_awaiting_payment_ck", `
@@ -326,7 +326,7 @@ func TestOrderModel(t *testing.T) {
 		})
 	})
 
-	// 6 to 8 — I3: all five amounts or none, and they add up.
+	// 6 to 8 — all five amounts or none, and they add up.
 	t.Run("06 a half-priced order is refused", func(t *testing.T) {
 		withFixture(t, db, func(t *testing.T, f orderFixture) {
 			expectRefused(t, f.tx, codeCheckViolation, "issuance_orders_amounts_ck", `
@@ -363,7 +363,7 @@ func TestOrderModel(t *testing.T) {
 		})
 	})
 
-	// 9 and 10 — I8 and the one-entry-fee index.
+	// 9 and 10 — the fee rounding and the one-entry-fee index.
 	t.Run("09 a fee line is rounded by the same rule", func(t *testing.T) {
 		withFixture(t, db, func(t *testing.T, f orderFixture) {
 			order := mustScanIDTx(t, f.tx, insertPricedOrder, f.alice, f.asset, statusAwaitingPayment, "OM-09")
@@ -423,7 +423,7 @@ func TestOrderModel(t *testing.T) {
 		})
 	})
 
-	// 13 to 15 — I5, the uniqueness of the delivery hash, and I2.
+	// 13 to 15 — the delivery hash: required when closed, unique, well formed.
 	t.Run("13 a closed order carries its delivery hash", func(t *testing.T) {
 		withFixture(t, db, func(t *testing.T, f orderFixture) {
 			expectRefused(t, f.tx, codeCheckViolation, "issuance_orders_delivered_hash_ck",
@@ -457,7 +457,7 @@ func TestOrderModel(t *testing.T) {
 		})
 	})
 
-	// 16 — I6 and I7: a refund says why, with a known reason.
+	// 16 — a refund says why, with a known reason.
 	t.Run("16 a refund carries a known reason", func(t *testing.T) {
 		withFixture(t, db, func(t *testing.T, f orderFixture) {
 			const q = `
@@ -516,7 +516,7 @@ func TestOrderModel(t *testing.T) {
 		})
 	})
 
-	// 20 — I10 at its four boundaries, on an asset of 1000 shares.
+	// 20 — the per-investor cap at its four boundaries, on an asset of 1000 shares.
 	t.Run("20 the per-investor cap stays within the offer", func(t *testing.T) {
 		withFixture(t, db, func(t *testing.T, f orderFixture) {
 			const q = `UPDATE ass.real_estate_shares_config SET max_shares_per_investor = $1 WHERE real_estate_id = $2`
@@ -527,7 +527,7 @@ func TestOrderModel(t *testing.T) {
 		})
 	})
 
-	// 21 — T4: CREATED no longer holds shares out of the stock.
+	// 21 — CREATED no longer holds shares out of the stock.
 	t.Run("21 only a reservation counts as sold", func(t *testing.T) {
 		withFixture(t, db, func(t *testing.T, f orderFixture) {
 			mustExecTx(t, f.tx, insertBareOrder, f.alice, f.asset, 5, statusCreated, "OM-21a")

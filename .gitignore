@@ -29,3 +29,8 @@
 /SESSION-*.md
 
 /.github/instructions/tooken-workflow.instructions.md
+
+# Local Claude Code setup (instructions + subagents) - not versioned.
+/CLAUDE.md
+/.claude/
+/.github/agents/

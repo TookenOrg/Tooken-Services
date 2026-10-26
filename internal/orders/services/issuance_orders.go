@@ -33,7 +33,7 @@ var (
 )
 
 // defaultReservationTTL is how long an unpaid order holds its shares when
-// ORDER_RESERVATION_TTL is unset or unusable (U1).
+// ORDER_RESERVATION_TTL is unset or unusable.
 const defaultReservationTTL = 15 * time.Minute
 
 // reservationTTL reads ORDER_RESERVATION_TTL as a Go duration ("15m", "1h").

@@ -145,7 +145,7 @@ func issuerStandsBehind(ctx context.Context, issuerID *int) (bool, error) {
 //
 // A published asset whose issuer has since been withdrawn stays visible, which
 // is a deliberate gap: the invariant held here is the one on ENTRY. Taking such
-// assets off the market is wanted but not yet decided — see PROGRESS.md §11.23.
+// assets off the market is wanted but not yet decided.
 func checkIssuerAttachment(ctx context.Context, statusID int, before, after database.RealEstateWriteDTO) error {
 	if samePtrInt(before.IssuerId, after.IssuerId) || after.IssuerId == nil {
 		return nil
@@ -313,7 +313,7 @@ func (s *Service) PublishRealEstate(ctx context.Context, id int) (server.RealEst
 	return s.GetRealEstateById(ctx, id, true)
 }
 
-// OpenFundraisingRealEstate opens the subscription of a published asset (D34).
+// OpenFundraisingRealEstate opens the subscription of a published asset.
 // It is a plain write: the token was bound at publication, so nothing reaches
 // the chain here.
 func (s *Service) OpenFundraisingRealEstate(ctx context.Context, id int) (server.RealEstate, error) {

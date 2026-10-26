@@ -408,11 +408,32 @@ func TestConfirmIssuanceOrderPayment(t *testing.T) {
 
 	t.Run("06 every other status: not awaiting payment, nothing written", func(t *testing.T) {
 		f := newConfirmFixture(t, db)
-		for _, status := range []int{1, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14} {
+		// 8 and 9 are absent: a confirmed payment starts the delivery on its
+		// own, so a second confirm-payment lands on an order that already
+		// moved to DELIVERY_IN_PROGRESS or DELIVERY_FAILED. Those two are
+		// covered by 08 below, where they answer like 4 does.
+		for _, status := range []int{1, 5, 6, 7, 10, 11, 12, 13, 14} {
 			t.Run(fmt.Sprintf("status %d", status), func(t *testing.T) {
 				o := newConfirmOrder(t, db, f.investor, f.asset, status, "15 minutes")
 				err := ConfirmIssuanceOrderPayment(ctx, f.asset, o.ref, f.admin)
 				expectIs(t, err, ErrOrderNotAwaitingPayment)
+				expectUntouched(t, db, o, status)
+			})
+		}
+	})
+
+	// The delivery moves the order out of PAYMENT_CONFIRMED by itself, within
+	// milliseconds of the answer. An ADMIN who clicks twice must not be told
+	// their payment failed because the delivery was quick, so these two
+	// statuses answer exactly like 4: nothing written, no error.
+	t.Run("08 the delivery already started or failed: idempotent, nothing written", func(t *testing.T) {
+		f := newConfirmFixture(t, db)
+		for _, status := range []int{8, 9} {
+			t.Run(fmt.Sprintf("status %d", status), func(t *testing.T) {
+				o := newConfirmOrder(t, db, f.investor, f.asset, status, "15 minutes")
+				if err := ConfirmIssuanceOrderPayment(ctx, f.asset, o.ref, f.admin); err != nil {
+					t.Fatalf("error = %v, want nil", err)
+				}
 				expectUntouched(t, db, o, status)
 			})
 		}
@@ -499,7 +520,7 @@ func TestConfirmIssuanceOrderPayment(t *testing.T) {
 		expectConfirmedOnce(t, db, f.order)
 	})
 
-	// P5: the asset first, the order second, like PlaceIssuanceOrder. While the
+	// The asset first, the order second, like PlaceIssuanceOrder. While the
 	// call waits on the asset, the order must still be free.
 	t.Run("14 the asset is locked before the order", func(t *testing.T) {
 		f := newConfirmFixture(t, db)
@@ -544,8 +565,8 @@ func TestConfirmIssuanceOrderPayment(t *testing.T) {
 		expectUntouched(t, db, f.order, 6)
 	})
 
-	// §3 of the ticket: now() is frozen at the start of the transaction, before
-	// the lock wait. The reservation must be judged on the real time.
+	// now() is frozen at the start of the transaction, before the lock wait.
+	// The reservation must be judged on the real time.
 	t.Run("16 a reservation that lapses while the call waits: expired", func(t *testing.T) {
 		f := newConfirmFixture(t, db)
 		o := newConfirmOrder(t, db, f.investor, f.asset, 2, "2 seconds")

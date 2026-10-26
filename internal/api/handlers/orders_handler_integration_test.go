@@ -22,6 +22,7 @@
 package handlers
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -57,6 +58,12 @@ type orderHarness struct {
 
 func newOrderHarness(t *testing.T) *orderHarness {
 	t.Helper()
+	return newOrderHarnessDelivering(t, noDelivery{})
+}
+
+// newOrderHarnessDelivering is newOrderHarness with d in place of the delivery.
+func newOrderHarnessDelivering(t *testing.T, d orderDeliverer) *orderHarness {
+	t.Helper()
 	dsn := os.Getenv("TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("TEST_DATABASE_URL is not set")
@@ -77,10 +84,32 @@ func newOrderHarness(t *testing.T) *orderHarness {
 	r := gin.New()
 	g := r.Group(globals.BaseURL)
 	g.Use(middleware.AutoAuthMiddleware())
-	server.RegisterHandlers(g, NewHandler())
+	server.RegisterHandlers(g, newHandlerDelivering(d))
 
 	return &orderHarness{t: t, db: db, r: r, run: time.Now().UnixNano() % 1_000_000_000}
 }
+
+// newHandlerDelivering builds the production handler, then puts d in place of
+// its delivery.
+//
+// A confirmed payment starts a delivery on its own, which would reach for a
+// chain these tests do not run and move the order under their feet.
+// What they check is the HTTP contract of the endpoints — codes, envelopes,
+// rows written — so the delivery is replaced by a no-op and tested on its own,
+// in internal/delivery and in the end-to-end suite. Only the test that checks
+// the handler starts a delivery passes something else.
+//
+// The test lives in package handlers, so no seam has to be opened in the
+// production code to do this.
+func newHandlerDelivering(d orderDeliverer) server.ServerInterface {
+	h := NewHandler().(*Handler)
+	h.deliverySvc = d
+	return h
+}
+
+type noDelivery struct{}
+
+func (noDelivery) Deliver(context.Context, string) {}
 
 func (h *orderHarness) unique(prefix string) string {
 	return fmt.Sprintf("%s-%d-%d", prefix, h.run, h.seq.Add(1))
@@ -306,7 +335,7 @@ func TestIssuanceOrderEndpoint(t *testing.T) {
 			expectCode(t, code, body, http.StatusUnauthorized)
 		})
 
-		// U6: MANAGER and ADMIN do not order, even with a verified KYC.
+		// MANAGER and ADMIN do not order, even with a verified KYC.
 		for _, role := range []string{authUtils.RoleManager, authUtils.RoleAdmin} {
 			t.Run("02 a "+role+" is a 403", func(t *testing.T) {
 				staff := h.newUser(t, role, "verified", "NULL")
@@ -377,7 +406,7 @@ func TestIssuanceOrderEndpoint(t *testing.T) {
 			expectCode(t, code, body, http.StatusNotFound)
 		})
 
-		// U7: what the public cannot see does not exist for it.
+		// What the public cannot see does not exist for it.
 		t.Run("08 a draft is a 404", func(t *testing.T) {
 			a := villaBelair()
 			a.status = 1
@@ -592,7 +621,7 @@ func TestIssuanceOrderEndpoint(t *testing.T) {
 			expectCode(t, code, body, http.StatusCreated)
 		})
 
-		// U8: a closed order still holds its shares, a cancelled one does not.
+		// A closed order still holds its shares, a cancelled one does not.
 		t.Run("19 a closed 45 counts, a cancelled 30 does not: 409", func(t *testing.T) {
 			asset := h.newAsset(t, villaBelair())
 			alice := h.investor(t)
@@ -613,7 +642,7 @@ func TestIssuanceOrderEndpoint(t *testing.T) {
 			rate *string
 		}{
 			{"18 no fee rate", nil},
-			{"18b a fee rate of 0 (U4)", &zero},
+			{"18b a fee rate of 0", &zero},
 		} {
 			t.Run(c.name+": feeAmount 0.00, fees empty, no line in the database", func(t *testing.T) {
 				a := villaBelair()
@@ -769,7 +798,7 @@ func TestIssuanceOrderConcurrency(t *testing.T) {
 	})
 }
 
-// ---------------------------------------------------------------- reads (M3-4)
+// ---------------------------------------------------------------- reads
 
 func (h *orderHarness) get(token, path string) (int, string) {
 	req := httptest.NewRequest(http.MethodGet, globals.BaseURL+path, nil)

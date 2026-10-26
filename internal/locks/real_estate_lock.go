@@ -21,7 +21,7 @@ type LockedRealEstateDTO struct {
 	PricePerShare        decimal.Decimal
 	CurrencyCode         string
 	EntryFeeRate         decimal.NullDecimal // NULL: no entry fee
-	MaxSharesPerInvestor sql.NullInt64       // NULL: no cap (U8)
+	MaxSharesPerInvestor sql.NullInt64       // NULL: no cap
 }
 
 // LockRealEstate takes the row lock on the asset.

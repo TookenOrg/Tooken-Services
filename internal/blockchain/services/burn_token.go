@@ -13,7 +13,9 @@ import (
 	"github.com/TookenOrg/tooken-services/internal/blockchain/globals"
 	"github.com/TookenOrg/tooken-services/internal/blockchain/utils"
 	"github.com/TookenOrg/tooken-services/pkg/logger"
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 )
 
 func (s *Service) Burn(ctx context.Context, tokenAddr, to string, humanAmount float64) (txHashName server.TxHashName, err error) {
@@ -34,13 +36,10 @@ func (s *Service) Burn(ctx context.Context, tokenAddr, to string, humanAmount fl
 		return
 	}
 
-	auth, err := utils.GenerateTransactOpts(ctx)
-	if err != nil {
-		return
-	}
-
 	logger.LogInfo("💌 Burning [%f] tokens (converted to [%s] wei) in Token [%s] for wallet [%s]...", humanAmount, amtWei.String(), tokenAddr, to)
-	tx, err := tokenInstance.Burn(auth, common.HexToAddress(to), amtWei)
+	tx, err := utils.Transact(ctx, func(auth *bind.TransactOpts) (*types.Transaction, error) {
+		return tokenInstance.Burn(auth, common.HexToAddress(to), amtWei)
+	})
 	if err != nil {
 		return
 	}

@@ -49,7 +49,8 @@ SELECT
 	ord.gross_amount,
 	ord.fee_amount,
 	ord.amount_due,
-	ord.reservation_expires_at
+	ord.reservation_expires_at,
+	ord.delivery_tx_hash
 FROM iss.issuance_orders ord
 CROSS JOIN LATERAL (
      SELECT CASE
@@ -73,6 +74,7 @@ func scanIssuanceOrder(scanner interface {
 		isFinal   *bool
 		amounts   [5]sql.NullString // unit_price, currency_code, gross, fee, due
 		expiresAt sql.NullTime
+		txHash    sql.NullString
 	)
 
 	err := scanner.Scan(
@@ -90,6 +92,7 @@ func scanIssuanceOrder(scanner interface {
 		&title,
 		&amounts[0], &amounts[1], &amounts[2], &amounts[3], &amounts[4],
 		&expiresAt,
+		&txHash,
 	)
 	if err != nil {
 		return e, err
@@ -99,7 +102,7 @@ func scanIssuanceOrder(scanner interface {
 	e.RealEstateTitle = title
 
 	// All five amounts are set or none is (issuance_orders_amounts_ck): an
-	// order created before M3-3 has none and keeps empty strings.
+	// order created before the amounts existed has none and keeps empty strings.
 	e.UnitPrice = amounts[0].String
 	e.CurrencyCode = amounts[1].String
 	e.GrossAmount = amounts[2].String
@@ -107,6 +110,9 @@ func scanIssuanceOrder(scanner interface {
 	e.AmountDue = amounts[4].String
 	if expiresAt.Valid {
 		e.ReservationExpiresAt = expiresAt.Time
+	}
+	if txHash.Valid {
+		e.DeliveryTxHash = &txHash.String
 	}
 
 	return e, nil

@@ -15,6 +15,7 @@ import (
 	"github.com/TookenOrg/tooken-services/internal/blockchain/utils"
 	"github.com/TookenOrg/tooken-services/pkg/logger"
 	"github.com/ethereum/go-ethereum/accounts/abi"
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -192,11 +193,6 @@ func addClaim(ctx context.Context, identityInstance *contracts.Identity, addClai
 
 	issuer := common.HexToAddress(issuerAddressDetails.Address)
 
-	auth, err := utils.GenerateTransactOpts(ctx)
-	if err != nil {
-		return
-	}
-
 	logger.LogInfo("💌 Adding claim on Identity...")
 
 	claimTopic := big.NewInt(int64(addClaimRequest.ClaimTopic))
@@ -204,7 +200,9 @@ func addClaim(ctx context.Context, identityInstance *contracts.Identity, addClai
 	signatureBytes := signature.SignatureBytes
 	dataBytes := []byte(claimData)
 
-	tx, err = identityInstance.AddClaim(auth, claimTopic, scheme, issuer, signatureBytes, dataBytes, "")
+	tx, err = utils.Transact(ctx, func(auth *bind.TransactOpts) (*types.Transaction, error) {
+		return identityInstance.AddClaim(auth, claimTopic, scheme, issuer, signatureBytes, dataBytes, "")
+	})
 	if err != nil {
 		return
 	}

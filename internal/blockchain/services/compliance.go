@@ -18,18 +18,13 @@ import (
 
 func DeploySharedComplianceModules(ctx context.Context, moduleName string) (moduleAddr common.Address, err error) {
 
-	auth, err := utils.GenerateTransactOpts(ctx)
-	if err != nil {
-		return
-	}
-
 	switch moduleName {
 	case globals.TransferRestrictionModuleName:
-		moduleAddr, err = DeployTransferRestrictModule(ctx, auth)
+		moduleAddr, err = DeployTransferRestrictModule(ctx)
 	case globals.MaxBalanceModuleName:
-		moduleAddr, err = DeployMaxBalanceModule(ctx, auth)
+		moduleAddr, err = DeployMaxBalanceModule(ctx)
 	case globals.SupplyLimitModuleName:
-		moduleAddr, err = DeploySupplyLimitModule(ctx, auth)
+		moduleAddr, err = DeploySupplyLimitModule(ctx)
 	default:
 		err = errors.New("compliance module not recognized: " + moduleName)
 		return
@@ -46,8 +41,8 @@ func DeploySharedComplianceModules(ctx context.Context, moduleName string) (modu
 // any address could claim its ownership (B8). For this module ownership grants
 // nothing (writes are onlyComplianceCall, upgradeTo refuses a non-proxy call), but
 // initializing it keeps every module in the same, owned state.
-func DeployTransferRestrictModule(ctx context.Context, auth *bind.TransactOpts) (common.Address, error) {
-	return deployComplianceModule(ctx, auth, globals.TransferRestrictionModuleName, "TRANSFER_RESTRICT_MODULE",
+func DeployTransferRestrictModule(ctx context.Context) (common.Address, error) {
+	return deployComplianceModule(ctx, globals.TransferRestrictionModuleName, "TRANSFER_RESTRICT_MODULE",
 		func(auth *bind.TransactOpts) (common.Address, *types.Transaction, initializableModule, error) {
 			return contracts.DeployTransferRestrictModule(auth, globals.EthClient)
 		})
@@ -61,8 +56,8 @@ type initializableModule interface {
 
 // DeployMaxBalanceModule deploys, initializes and registers the shared module
 // that caps the balance one investor identity can hold in a token.
-func DeployMaxBalanceModule(ctx context.Context, auth *bind.TransactOpts) (common.Address, error) {
-	return deployComplianceModule(ctx, auth, globals.MaxBalanceModuleName, "MAX_BALANCE_MODULE",
+func DeployMaxBalanceModule(ctx context.Context) (common.Address, error) {
+	return deployComplianceModule(ctx, globals.MaxBalanceModuleName, "MAX_BALANCE_MODULE",
 		func(auth *bind.TransactOpts) (common.Address, *types.Transaction, initializableModule, error) {
 			return contracts.DeployMaxBalanceModule(auth, globals.EthClient)
 		})
@@ -70,8 +65,8 @@ func DeployMaxBalanceModule(ctx context.Context, auth *bind.TransactOpts) (commo
 
 // DeploySupplyLimitModule deploys, initializes and registers the shared module
 // that caps the total supply of a token.
-func DeploySupplyLimitModule(ctx context.Context, auth *bind.TransactOpts) (common.Address, error) {
-	return deployComplianceModule(ctx, auth, globals.SupplyLimitModuleName, "SUPPLY_LIMIT_MODULE",
+func DeploySupplyLimitModule(ctx context.Context) (common.Address, error) {
+	return deployComplianceModule(ctx, globals.SupplyLimitModuleName, "SUPPLY_LIMIT_MODULE",
 		func(auth *bind.TransactOpts) (common.Address, *types.Transaction, initializableModule, error) {
 			return contracts.DeploySupplyLimitModule(auth, globals.EthClient)
 		})
@@ -90,13 +85,16 @@ func DeploySupplyLimitModule(ctx context.Context, auth *bind.TransactOpts) (comm
 // no locked constructor: until it runs, anyone can claim ownership (B8).
 func deployComplianceModule(
 	ctx context.Context,
-	auth *bind.TransactOpts,
 	name, txLabel string,
 	deploy func(*bind.TransactOpts) (common.Address, *types.Transaction, initializableModule, error),
 ) (moduleAddr common.Address, err error) {
 
 	logger.LogInfo("💌 Deploying %s...", name)
-	moduleAddr, tx, module, err := deploy(auth)
+	var module initializableModule
+	tx, err := utils.Transact(ctx, func(auth *bind.TransactOpts) (tx *types.Transaction, err error) {
+		moduleAddr, tx, module, err = deploy(auth)
+		return
+	})
 	if err != nil {
 		return common.Address{}, fmt.Errorf("deploy %s: %w", name, err)
 	}
@@ -110,13 +108,9 @@ func deployComplianceModule(
 		return moduleAddr, err
 	}
 
-	// The deployment consumed the nonce auth was built with: the next
-	// transaction needs options of its own.
-	initAuth, err := utils.GenerateTransactOpts(ctx)
-	if err != nil {
-		return moduleAddr, err
-	}
-	initTx, err := module.Initialize(initAuth)
+	initTx, err := utils.Transact(ctx, func(auth *bind.TransactOpts) (*types.Transaction, error) {
+		return module.Initialize(auth)
+	})
 	if err != nil {
 		return moduleAddr, fmt.Errorf("initialize %s: %w", name, err)
 	}

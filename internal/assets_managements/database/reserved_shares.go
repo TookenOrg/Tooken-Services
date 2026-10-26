@@ -14,8 +14,8 @@ package database
 //   - its status says so (iss.issuance_order_statuses.counts_as_reserved), so
 //     adding a status to the flow needs no change here;
 //   - and, if it is still AWAITING_PAYMENT, its reservation has not lapsed.
-//     Nothing writes EXPIRED (D6): the lapse is read from the date, with the
-//     database clock, the one reservation_expires_at was written with (U2).
+//     Nothing writes EXPIRED: the lapse is read from the date, with the
+//     database clock, the one reservation_expires_at was written with.
 const ReservedOrders = `
 FROM iss.issuance_orders o
 JOIN iss.issuance_order_statuses s

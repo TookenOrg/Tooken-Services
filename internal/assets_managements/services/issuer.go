@@ -15,9 +15,9 @@ import (
 
 // Issuer service: the legal vehicle a token represents shares of.
 //
-// Since §11.18 an asset cannot be published without an issuer_id, but nothing
-// could create an issuer other than a direct SQL INSERT. The rule was right and
-// the tooling to satisfy it was missing; this file provides it.
+// An asset cannot be published without an issuer_id, but nothing could create
+// an issuer other than a direct SQL INSERT. The rule was right and the tooling
+// to satisfy it was missing; this file provides it.
 //
 // The three sentinels mirror the real estate ones for the same reason: the
 // handler picks a status code without knowing a single business rule.
@@ -352,7 +352,7 @@ func checkIssuerCreatable(in database.IssuerWriteDTO) error {
 // Everything here is keyed on a CHANGE of status. A patch that does not touch
 // the status never triggers it, so a legacy row stored without a registration
 // number stays editable — the freeze trap already met on the address, on
-// estate_type and on the payment rhythm (§11.20).
+// estate_type and on the payment rhythm.
 func checkIssuerStatusChange(state database.IssuerGuardStateDTO, in database.IssuerWriteDTO) error {
 	target := in.StatusId
 
@@ -399,8 +399,8 @@ func checkIssuerStatusChange(state database.IssuerGuardStateDTO, in database.Iss
 // issuer of what makes it identifiable.
 //
 // checkIssuerStatusChange returns early when the status does not change, which
-// is what keeps legacy rows editable — and which also left the invariant of
-// §11.22 unenforced for every patch that keeps the issuer active. Clearing
+// is what keeps legacy rows editable — and which also left the identifiability
+// invariant unenforced for every patch that keeps the issuer active. Clearing
 // registration_number was then accepted on a live vehicle, producing exactly
 // the state a creation and an activation both refuse.
 //

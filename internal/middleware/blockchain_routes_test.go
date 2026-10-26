@@ -14,6 +14,10 @@ import (
 // key. Adding a route is the moment the omission happens again, so the list
 // below is the reminder: a new write path under /trex or /contract has to be
 // added here, and that only passes once the spec declares bearerAuth.
+//
+// POST /contract/token/mint is deliberately absent: it was removed. Minting
+// now happens only as the delivery of a paid order, so there is no longer a
+// way to create shares out of band, with or without a token.
 func TestBlockchainWriteRoutesRequireAToken(t *testing.T) {
 	routes, err := LoadProtectedRoutesFromOpenAPI("../../api/openapi.yaml")
 	if err != nil {
@@ -29,7 +33,6 @@ func TestBlockchainWriteRoutesRequireAToken(t *testing.T) {
 		{"POST", "/contract/identity"},
 		{"POST", "/contract/identity/claims/add"},
 		{"POST", "/contract/token"},
-		{"POST", "/contract/token/mint"},
 		{"POST", "/contract/token/burn"},
 	}
 

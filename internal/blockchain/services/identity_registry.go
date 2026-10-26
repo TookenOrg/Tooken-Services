@@ -43,13 +43,10 @@ func registerIdentity(ctx context.Context, userWallet, identityAddress common.Ad
 		return
 	}
 
-	auth, err := utils.GenerateTransactOpts(ctx)
-	if err != nil {
-		return
-	}
-
 	logger.LogInfo("💌 Registration of new identity in the investor whitelist...")
-	tx, err = irInstance.RegisterIdentity(auth, userWallet, identityAddress, uint16(countryCode))
+	tx, err = utils.Transact(ctx, func(auth *bind.TransactOpts) (*types.Transaction, error) {
+		return irInstance.RegisterIdentity(auth, userWallet, identityAddress, uint16(countryCode))
+	})
 	if err != nil {
 		return
 	}
