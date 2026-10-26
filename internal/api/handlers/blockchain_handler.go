@@ -228,54 +228,6 @@ func (h *Handler) GetTokenInfos(gCtx *gin.Context, tokenAddress string) {
 	})
 }
 
-func (h *Handler) MintTokenAsync(gCtx *gin.Context) {
-	if !middleware.RequireRole(gCtx, authUtils.RoleManager, authUtils.RoleAdmin) {
-		return
-	}
-
-	logger.LogInfo("🚀 Starting mint on token")
-
-	var req server.MintTokenRequest
-	if err := gCtx.ShouldBindJSON(&req); err != nil {
-		gCtx.JSON(http.StatusInternalServerError, server.MintTokenResponse{
-			Message: "Failed to parse request body: " + err.Error(),
-		})
-		return
-	}
-
-	reqCtx := gCtx.Request.Context()
-
-	// Validate before answering 202: the work runs in a goroutine, so this is
-	// the only moment where the caller can still be told the request is wrong.
-	if err := h.blockchainSvc.ValidateMintInput(reqCtx, req.TokenContractAddress, req.To, req.Amount); err != nil {
-		if errors.Is(err, blockchainService.ErrInvalidMintInput) {
-			logger.LogWarn("Refused mint request: %s", err.Error())
-			gCtx.JSON(http.StatusBadRequest, server.MintTokenResponse{Message: err.Error()})
-			return
-		}
-
-		logger.LogError("Failed to validate the mint request: %s", err.Error())
-		gCtx.JSON(http.StatusInternalServerError, server.MintTokenResponse{
-			Message: "Unable to validate the request.",
-		})
-		return
-	}
-
-	ctx := context.WithoutCancel(reqCtx)
-
-	go func(ctx context.Context) {
-		_, err := h.blockchainSvc.Mint(ctx, req.TokenContractAddress, req.To, req.Amount)
-		if err != nil {
-			logger.LogError("Failed to Mint: %s", err.Error())
-			return
-		}
-	}(ctx)
-
-	gCtx.JSON(http.StatusAccepted, server.MintTokenResponse{
-		Message: "Mint started successfully.",
-	})
-}
-
 func (h *Handler) BurnTokenAsync(gCtx *gin.Context) {
 	if !middleware.RequireRole(gCtx, authUtils.RoleManager, authUtils.RoleAdmin) {
 		return

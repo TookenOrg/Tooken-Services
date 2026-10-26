@@ -2,7 +2,7 @@
 
 // Coverage of ListIssuanceOrders and GetIssuanceOrderByRef against a real
 // PostgreSQL: who sees which orders, in which order, and the EXPIRED status
-// shown at read time (TICKET-M3-4 §4.1).
+// shown at read time.
 //
 // Same constraints as issuance_order_place_integration_test.go: what is written
 // here can never be deleted, so run it on a THROWAWAY database only:
@@ -16,7 +16,9 @@ package database
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"strings"
 	"testing"
@@ -291,7 +293,7 @@ func TestListIssuanceOrders(t *testing.T) {
 	})
 
 	// Zero rows is a read result, not a business error: the database reports
-	// sql.ErrNoRows and the service decides it is ErrOrderNotFound (L8).
+	// sql.ErrNoRows and the service decides it is ErrOrderNotFound.
 	t.Run("10 an unknown reference is sql.ErrNoRows", func(t *testing.T) {
 		for _, viewAll := range []bool{false, true} {
 			_, err := GetIssuanceOrderByRef(ctx, placeUnique("UNKNOWN"), viewAll, 0)
@@ -337,6 +339,41 @@ func TestListIssuanceOrders(t *testing.T) {
 				t.Fatalf("want %s, got %s", marieRef, got.OrderRef)
 			}
 		})
+	})
+
+	// The hash of the broadcast mint is how an investor follows the delivery:
+	// it must come back on both reads, and stay null while nothing went out.
+	t.Run("11 the delivery hash is read back, null when there is none", func(t *testing.T) {
+		asset := newAsset(t, db, fundraising())
+		user := newInvestor(t, db, kycVerified)
+		// The database is never emptied and the hash is unique: draw a new one.
+		raw := make([]byte, 32)
+		if _, err := rand.Read(raw); err != nil {
+			t.Fatal(err)
+		}
+		hash := "0x" + hex.EncodeToString(raw)
+		withHash := datedOrder(t, user, asset, 8, "now()", "now() + interval '15 minutes'")
+		if _, err := db.Exec(`UPDATE iss.issuance_orders SET delivery_tx_hash = $2 WHERE order_reference = $1`,
+			withHash, hash); err != nil {
+			t.Fatalf("recording the hash: %v", err)
+		}
+		withoutHash := datedOrder(t, user, asset, 8, "now()", "now() + interval '15 minutes'")
+
+		got, err := GetIssuanceOrderByRef(ctx, withHash, true, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.DeliveryTxHash == nil || *got.DeliveryTxHash != hash {
+			t.Fatalf("detail: want hash %s, got %v", hash, got.DeliveryTxHash)
+		}
+
+		byRef := refsOf(listOf(t, false, user))
+		if h := byRef[withHash].DeliveryTxHash; h == nil || *h != hash {
+			t.Fatalf("list: want hash %s, got %v", hash, h)
+		}
+		if h := byRef[withoutHash].DeliveryTxHash; h != nil {
+			t.Fatalf("list: an order with nothing broadcast must have no hash, got %s", *h)
+		}
 	})
 }
 

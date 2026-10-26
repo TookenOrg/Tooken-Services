@@ -27,25 +27,25 @@ import (
 )
 
 const (
-	m25ScratchDatabaseName = "tooken_it_users_services_m25"
-	m25BaselineSQLPath     = "../../../tools/db/baseline.sql"
-	m25HardhatAccount0Key  = "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+	scratchDatabaseName = "tooken_it_users_services_kyc_mint"
+	baselineSQLPath     = "../../../tools/db/baseline.sql"
+	hardhatAccount0Key  = "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
 )
 
-type m25IntegrationEnv struct {
+type integrationEnv struct {
 	DB     *sql.DB
 	Client *ethclient.Client
 }
 
-func TestM25ApprovedKYCEnablesMintAndNonKYCWalletReverts(t *testing.T) {
+func TestApprovedKYCEnablesMintAndNonKYCWalletReverts(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 900*time.Second)
 	defer cancel()
 
-	env := newM25IntegrationEnv(ctx, t)
+	env := newIntegrationEnv(ctx, t)
 	usersSvc := NewService()
 	chainSvc := blkServices.NewService()
 
-	token := deployM25Token(ctx, t, chainSvc)
+	token := deployTestToken(ctx, t, chainSvc)
 	tokenAddr := common.HexToAddress(token.Address)
 	tokenInstance, err := contracts.NewToken(tokenAddr, env.Client)
 	if err != nil {
@@ -60,9 +60,9 @@ func TestM25ApprovedKYCEnablesMintAndNonKYCWalletReverts(t *testing.T) {
 		t.Fatalf("bind identity registry: %v", err)
 	}
 
-	adminID := insertM25User(t, env.DB, "m2-5-admin", "ADMIN")
-	aliceID := insertM25User(t, env.DB, "m2-5-alice", "USER")
-	aliceVerificationID := insertM25ApprovedKYC(t, env.DB, aliceID, adminID, "Alice Tooken", "FR")
+	adminID := insertUser(t, env.DB, "kyc-mint-admin", "ADMIN")
+	aliceID := insertUser(t, env.DB, "kyc-mint-alice", "USER")
+	aliceVerificationID := insertApprovedKYC(t, env.DB, aliceID, adminID, "Alice Tooken", "FR")
 
 	t.Run("Alice approved KYC syncs on-chain and can receive minted tokens", func(t *testing.T) {
 		response, err := usersSvc.SyncApprovedKycVerificationOnChain(ctx, aliceVerificationID)
@@ -90,28 +90,28 @@ func TestM25ApprovedKYCEnablesMintAndNonKYCWalletReverts(t *testing.T) {
 		if !verified {
 			t.Fatal("Alice must be verified on the token identity registry")
 		}
-		assertM25UserVerified(t, env.DB, aliceID)
+		assertUserVerified(t, env.DB, aliceID)
 
 		before, err := tokenInstance.BalanceOf(bindCall(ctx), aliceWallet)
 		if err != nil {
 			t.Fatalf("BalanceOf(alice before): %v", err)
 		}
-		result, err := chainSvc.Mint(ctx, token.Address, aliceWallet.Hex(), 100)
+		txHash, err := mintShares(ctx, chainSvc, token.Address, aliceWallet.Hex(), 100)
 		if err != nil {
 			t.Fatalf("Mint(alice): %v", err)
 		}
-		if result.OperationName != "Mint" || result.TransactionHash == "" {
-			t.Fatalf("Mint must return its transaction, got %+v", result)
+		if txHash == "" {
+			t.Fatal("the mint must return its transaction hash")
 		}
 		after, err := tokenInstance.BalanceOf(bindCall(ctx), aliceWallet)
 		if err != nil {
 			t.Fatalf("BalanceOf(alice after): %v", err)
 		}
-		assertM25BalanceGain(t, before, after, 100)
+		assertBalanceGain(t, before, after, 100)
 
-		activeWalletsBefore := countM25Rows(t, env.DB, `SELECT count(*) FROM blk.user_wallet WHERE user_id = $1 AND is_active`, aliceID)
-		identitiesBefore := countM25Rows(t, env.DB, `SELECT count(*) FROM blk.identity WHERE user_id = $1`, aliceID)
-		registerTxBefore := countM25Rows(t, env.DB, `SELECT count(*) FROM blk.eth_transaction WHERE tx_name = 'REGISTER_IDENTITY'`)
+		activeWalletsBefore := countRows(t, env.DB, `SELECT count(*) FROM blk.user_wallet WHERE user_id = $1 AND is_active`, aliceID)
+		identitiesBefore := countRows(t, env.DB, `SELECT count(*) FROM blk.identity WHERE user_id = $1`, aliceID)
+		registerTxBefore := countRows(t, env.DB, `SELECT count(*) FROM blk.eth_transaction WHERE tx_name = 'REGISTER_IDENTITY'`)
 
 		secondResponse, err := usersSvc.SyncApprovedKycVerificationOnChain(ctx, aliceVerificationID)
 		if err != nil {
@@ -120,13 +120,13 @@ func TestM25ApprovedKYCEnablesMintAndNonKYCWalletReverts(t *testing.T) {
 		if secondResponse.Transactions.Claim != nil || secondResponse.Transactions.RegisterIdentity != nil {
 			t.Fatalf("idempotent sync must not add claim/register transactions, got %+v", secondResponse.Transactions)
 		}
-		if got := countM25Rows(t, env.DB, `SELECT count(*) FROM blk.user_wallet WHERE user_id = $1 AND is_active`, aliceID); got != activeWalletsBefore {
+		if got := countRows(t, env.DB, `SELECT count(*) FROM blk.user_wallet WHERE user_id = $1 AND is_active`, aliceID); got != activeWalletsBefore {
 			t.Fatalf("active wallet count changed: before=%d after=%d", activeWalletsBefore, got)
 		}
-		if got := countM25Rows(t, env.DB, `SELECT count(*) FROM blk.identity WHERE user_id = $1`, aliceID); got != identitiesBefore {
+		if got := countRows(t, env.DB, `SELECT count(*) FROM blk.identity WHERE user_id = $1`, aliceID); got != identitiesBefore {
 			t.Fatalf("identity count changed: before=%d after=%d", identitiesBefore, got)
 		}
-		if got := countM25Rows(t, env.DB, `SELECT count(*) FROM blk.eth_transaction WHERE tx_name = 'REGISTER_IDENTITY'`); got != registerTxBefore {
+		if got := countRows(t, env.DB, `SELECT count(*) FROM blk.eth_transaction WHERE tx_name = 'REGISTER_IDENTITY'`); got != registerTxBefore {
 			t.Fatalf("register identity tx count changed: before=%d after=%d", registerTxBefore, got)
 		}
 
@@ -134,14 +134,14 @@ func TestM25ApprovedKYCEnablesMintAndNonKYCWalletReverts(t *testing.T) {
 		if err != nil {
 			t.Fatalf("BalanceOf(alice before second mint): %v", err)
 		}
-		if _, err := chainSvc.Mint(ctx, token.Address, aliceWallet.Hex(), 25); err != nil {
+		if _, err := mintShares(ctx, chainSvc, token.Address, aliceWallet.Hex(), 25); err != nil {
 			t.Fatalf("second Mint(alice): %v", err)
 		}
 		afterSecondMint, err := tokenInstance.BalanceOf(bindCall(ctx), aliceWallet)
 		if err != nil {
 			t.Fatalf("BalanceOf(alice after second mint): %v", err)
 		}
-		assertM25BalanceGain(t, beforeSecondMint, afterSecondMint, 25)
+		assertBalanceGain(t, beforeSecondMint, afterSecondMint, 25)
 	})
 
 	t.Run("Bob without verified KYC is rejected by the token", func(t *testing.T) {
@@ -159,7 +159,7 @@ func TestM25ApprovedKYCEnablesMintAndNonKYCWalletReverts(t *testing.T) {
 			t.Fatal("Bob must not be verified before mint")
 		}
 
-		_, err = chainSvc.Mint(ctx, token.Address, bobWallet.Hex(), 100)
+		_, err = mintShares(ctx, chainSvc, token.Address, bobWallet.Hex(), 100)
 		if err == nil {
 			t.Fatal("Mint(bob) must fail")
 		}
@@ -177,7 +177,7 @@ func TestM25ApprovedKYCEnablesMintAndNonKYCWalletReverts(t *testing.T) {
 	})
 }
 
-func newM25IntegrationEnv(ctx context.Context, t *testing.T) *m25IntegrationEnv {
+func newIntegrationEnv(ctx context.Context, t *testing.T) *integrationEnv {
 	t.Helper()
 
 	dsn := os.Getenv("TEST_DATABASE_URL")
@@ -186,27 +186,27 @@ func newM25IntegrationEnv(ctx context.Context, t *testing.T) *m25IntegrationEnv 
 	}
 	logger.Init(true)
 
-	client := dialM25TestNode(ctx, t)
-	db := createM25ScratchDatabase(t, dsn)
+	client := dialTestNode(ctx, t)
+	db := createScratchDatabase(t, dsn)
 
 	previousDB := appGlobals.DB
 	appGlobals.DB = db
 	previousClient := blkGlobals.EthClient
 	blkGlobals.EthClient = client
 
-	t.Setenv("PRIVATE_KEY", m25HardhatAccount0Key)
+	t.Setenv("PRIVATE_KEY", hardhatAccount0Key)
 
 	t.Cleanup(func() {
 		blkGlobals.EthClient = previousClient
 		appGlobals.DB = previousDB
 		db.Close()
-		dropM25ScratchDatabase(t, dsn)
+		dropScratchDatabase(t, dsn)
 	})
 
-	return &m25IntegrationEnv{DB: db, Client: client}
+	return &integrationEnv{DB: db, Client: client}
 }
 
-func deployM25Token(ctx context.Context, t *testing.T, chainSvc *blkServices.Service) server.TokenInfos {
+func deployTestToken(ctx context.Context, t *testing.T, chainSvc *blkServices.Service) server.TokenInfos {
 	t.Helper()
 
 	if _, err := chainSvc.DeployAllImplementations(ctx); err != nil {
@@ -243,7 +243,7 @@ func deployM25Token(ctx context.Context, t *testing.T, chainSvc *blkServices.Ser
 	return token
 }
 
-func dialM25TestNode(ctx context.Context, t *testing.T) *ethclient.Client {
+func dialTestNode(ctx context.Context, t *testing.T) *ethclient.Client {
 	t.Helper()
 
 	rpc := os.Getenv("ETH_TEST_RPC")
@@ -252,20 +252,20 @@ func dialM25TestNode(ctx context.Context, t *testing.T) *ethclient.Client {
 	}
 	client, err := ethclient.DialContext(ctx, rpc)
 	if err != nil {
-		t.Skipf("no local EVM node at %s: %v", rpc, err)
+		integrationUnavailable(t, "no local EVM node at %s: %v", rpc, err)
 	}
 	if _, err := client.ChainID(ctx); err != nil {
-		t.Skipf("local EVM node at %s not reachable: %v", rpc, err)
+		integrationUnavailable(t, "local EVM node at %s not reachable: %v", rpc, err)
 	}
 	return client
 }
 
-func createM25ScratchDatabase(t *testing.T, dsn string) *sql.DB {
+func createScratchDatabase(t *testing.T, dsn string) *sql.DB {
 	t.Helper()
 
-	adminDSN, scratchDSN, err := m25ScratchDSNs(dsn)
+	adminDSN, scratchDSN, err := scratchDSNs(dsn)
 	if err != nil {
-		t.Skipf("TEST_DATABASE_URL is not a URL a database can be derived from: %v", err)
+		integrationUnavailable(t, "TEST_DATABASE_URL is not a URL a database can be derived from: %v", err)
 	}
 
 	admin, err := sql.Open("postgres", adminDSN)
@@ -274,19 +274,19 @@ func createM25ScratchDatabase(t *testing.T, dsn string) *sql.DB {
 	}
 	defer admin.Close()
 	if err := admin.Ping(); err != nil {
-		t.Skipf("database server not reachable: %v", err)
+		integrationUnavailable(t, "database server not reachable: %v", err)
 	}
 
-	if _, err := admin.Exec(`DROP DATABASE IF EXISTS ` + m25ScratchDatabaseName); err != nil {
-		t.Skipf("cannot drop %s (the test user needs CREATEDB): %v", m25ScratchDatabaseName, err)
+	if _, err := admin.Exec(`DROP DATABASE IF EXISTS ` + scratchDatabaseName); err != nil {
+		integrationUnavailable(t, "cannot drop %s (the test user needs CREATEDB): %v", scratchDatabaseName, err)
 	}
-	if _, err := admin.Exec(`CREATE DATABASE ` + m25ScratchDatabaseName); err != nil {
-		t.Skipf("cannot create %s (the test user needs CREATEDB): %v", m25ScratchDatabaseName, err)
+	if _, err := admin.Exec(`CREATE DATABASE ` + scratchDatabaseName); err != nil {
+		integrationUnavailable(t, "cannot create %s (the test user needs CREATEDB): %v", scratchDatabaseName, err)
 	}
 
-	baseline, err := os.ReadFile(m25BaselineSQLPath)
+	baseline, err := os.ReadFile(baselineSQLPath)
 	if err != nil {
-		t.Fatalf("read %s: %v", m25BaselineSQLPath, err)
+		t.Fatalf("read %s: %v", baselineSQLPath, err)
 	}
 
 	db, err := sql.Open("postgres", scratchDSN)
@@ -295,16 +295,16 @@ func createM25ScratchDatabase(t *testing.T, dsn string) *sql.DB {
 	}
 	if _, err := db.Exec(string(baseline)); err != nil {
 		db.Close()
-		t.Fatalf("apply %s: %v", m25BaselineSQLPath, err)
+		t.Fatalf("apply %s: %v", baselineSQLPath, err)
 	}
 
 	return db
 }
 
-func dropM25ScratchDatabase(t *testing.T, dsn string) {
+func dropScratchDatabase(t *testing.T, dsn string) {
 	t.Helper()
 
-	adminDSN, _, err := m25ScratchDSNs(dsn)
+	adminDSN, _, err := scratchDSNs(dsn)
 	if err != nil {
 		return
 	}
@@ -313,10 +313,10 @@ func dropM25ScratchDatabase(t *testing.T, dsn string) {
 		return
 	}
 	defer admin.Close()
-	_, _ = admin.Exec(`DROP DATABASE IF EXISTS ` + m25ScratchDatabaseName)
+	_, _ = admin.Exec(`DROP DATABASE IF EXISTS ` + scratchDatabaseName)
 }
 
-func m25ScratchDSNs(dsn string) (adminDSN, scratchDSN string, err error) {
+func scratchDSNs(dsn string) (adminDSN, scratchDSN string, err error) {
 	parsed, err := url.Parse(dsn)
 	if err != nil {
 		return "", "", err
@@ -329,12 +329,12 @@ func m25ScratchDSNs(dsn string) (adminDSN, scratchDSN string, err error) {
 	admin.Path = "/postgres"
 
 	scratch := *parsed
-	scratch.Path = "/" + m25ScratchDatabaseName
+	scratch.Path = "/" + scratchDatabaseName
 
 	return admin.String(), scratch.String(), nil
 }
 
-func insertM25User(t *testing.T, db *sql.DB, emailPrefix, role string) int {
+func insertUser(t *testing.T, db *sql.DB, emailPrefix, role string) int {
 	t.Helper()
 
 	var id int
@@ -350,7 +350,7 @@ func insertM25User(t *testing.T, db *sql.DB, emailPrefix, role string) int {
 	return id
 }
 
-func insertM25ApprovedKYC(t *testing.T, db *sql.DB, userID, decidedBy int, fullName, country string) int {
+func insertApprovedKYC(t *testing.T, db *sql.DB, userID, decidedBy int, fullName, country string) int {
 	t.Helper()
 
 	var id int
@@ -374,7 +374,7 @@ func insertM25ApprovedKYC(t *testing.T, db *sql.DB, userID, decidedBy int, fullN
 	return id
 }
 
-func assertM25UserVerified(t *testing.T, db *sql.DB, userID int) {
+func assertUserVerified(t *testing.T, db *sql.DB, userID int) {
 	t.Helper()
 
 	var status string
@@ -393,7 +393,7 @@ func assertM25UserVerified(t *testing.T, db *sql.DB, userID int) {
 	}
 }
 
-func countM25Rows(t *testing.T, db *sql.DB, query string, args ...any) int {
+func countRows(t *testing.T, db *sql.DB, query string, args ...any) int {
 	t.Helper()
 
 	var count int
@@ -403,7 +403,7 @@ func countM25Rows(t *testing.T, db *sql.DB, query string, args ...any) int {
 	return count
 }
 
-func assertM25BalanceGain(t *testing.T, before, after *big.Int, humanAmount int64) {
+func assertBalanceGain(t *testing.T, before, after *big.Int, humanAmount int64) {
 	t.Helper()
 
 	expected := new(big.Int).Mul(big.NewInt(humanAmount), new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil))
@@ -414,4 +414,43 @@ func assertM25BalanceGain(t *testing.T, before, after *big.Int, humanAmount int6
 
 func bindCall(ctx context.Context) *bind.CallOpts {
 	return &bind.CallOpts{Context: ctx}
+}
+
+// mintShares mints whole shares and waits for the chain, the way the delivery
+// does: sign, record, send, then read the receipt. It stands in for the
+// Service.Mint that was removed, so these tests keep asking the same question
+// through the path the product actually takes.
+func mintShares(ctx context.Context, svc *blkServices.Service, tokenAddr, wallet string, shares int) (string, error) {
+
+	txHash, sent, err := svc.SendMintShares(ctx, tokenAddr, wallet, shares, func(string) error { return nil })
+	if err != nil {
+		return txHash, err
+	}
+	if !sent {
+		return txHash, fmt.Errorf("mint of %d shares to %s never reached the network", shares, wallet)
+	}
+
+	found, succeeded, err := svc.MintReceipt(ctx, txHash, wallet, shares)
+	if err != nil {
+		return txHash, err
+	}
+	if !found {
+		return txHash, fmt.Errorf("mint %s was not mined in time", txHash)
+	}
+	if !succeeded {
+		return txHash, fmt.Errorf("mint %s was mined but did not create the shares", txHash)
+	}
+
+	return txHash, nil
+}
+
+// integrationUnavailable skips the test when no integration run was asked for,
+// and fails it when one was: with TEST_DATABASE_URL or ETH_TEST_RPC set, a
+// missing database or node must not let the suite pass without running.
+func integrationUnavailable(t *testing.T, format string, args ...any) {
+	t.Helper()
+	if os.Getenv("TEST_DATABASE_URL") != "" || os.Getenv("ETH_TEST_RPC") != "" {
+		t.Fatalf(format, args...)
+	}
+	t.Skipf(format, args...)
 }

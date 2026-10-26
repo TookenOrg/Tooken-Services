@@ -1516,7 +1516,13 @@ paths:
 
         For the POC, only ADMIN user can confirm payment for primary-market orders.
         This restriction is only for the proof of concept (POC) implementation.
-        Delivery of the asset will be handled automatically in backend after payment confirmation.
+
+        The answer is 200 as soon as the payment is recorded: that part is
+        synchronous. Delivery then starts on its own, in the background. The
+        order leaves PAYMENT_CONFIRMED by itself, and ends up either DELIVERED
+        then CLOSED, or DELIVERY_FAILED with the reason on its timeline. Poll
+        the order to follow it; deliveryTxHash carries the mint once it is
+        broadcast.
       tags:
         - Issuance
         - Payments
@@ -1851,46 +1857,6 @@ paths:
               schema:
                 $ref: "#/components/schemas/TokenInfos"
 
-  /contract/token/mint:
-    post:
-      tags:
-        - Blockchain
-        - contract
-        - token
-      summary: Register the given amount for the userId in the sharetoken
-      operationId: mintTokenAsync
-      security:
-        - bearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/MintTokenRequest"
-      responses:
-        "202":
-          description: >-
-            Mint accepted and started. The on-chain work continues in the
-            background, so this status does not mean it succeeded.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/APIResponse"
-        "400":
-          description: >-
-            The request was refused before anything was sent to the chain:
-            malformed address, or an amount that cannot be converted exactly.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/MintTokenResponse"
-        "500":
-          description: Internal server error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/MintTokenResponse"
-
   /contract/token/burn:
     post:
       tags:
@@ -2221,43 +2187,6 @@ components:
           type: integer
           description: The user ID of the investor
           example: 123456
-
-    MintTokenRequest:
-      type: object
-      required:
-        - tokenContractAddress
-        - to
-        - amount
-      properties:
-        tokenContractAddress:
-          type: string
-          description: The address of the token contract
-          example: "0x1234567890abcdef1234567890abcdef12345678"
-        amount:
-          type: number
-          format: double
-          description: >-
-            The amount of tokens to mint, in human format (not wei). The request is
-            refused rather than approximated when the amount cannot be converted
-            exactly: it must carry at most 15 significant digits, stay below
-            9007199254740992, and have no more decimals than the token declares.
-            The result is written to an immutable ledger, so an amount that
-            merely resembles the one requested is worse than a rejection.
-          maximum: 9007199254740991
-          minimum: 0
-          example: 1000.87
-        to:
-          type: string
-          description: The address to mint the tokens to
-          example: "0x1234567890abcdef1234567890abcdef12345678"
-
-    MintTokenResponse:
-      allOf:
-        - $ref: "#/components/schemas/APIResponse"
-        - type: object
-          properties:
-            data:
-              $ref: "#/components/schemas/TxHashName"
 
     BurnTokenRequest:
       type: object
@@ -3228,7 +3157,15 @@ components:
           description: Title of the real estate associated with the order
         deliveryTxHash:
           type: string
-          description: Transaction hash of the delivery associated with the order
+          nullable: true
+          description: >-
+            Hash of the mint transaction for this order. It is stored as soon
+            as the transaction is signed, just before it is sent, so a hash
+            does not prove the network received it: check it on chain. It is
+            taken back if the node refused the send and does not know the
+            transaction. Null means no mint was signed for this order, or the
+            one that was never reached the network.
+          example: "0xab12cd34ef56ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12"
 
     KycVerification:
       type: object
