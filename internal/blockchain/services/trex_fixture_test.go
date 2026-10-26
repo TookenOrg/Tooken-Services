@@ -64,8 +64,8 @@ type trexFixture struct {
 }
 
 // newTREXFixture dials the local node and deploys the whole T-REX infrastructure.
-// It skips the test — rather than failing it — when no node is reachable, so the
-// default `go test ./...` stays green without a chain.
+// When no node is reachable it skips or fails the test, see
+// integrationUnavailable.
 func newTREXFixture(ctx context.Context, t *testing.T) *trexFixture {
 	t.Helper()
 
@@ -75,11 +75,11 @@ func newTREXFixture(ctx context.Context, t *testing.T) *trexFixture {
 	}
 	client, err := ethclient.DialContext(ctx, rpc)
 	if err != nil {
-		t.Skipf("no local EVM node at %s: %v", rpc, err)
+		integrationUnavailable(t, "no local EVM node at %s: %v", rpc, err)
 	}
 	chainID, err := client.ChainID(ctx)
 	if err != nil {
-		t.Skipf("local EVM node at %s not reachable: %v", rpc, err)
+		integrationUnavailable(t, "local EVM node at %s not reachable: %v", rpc, err)
 	}
 
 	deployerKey, err := crypto.HexToECDSA(hardhatAccount0Key)

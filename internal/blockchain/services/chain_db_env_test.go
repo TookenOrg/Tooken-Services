@@ -109,8 +109,8 @@ func newChainDBEnv(ctx context.Context, t *testing.T) *chainDBEnv {
 	return env
 }
 
-// dialTestNode connects to the local EVM node, skipping the test — rather than
-// failing it — when none answers.
+// dialTestNode connects to the local EVM node; when none answers, see
+// integrationUnavailable.
 //
 // It dials WebSocket by default because production does: SetupEthClient reads
 // WS_RPC_URL. The transport is not a detail — eth_subscribe does not exist over
@@ -126,10 +126,10 @@ func dialTestNode(ctx context.Context, t *testing.T) *ethclient.Client {
 	}
 	client, err := ethclient.DialContext(ctx, rpc)
 	if err != nil {
-		t.Skipf("no local EVM node at %s: %v", rpc, err)
+		integrationUnavailable(t, "no local EVM node at %s: %v", rpc, err)
 	}
 	if _, err := client.ChainID(ctx); err != nil {
-		t.Skipf("local EVM node at %s not reachable: %v", rpc, err)
+		integrationUnavailable(t, "local EVM node at %s not reachable: %v", rpc, err)
 	}
 	return client
 }
@@ -142,7 +142,7 @@ func createScratchDatabase(t *testing.T, dsn string) *sql.DB {
 
 	adminDSN, scratchDSN, err := scratchDSNs(dsn)
 	if err != nil {
-		t.Skipf("TEST_DATABASE_URL is not a URL a database can be derived from: %v", err)
+		integrationUnavailable(t, "TEST_DATABASE_URL is not a URL a database can be derived from: %v", err)
 	}
 
 	admin, err := sql.Open("postgres", adminDSN)
@@ -151,14 +151,14 @@ func createScratchDatabase(t *testing.T, dsn string) *sql.DB {
 	}
 	defer admin.Close()
 	if err := admin.Ping(); err != nil {
-		t.Skipf("database server not reachable: %v", err)
+		integrationUnavailable(t, "database server not reachable: %v", err)
 	}
 
 	if _, err := admin.Exec(`DROP DATABASE IF EXISTS ` + scratchDatabaseName); err != nil {
-		t.Skipf("cannot drop %s (the test user needs CREATEDB): %v", scratchDatabaseName, err)
+		integrationUnavailable(t, "cannot drop %s (the test user needs CREATEDB): %v", scratchDatabaseName, err)
 	}
 	if _, err := admin.Exec(`CREATE DATABASE ` + scratchDatabaseName); err != nil {
-		t.Skipf("cannot create %s (the test user needs CREATEDB): %v", scratchDatabaseName, err)
+		integrationUnavailable(t, "cannot create %s (the test user needs CREATEDB): %v", scratchDatabaseName, err)
 	}
 
 	baseline, err := os.ReadFile(baselineSQLPath)
@@ -300,4 +300,15 @@ func probeTxHash(seed string) string {
 		return hash[:66]
 	}
 	return hash + strings.Repeat("0", 66-len(hash))
+}
+
+// integrationUnavailable skips the test when no integration run was asked for,
+// and fails it when one was: with TEST_DATABASE_URL or ETH_TEST_RPC set, a
+// missing database or node must not let the suite pass without running.
+func integrationUnavailable(t *testing.T, format string, args ...any) {
+	t.Helper()
+	if os.Getenv("TEST_DATABASE_URL") != "" || os.Getenv("ETH_TEST_RPC") != "" {
+		t.Fatalf(format, args...)
+	}
+	t.Skipf(format, args...)
 }

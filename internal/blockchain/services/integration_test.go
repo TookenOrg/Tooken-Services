@@ -42,10 +42,10 @@ func TestDeployTransferRestrictModuleIntegration(t *testing.T) {
 
 	client, err := ethclient.DialContext(ctx, rpc)
 	if err != nil {
-		t.Skipf("no local EVM node at %s: %v", rpc, err)
+		integrationUnavailable(t, "no local EVM node at %s: %v", rpc, err)
 	}
 	if _, err := client.ChainID(ctx); err != nil {
-		t.Skipf("local EVM node at %s not reachable: %v", rpc, err)
+		integrationUnavailable(t, "local EVM node at %s not reachable: %v", rpc, err)
 	}
 
 	// Wire the package globals + signer exactly like main.go does at startup.
