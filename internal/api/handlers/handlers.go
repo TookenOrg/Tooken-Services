@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"context"
+
 	"github.com/TookenOrg/tooken-services/internal/api/server"
 	assetsService "github.com/TookenOrg/tooken-services/internal/assets_managements/services"
 	authService "github.com/TookenOrg/tooken-services/internal/auth/services"
@@ -12,6 +14,14 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// orderDeliverer is the delivery seen from the handler: one call, no answer.
+// Declaring it here rather than taking the concrete service lets a test put a
+// no-op in its place, so the handler suite can check the HTTP contract without
+// a chain running behind it.
+type orderDeliverer interface {
+	Deliver(ctx context.Context, orderRef string)
+}
+
 type Handler struct {
 	blockchainSvc *blockchainService.Service
 	paymentsSvc   *paymentsService.Service
@@ -19,7 +29,7 @@ type Handler struct {
 	userSvc       *usersService.Service
 	realEstateSvc *assetsService.Service
 	orderSvc      *ordersService.Service
-	deliverySvc   *deliveryService.Service
+	deliverySvc   orderDeliverer
 }
 
 func NewHandler() server.ServerInterface {

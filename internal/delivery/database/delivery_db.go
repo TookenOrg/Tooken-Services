@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/TookenOrg/tooken-services/internal/api/server"
+	"github.com/TookenOrg/tooken-services/internal/globals"
 	"github.com/TookenOrg/tooken-services/internal/locks"
 	ordrDb "github.com/TookenOrg/tooken-services/internal/orders/database"
 	usrDb "github.com/TookenOrg/tooken-services/internal/users/database"
@@ -20,9 +21,13 @@ var (
 	ErrOrderNotDeliverable = errors.New("order is not deliverable")
 
 	// ErrDeliveryRefused means the order was moved to DELIVERY_FAILED before any
-	// on-chain action (D-L12). The transaction committed, so the failure is
+	// on-chain action. The transaction committed, so the failure is
 	// recorded; the reason is wrapped in the returned error.
 	ErrDeliveryRefused = errors.New("delivery refused")
+
+	// ErrDeliveryAlreadyRecorded means another delivery of the same order got
+	// its hash in first. Nothing must be sent: that other one owns the mint.
+	ErrDeliveryAlreadyRecorded = errors.New("a delivery transaction is already recorded for this order")
 )
 
 type DeliveryTargetDTO struct {
@@ -141,7 +146,7 @@ func moveOrder(ctx context.Context, tx *sql.Tx, order locks.LockedIssuanceOrderD
 //
 // txHash is the transaction to put on the timeline, nil when nothing was ever
 // signed. reachedNetwork says whether that transaction actually left for the
-// node: when it did not (§4.4), iss.issuance_orders.delivery_tx_hash is
+// node: when it did not, iss.issuance_orders.delivery_tx_hash is
 // cleared, so the column keeps answering one question only — what was
 // broadcast — and nothing later waits on a transaction the chain never saw.
 //
@@ -219,4 +224,78 @@ WHERE o.id = $1
 	}
 
 	return wallet, &tokenAddress.String, nil
+}
+
+// RecordDeliveryTxHash is transaction B: it stores the hash of a mint that is
+// signed but not sent yet.
+//
+// It is the gate that makes a double mint impossible. The WHERE clause accepts
+// the write only while the order is still DELIVERY_IN_PROGRESS and carries no
+// hash, so of two deliveries racing on the same order exactly one gets through.
+// The other gets ErrDeliveryAlreadyRecorded and must not send anything.
+//
+// One statement, no lock: the UPDATE is atomic on its own, and holding a lock
+// here would keep it across the network call that follows.
+func RecordDeliveryTxHash(ctx context.Context, orderID int64, txHash string) error {
+	const query = `
+UPDATE iss.issuance_orders
+SET delivery_tx_hash = $2,
+    updated_at = now()
+WHERE id = $1
+  AND status_id = $3
+  AND delivery_tx_hash IS NULL
+`
+
+	result, err := globals.DB.ExecContext(ctx, query, orderID, txHash,
+		int(server.IssuanceOrderStatusIdDeliveryInProgress))
+	if err != nil {
+		return fmt.Errorf("record delivery tx hash of order %d: %w", orderID, err)
+	}
+
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("record delivery tx hash of order %d: %w", orderID, err)
+	}
+
+	if affected == 0 {
+		return ErrDeliveryAlreadyRecorded
+	}
+
+	return nil
+}
+
+// CompleteDelivery is transaction C: the mint is mined and verified, so the
+// order becomes DELIVERED then CLOSED, both in the same transaction.
+//
+// It only accepts an order that is still DELIVERY_IN_PROGRESS and carries this
+// very hash. Anything else means the order moved on without us, and nothing is
+// written.
+func CompleteDelivery(ctx context.Context, orderRef, txHash string) error {
+
+	return utils.InTransaction(ctx, func(tx *sql.Tx) error {
+		if err := locks.LockIssuanceOrder(ctx, tx, orderRef); err != nil {
+			return err
+		}
+
+		order, err := locks.ReadLockedIssuanceOrder(ctx, tx, orderRef)
+		if err != nil {
+			return err
+		}
+
+		if order.StatusId != int(server.IssuanceOrderStatusIdDeliveryInProgress) ||
+			!order.DeliveryTxHash.Valid || order.DeliveryTxHash.String != txHash {
+			return ErrOrderNotDeliverable
+		}
+
+		delivered := int(server.IssuanceOrderStatusIdDelivered)
+		if err := moveOrder(ctx, tx, order, delivered, "shares minted and verified on chain", &txHash); err != nil {
+			return err
+		}
+
+		// The next transition starts where the previous one landed.
+		order.StatusId = delivered
+
+		return moveOrder(ctx, tx, order, int(server.IssuanceOrderStatusIdClosed),
+			"nothing left to do on this order", &txHash)
+	})
 }

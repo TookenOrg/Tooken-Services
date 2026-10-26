@@ -1,7 +1,7 @@
 //go:build integration
 
 // End-to-end coverage of POST /assets/real-estate/issuance/orders/{orderRef}/confirm-payment
-// (M3-5) through the real router, middleware, handler, service and database.
+// through the real router, middleware, handler, service and database.
 // What the transaction proves on its own (locks, clock, rollbacks) lives in
 // internal/payments/database; this file proves the contract a client sees.
 //
@@ -12,11 +12,13 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/TookenOrg/tooken-services/internal/api/server"
 	authUtils "github.com/TookenOrg/tooken-services/internal/auth/utils"
@@ -28,7 +30,11 @@ func confirmPath(ref string) string {
 }
 
 func (h *orderHarness) confirm(token, ref string) (int, string) {
-	req := httptest.NewRequest(http.MethodPost, globals.BaseURL+confirmPath(ref), nil)
+	// net/http cancels the request context once the handler returns; httptest
+	// does not, so do it here, or work leaking past the request goes unseen.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req := httptest.NewRequestWithContext(ctx, http.MethodPost, globals.BaseURL+confirmPath(ref), nil)
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
@@ -112,7 +118,7 @@ func (h *orderHarness) expectConfirmedOnce(t *testing.T, ref string) {
 }
 
 // decodeConfirmed decodes the 200 of the confirmation: the {message, data}
-// envelope (P7), with the order in PAYMENT_CONFIRMED.
+// envelope, with the order in PAYMENT_CONFIRMED.
 func decodeConfirmed(t *testing.T, body, ref string) server.IssuanceOrder {
 	t.Helper()
 	var resp server.CreateIssuanceOrderResponse
@@ -168,7 +174,7 @@ func TestConfirmPaymentEndpoint(t *testing.T) {
 			h.expectUntouched(t, ref, 2)
 		})
 
-		t.Run("04 a MANAGER is a 403 (P3: ADMIN only)", func(t *testing.T) {
+		t.Run("04 a MANAGER is a 403 (ADMIN only)", func(t *testing.T) {
 			manager := h.newUser(t, authUtils.RoleManager, "none", "NULL")
 			code, body := h.confirm(manager.token, ref)
 			expectCode(t, code, body, http.StatusForbidden)
@@ -305,6 +311,97 @@ func TestConfirmPaymentEndpoint(t *testing.T) {
 			})
 		}
 	})
+}
+
+// recordingDelivery stands for the delivery and remembers each order it was
+// asked to deliver, with the context it was given.
+type recordingDelivery struct {
+	calls chan deliveryCall
+}
+
+type deliveryCall struct {
+	ref string
+	ctx context.Context
+}
+
+func (d recordingDelivery) Deliver(ctx context.Context, orderRef string) {
+	d.calls <- deliveryCall{ref: orderRef, ctx: ctx}
+}
+
+// expectDelivery waits for the delivery the handler starts in the background.
+func (d recordingDelivery) expectDelivery(t *testing.T, ref string) {
+	t.Helper()
+	select {
+	case c := <-d.calls:
+		if c.ref != ref {
+			t.Fatalf("delivery started for %s, want %s", c.ref, ref)
+		}
+		// confirm has returned, so the request context is cancelled by now:
+		// a delivery still tied to it would be cut halfway through the mint.
+		if err := c.ctx.Err(); err != nil {
+			t.Fatalf("the delivery context ended with the request: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatalf("no delivery started for %s", ref)
+	}
+	d.expectNoDelivery(t)
+}
+
+// expectNoDelivery checks that no delivery was started. A refusal returns
+// before the goroutine is launched, so there is nothing to wait for.
+func (d recordingDelivery) expectNoDelivery(t *testing.T) {
+	t.Helper()
+	select {
+	case c := <-d.calls:
+		t.Fatalf("unexpected delivery of %s", c.ref)
+	default:
+	}
+}
+
+func TestConfirmPaymentStartsTheDelivery(t *testing.T) {
+	delivery := recordingDelivery{calls: make(chan deliveryCall, 8)}
+	h := newOrderHarnessDelivering(t, delivery)
+	admin := h.admin(t)
+	asset := h.newAsset(t, villaBelair())
+	investor := h.investor(t)
+
+	t.Run("a confirmed payment starts exactly one delivery", func(t *testing.T) {
+		ref := h.rawOrderRef(t, investor.id, asset, 2, "15 minutes")
+		code, body := h.confirm(admin.token, ref)
+		expectCode(t, code, body, http.StatusOK)
+		delivery.expectDelivery(t, ref)
+	})
+
+	// A delivery lost to a restart leaves the order paid but undelivered:
+	// confirming again is the way to start it once more.
+	t.Run("a replay on a paid order starts it again", func(t *testing.T) {
+		ref := h.rawOrderRef(t, investor.id, asset, 4, "15 minutes")
+		code, body := h.confirm(admin.token, ref)
+		expectCode(t, code, body, http.StatusOK)
+		delivery.expectDelivery(t, ref)
+	})
+
+	for _, c := range []struct {
+		name  string
+		token string
+		ref   func() string
+		want  int
+	}{
+		{"a USER is refused: no delivery", investor.token,
+			func() string { return h.rawOrderRef(t, investor.id, asset, 2, "15 minutes") }, http.StatusForbidden},
+		{"an unknown order: no delivery", admin.token,
+			func() string { return h.unique("ISS-UNKNOWN") }, http.StatusNotFound},
+		{"a lapsed reservation: no delivery", admin.token,
+			func() string { return h.rawOrderRef(t, investor.id, asset, 2, "-1 minute") }, http.StatusConflict},
+		{"a CLOSED order: no delivery", admin.token,
+			func() string { return h.rawOrderRef(t, investor.id, asset, 5, "15 minutes") }, http.StatusConflict},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			code, body := h.confirm(c.token, c.ref())
+			expectCode(t, code, body, c.want)
+			delivery.expectNoDelivery(t)
+		})
+	}
 }
 
 func TestConfirmPaymentConcurrency(t *testing.T) {

@@ -28,7 +28,8 @@ type LockedIssuanceOrderDTO struct {
 	FeeAmount            decimal.Decimal
 	AmountDue            decimal.Decimal
 	ReservationExpiresAt sql.NullTime
-	ReservationExpired   bool // computed by PostgreSQL, see ReadLockedIssuanceOrder
+	ReservationExpired   bool           // computed by PostgreSQL, see ReadLockedIssuanceOrder
+	DeliveryTxHash       sql.NullString // the mint that was broadcast, NULL while none was
 }
 
 // LockIssuanceOrder takes the row lock (FOR UPDATE) on the order, held until
@@ -70,7 +71,8 @@ SELECT
     io.fee_amount,
     io.amount_due,
     io.reservation_expires_at,
-	COALESCE(io.reservation_expires_at <= clock_timestamp(), false) AS reservation_expired
+	COALESCE(io.reservation_expires_at <= clock_timestamp(), false) AS reservation_expired,
+    io.delivery_tx_hash
 FROM iss.issuance_orders io
 WHERE io.order_reference = $1
 `
@@ -90,6 +92,7 @@ WHERE io.order_reference = $1
 		&o.AmountDue,
 		&o.ReservationExpiresAt,
 		&o.ReservationExpired,
+		&o.DeliveryTxHash,
 	)
 	if err != nil {
 		return LockedIssuanceOrderDTO{}, fmt.Errorf("read locked issuance order %s: %w", orderReference, err)

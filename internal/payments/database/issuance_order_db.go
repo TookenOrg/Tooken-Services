@@ -38,7 +38,13 @@ func ConfirmIssuanceOrderPayment(ctx context.Context, realEstateId int, orderRef
 		}
 
 		// The order must not be already paid for the confirmation to proceed.
-		if order.StatusId == int(server.IssuanceOrderStatusIdPaymentConfirmed) {
+		// The delivery starts on its own right after this transaction commits,
+		// so a second confirm-payment rarely finds the order still in
+		// PAYMENT_CONFIRMED: it may already be on its way to CLOSED. All those
+		// statuses mean the same thing to the caller — the payment is recorded,
+		// there is nothing left to do — so they answer 200 and write nothing
+		// (a double click must not be punished).
+		if paymentAlreadyRecorded(order.StatusId) {
 			logger.LogInfo("Order %s has already been paid", orderReference)
 			return nil
 		}
@@ -68,6 +74,25 @@ func ConfirmIssuanceOrderPayment(ctx context.Context, realEstateId int, orderRef
 	})
 
 	return err
+}
+
+// paymentAlreadyRecorded reports whether the payment of this order is already
+// in. The delivery starts on its own right after the confirmation commits, so
+// a second confirm-payment may land on an order that has already moved to
+// DELIVERY_IN_PROGRESS or DELIVERY_FAILED. All three mean the same thing to
+// the caller — the money is recorded, there is nothing left to do.
+//
+// DELIVERED, CLOSED and the reversal statuses are deliberately absent: those
+// orders are settled, and confirming a payment on one of them is an operator
+// mistake worth a 409 rather than a silent 200.
+func paymentAlreadyRecorded(statusID int) bool {
+	switch statusID {
+	case int(server.IssuanceOrderStatusIdPaymentConfirmed),
+		int(server.IssuanceOrderStatusIdDeliveryInProgress),
+		int(server.IssuanceOrderStatusIdDeliveryFailed):
+		return true
+	}
+	return false
 }
 
 // checkOrderForPaymentConfirmation verifies that the order is in a state awaiting payment.
