@@ -234,7 +234,7 @@ The sub-transactions are returned as `OnbehalfTransactions`.
 
 #### Caps: `totalShares` and `maxSharesPerInvestor`
 
-Every token is born capped, in the **same** `DeployTREXSuite` transaction (M3-6).
+Every token is born capped, in the **same** `DeployTREXSuite` transaction.
 
 - **Validation before any I/O.** Both fields are whole-share strings
   (`sharesToBaseUnits`, `services/caps.go`): `0`, negatives, signs, decimals,
@@ -266,14 +266,49 @@ Every token is born capped, in the **same** `DeployTREXSuite` transaction (M3-6)
   (`database.IsContractRoleNameTaken`) and it re-reads the winner's address.
 - A mint that breaks a cap reverts with `Compliance not followed`.
 
-### 5.4 Mint / Burn — `Mint`, `Burn` (`services/mint_token.go`, `burn_token.go`)
+### 5.4 Mint — `SendMintShares`, `MintReceipt` (`services/mint.go`)
 
-`POST /contract/token/mint` and `/contract/token/burn` (both async `202`).
-Look up the token in `blk.token` for its decimals, validate inputs
-(`controlInputMintBurn` + `IsHexAddress`), convert the human amount to wei with
-`utils.ConvertFloatToWei` (shopspring/decimal), then call `Token.Mint` / `Token.Burn`.
-Handlers run these in a goroutine with `context.WithoutCancel` so the work outlives
-the HTTP request.
+There is no mint endpoint any more: shares are created only as the
+delivery of a paid order, so nothing can mint out of band. The delivery module
+drives this through the `TokenMinter` interface it declares on its own side.
+
+The pair exists because of one rule: **an order is never minted twice.**
+`SendMintShares` splits what the old `Mint` did in one go:
+
+1. read the decimals from `blk.token`, convert `shares × 10^decimals` with
+   `sharesToBaseUnits` — whole numbers only, never a float;
+2. enter `utils.Transact`, which holds the platform-key lock (shared by every
+   transaction the server signs) until the mint is on its way;
+3. sign with **`opts.NoSend = true`**: gas is estimated and
+   the transaction is signed, but nothing is broadcast
+   (`bind/v2/base.go:450`). A mint the chain would reject — unverified wallet,
+   compliance cap — fails here, before a hash exists;
+4. hand the hash to the `record` callback, which stores it;
+5. broadcast, and only if `record` returned `nil`.
+
+That order is what makes "no hash on the order" mean "nothing was ever sent".
+If `SendTransaction` fails, the node is asked whether it knows the hash anyway:
+a refused send is not always a send that did not happen.
+
+`MintReceipt` waits for the mint and answers `(found, succeeded)`. `found` is
+false when the transaction is still not mined once `ETH_TX_WAIT` is over, and
+that is **not** a failure: the caller must leave the order alone, since the
+transaction may land later and a second mint would then double the shares.
+`succeeded` needs both a receipt with status 1 **and** a
+`Transfer(0x0 → wallet, amount)` among its logs — a receipt alone only says the
+call did not revert.
+
+The lock is there because `GenerateTransactOpts` reads `PendingNonceAt`: two
+transactions prepared at the same instant — two mints, or a mint and a KYC
+registration — would claim the same nonce and one would be rejected. For a
+mint, that rejection fails a paid order. See §6.1.
+
+### 5.5 Burn — `Burn` (`services/burn_token.go`)
+
+`POST /contract/token/burn` (async `202`). Looks up the token in `blk.token`
+for its decimals, validates inputs, converts the human amount with
+`utils.ConvertFloatToWei`, then calls `Token.Burn`. The handler runs it in a
+goroutine with `context.WithoutCancel` so the work outlives the HTTP request.
 
 ---
 
@@ -283,13 +318,19 @@ the HTTP request.
 
 ```mermaid
 graph LR
-    A["utils.GenerateTransactOpts(ctx)<br/>nonce, gasPrice, chainID,<br/>gasLimit=15_000_000, value=0"]
-    B["bindings call<br/>Deploy* / instance.Method(auth, ...)"]
+    A["utils.Transact(ctx, send)<br/>signer lock + 1-min timeout<br/>GenerateTransactOpts: nonce, tip, chainID"]
+    B["send: bindings call<br/>Deploy* / instance.Method(auth, ...)"]
     C["utils.WaitDeployedTransaction(ctx, tx, wait?)<br/>bind.WaitMined, 2-min timeout,<br/>fails on non-success receipt"]
     D["database.InsertEthTransaction(...)<br/>→ blk.eth_transaction"]
     A --> B --> C --> D
 ```
 
+- `utils.Transact` is the only way production code signs. It holds one lock
+  for the platform key from the nonce read to the broadcast, so concurrent
+  writes never share a nonce, and gives `opts.Context` a one-minute deadline,
+  so a frozen node fails the call instead of holding the lock forever. The
+  callback broadcasts one transaction and returns; it must not wait for mining
+  nor call `Transact` again (the lock is not reentrant).
 - The boolean arg to `WaitDeployedTransaction` is `shouldWaitContractReturn`: pass
   `true` for **deployments** (it then polls `CodeAt` up to 10× to confirm bytecode
   is live), `false` for plain method calls.
@@ -326,7 +367,7 @@ its token on-chain (`token.identityRegistry()`), because `Token.setIdentityRegis
 makes it mutable: a stored copy would go stale in silence. The rule is *on-chain on
 the path that decides, in database for what is displayed*. `blk.contract_instance` was
 the fourth attempt at holding such an address off-chain and was removed with its
-reader (2026-09-18); see `PROGRESS.md` §27 and §32.
+reader (2026-09-18).
 
 `utils.FindContractByName` filters an in-memory `[]server.ContractDetails` slice.
 
@@ -365,8 +406,10 @@ Endpoints → service methods (all under `globals.BaseURL` = `/api/v1`):
 | `POST /contract/identity/claims/add` | `AddClaimToIdentity` | `AddClaimToIdentity` |
 | `POST /contract/token` | `CreateTokenContract` | `CreateToken` |
 | `GET  /contract/token/{tokenAddress}/infos` | `GetTokenInfos` | *(stub)* |
-| `POST /contract/token/mint` | `MintTokenAsync` | `Mint` |
 | `POST /contract/token/burn` | `BurnTokenAsync` | `Burn` |
+
+There is no mint endpoint: `SendMintShares` is reached only through the
+delivery of a paid order.
 
 These routes are **not** marked `bearerAuth` in `api/openapi.yaml`, so they are
 currently public (auth is spec-driven — see the repo `copilot-instructions.md`).
@@ -429,7 +472,7 @@ module or extending it.
   still `TODO`/commented, so those rows must be seeded manually.
 - **`GetWalletByUserId` is mocked** (`wallet_db.go`) — returns `common.MaxAddress`,
   so `CreateIdentity`'s idempotency check never sees "no wallet".
-- ✅ **Removed on 2026-09-18** (`PROGRESS.md` §32.7): `SetGlobals` and its commented
+- ✅ **Removed on 2026-09-18**: `SetGlobals` and its commented
   call site in `main.go`, `globals.IdentityRegistry{,Address,Instance}`,
   `GetContractInstanceByName`, `GetTrexSuite` and `GetTREXFactoryAddress`. All were
   dead, and three of them were attempts at caching a registry address off-chain.
@@ -441,10 +484,10 @@ module or extending it.
 - **Re-running `DeployTrexSuite` on an installed environment fails**: the module
   role insert is fatal and `TRANSFER_RESTRICTION_MODULE` already exists. A useless
   module is deployed first.
-- **Modules deployed before M3-6 are not initialized**, so anyone can still claim
+- **Modules deployed before the capping work are not initialized**, so anyone can still claim
   their ownership. For `TransferRestrictModule` this has no effect: every write is
   `onlyComplianceCall`, and `upgradeTo` refuses a non-proxy call.
-- **Tokens deployed before M3-6 have no caps.** They are not patched (decision M6-7).
+- **Tokens deployed before the capping work have no caps.** They are not patched.
 
 ---
 
@@ -456,6 +499,12 @@ module or extending it.
   `defineAuthorityVersion`, the ONCHAINID claim signature / key derivation, and the
   caps: `sharesToBaseUnits`, `encodeCapSettings`, and `CreateTokenWithSalt` refusing
   bad shares before any I/O).
+- **Delivery orchestration** (`internal/delivery/services/deliver_test.go`, no
+  chain/DB): a fake `TokenMinter` and fake database calls prove the rule that
+  matters — a refused order is never minted, a hash that could not be stored
+  stops the send, the delivery that loses the race for the hash stops without
+  touching the order, and a mint whose fate is unknown leaves the order in
+  `DELIVERY_IN_PROGRESS` instead of failing it.
 - **Caps on a real chain + DB** (`services/caps_integration_test.go`, integration
   tag, needs `TEST_DATABASE_URL`): caps read back in base units, reached and
   exceeded (per investor across wallets, per token, on the total supply), a wrong
@@ -472,4 +521,6 @@ module or extending it.
   ```
 
   Override the endpoint with `ETH_TEST_RPC` and the signer with `PRIVATE_KEY`
-  (defaults to a publicly-known Hardhat dev account).
+  (defaults to a publicly-known Hardhat dev account). With neither
+  `TEST_DATABASE_URL` nor `ETH_TEST_RPC` set, a missing node skips the test;
+  with either set, it fails it, so a requested run cannot pass without running.
