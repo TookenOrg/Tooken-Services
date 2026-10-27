@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/TookenOrg/tooken-services/internal/api/server"
 	"github.com/TookenOrg/tooken-services/internal/auth/database"
 	"github.com/TookenOrg/tooken-services/internal/auth/utils"
 )
@@ -12,7 +13,7 @@ import (
 // ErrEmailAlreadyUsed: an account already exists for that email.
 var ErrEmailAlreadyUsed = errors.New("email already used")
 
-func (s *Service) SignUp(ctx context.Context, email, password, fullName string) (errCode int, jwtToken string, err error) {
+func (s *Service) SignUp(ctx context.Context, email, password, fullName string) (errCode int, session server.JwtToken, err error) {
 	// 1 - idempotency
 	isIdempotent, errCode, err := checkIdempotencySignUp(ctx, email)
 	if err != nil {
@@ -30,19 +31,19 @@ func (s *Service) SignUp(ctx context.Context, email, password, fullName string) 
 	}
 
 	// 3 - Insert new user
-	userId, role, err := database.InsertUser(ctx, email, hashedPassword, fullName)
+	userId, err := database.InsertUser(ctx, email, hashedPassword, fullName)
 	if err != nil {
 		errCode = http.StatusInternalServerError
 		return
 	}
 
-	// 4 - generate jwt for session
-	jwtToken, err = utils.GenerateJWT(userId, email, role)
+	// 4 - open the session, so the new user is signed in right away
+	session, err = openSession(ctx, userId)
 	if err != nil {
+		errCode = http.StatusInternalServerError
 		return
 	}
 
-	// 5 - return
 	return
 }
 

@@ -263,18 +263,11 @@ func (p *platform) signUp(t *testing.T, name string) account {
 		FullName: name,
 	}).expect(t, http.StatusCreated, "sign-up "+email)
 
-	token, _ := decode[server.APIResponse](t, r).Data.(string)
-	if token == "" {
-		t.Fatalf("sign-up %s returned no token: %s", email, r.body)
+	session := decode[server.SignUpResponse](t, r).Data
+	if session == nil || session.Token == "" || session.User.Id == 0 {
+		t.Fatalf("sign-up %s returned no session: %s", email, r.body)
 	}
-
-	// The sign-up answers a token only; the id is what the back office
-	// filters on.
-	var id int
-	if err := p.db.QueryRow(`SELECT id FROM usr.users WHERE email = $1`, email).Scan(&id); err != nil {
-		t.Fatalf("id of %s: %v", email, err)
-	}
-	return account{id: id, email: email, token: token}
+	return account{id: session.User.Id, email: email, token: session.Token}
 }
 
 func (p *platform) signIn(t *testing.T, email, password string) account {

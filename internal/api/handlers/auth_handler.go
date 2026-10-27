@@ -20,7 +20,7 @@ func (h *Handler) PostAuthSignUp(gCtx *gin.Context) {
 		return
 	}
 
-	errCode, jwtToken, err := h.authSvc.SignUp(gCtx.Request.Context(), string(req.Email), req.Password, req.FullName)
+	errCode, session, err := h.authSvc.SignUp(gCtx.Request.Context(), string(req.Email), req.Password, req.FullName)
 	if err != nil || errCode >= http.StatusBadRequest {
 		if errCode == 0 {
 			errCode = http.StatusBadRequest
@@ -40,9 +40,9 @@ func (h *Handler) PostAuthSignUp(gCtx *gin.Context) {
 		return
 	}
 
-	gCtx.JSON(http.StatusCreated, server.APIResponse{
+	gCtx.JSON(http.StatusCreated, server.SignUpResponse{
 		Message: "User created successfully.",
-		Data:    jwtToken,
+		Data:    &session,
 	})
 }
 
@@ -56,7 +56,7 @@ func (h *Handler) PostAuthSignIn(gCtx *gin.Context) {
 		return
 	}
 
-	user, jwtToken, refreshToken, tokenExpireAt, err := h.authSvc.SignIn(gCtx.Request.Context(), string(req.Email), req.Password)
+	session, err := h.authSvc.SignIn(gCtx.Request.Context(), string(req.Email), req.Password)
 	if err != nil {
 		if errors.Is(err, authServices.ErrInvalidCredentials) {
 			gCtx.JSON(http.StatusUnauthorized, server.APIResponse{
@@ -74,11 +74,39 @@ func (h *Handler) PostAuthSignIn(gCtx *gin.Context) {
 
 	gCtx.JSON(http.StatusOK, server.SignInResponse{
 		Message: "User connected successfully.",
-		Data: &server.JwtToken{
-			Token:        jwtToken,
-			User:         user,
-			RefreshToken: refreshToken,
-			ExpiresAt:    tokenExpireAt,
-		},
+		Data:    &session,
+	})
+}
+
+func (h *Handler) PostAuthRefresh(gCtx *gin.Context) {
+
+	var req server.RefreshTokenRequest
+	if err := gCtx.ShouldBindJSON(&req); err != nil {
+		gCtx.JSON(http.StatusBadRequest, server.APIResponse{
+			Message: "The body must be a JSON object holding the refreshToken.",
+		})
+		return
+	}
+
+	session, err := h.authSvc.Refresh(gCtx.Request.Context(), req.RefreshToken)
+	if err != nil {
+		if errors.Is(err, authServices.ErrInvalidRefreshToken) {
+			logger.LogInfo("Refresh refused: %v", err)
+			gCtx.JSON(http.StatusUnauthorized, server.APIResponse{
+				Message: "Session expired, please sign in again.",
+			})
+			return
+		}
+
+		logger.LogError("Refresh failed: %v", err)
+		gCtx.JSON(http.StatusInternalServerError, server.APIResponse{
+			Message: "Unable to refresh the session right now.",
+		})
+		return
+	}
+
+	gCtx.JSON(http.StatusOK, server.RefreshTokenResponse{
+		Message: "Session refreshed.",
+		Data:    &session,
 	})
 }

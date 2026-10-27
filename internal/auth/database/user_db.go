@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/TookenOrg/tooken-services/internal/globals"
+	"github.com/TookenOrg/tooken-services/pkg/logger"
 )
 
 type UserDTO struct {
@@ -19,22 +20,22 @@ type UserDTO struct {
 	Role           string     `json:"role"`
 }
 
-func InsertUser(ctx context.Context, email, hasedPassword, fullName string) (id int, role string, err error) {
+// InsertUser leaves the role to its schema default (migration 000009); the
+// caller reads the account back rather than assuming that default.
+func InsertUser(ctx context.Context, email, hasedPassword, fullName string) (id int, err error) {
 	query := `
         INSERT INTO usr.users
             (full_name, email, password)
         VALUES ($1, $2, $3)
-        RETURNING id, role
+        RETURNING id
     `
 
-	// role is returned rather than assumed: its default lives in the schema
-	// (migration 000009), and duplicating it here would let the two drift.
-	err = globals.DB.QueryRow(query, fullName, email, hasedPassword).Scan(&id, &role)
+	err = globals.DB.QueryRow(query, fullName, email, hasedPassword).Scan(&id)
 	if err != nil {
-		return 0, "", fmt.Errorf("failed to insert user: %w", err)
+		return 0, fmt.Errorf("failed to insert user: %w", err)
 	}
 
-	fmt.Printf("User inserted: %d\n", id)
+	logger.LogDebug("✅ User %d inserted", id)
 	return
 }
 

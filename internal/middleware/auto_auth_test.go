@@ -136,6 +136,42 @@ func TestOptionalAuthRoute(t *testing.T) {
 	}
 }
 
+// A refresh token is signed with the same key as an access token. Accepted as
+// a Bearer token it would authenticate a caller with no user id and no role,
+// and on an optional-auth route quietly serve them as identified.
+func TestARefreshTokenIsNotABearerToken(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	refresh, err := utils.GenerateRefreshToken(7)
+	if err != nil {
+		t.Fatalf("GenerateRefreshToken: %v", err)
+	}
+
+	useRoutes(t, map[string]map[string]AuthMode{
+		"/orders/:ref": {"GET": AuthRequired},
+		"/assets/:id":  {"GET": AuthOptional},
+	})
+
+	r := gin.New()
+	r.Use(AutoAuthMiddleware())
+	r.GET("/orders/:ref", func(c *gin.Context) { c.String(http.StatusOK, "reached") })
+	r.GET("/assets/:id", func(c *gin.Context) { c.String(http.StatusOK, "reached") })
+
+	for _, path := range []string{"/orders/ORD-1", "/assets/7"} {
+		t.Run(path, func(t *testing.T) {
+			req := httptest.NewRequest("GET", path, nil)
+			req.Header.Set("Authorization", "Bearer "+refresh)
+
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+
+			if w.Code != http.StatusUnauthorized {
+				t.Errorf("want 401, got %d (%s)", w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
 // A valid token on an optional-auth route must reach the handler as claims,
 // carrying the role decided in migration 000009.
 func TestOptionalAuthRouteParsesAValidToken(t *testing.T) {

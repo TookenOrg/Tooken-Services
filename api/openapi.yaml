@@ -5,7 +5,7 @@ info:
   description: Minimal API with health check
 
 servers:
-  - url: http://localhost:8080
+  - url: http://localhost:8080/api/v1
     description: Development server
   - url: https://api.tooken.fr/api/v1 # Production
     description: Production
@@ -33,7 +33,10 @@ paths:
   /auth/sign-up:
     post:
       operationId: PostAuthSignUp
-      summary: Create a new user and return a JWT
+      summary: Create an account and open a session
+      description: >
+        Answers the same session as POST /auth/sign-in, so the new user is
+        signed in right away.
       tags:
         - auth
       requestBody:
@@ -44,7 +47,7 @@ paths:
               $ref: "#/components/schemas/SignUpRequest"
       responses:
         "201":
-          description: User created successfully
+          description: Account created and session opened
           content:
             application/json:
               schema:
@@ -106,6 +109,54 @@ paths:
             The credentials could not be checked at all, a database outage for
             instance. Distinct from 401 on purpose: retrying with a different
             password would not help.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+
+  /auth/refresh:
+    post:
+      operationId: PostAuthRefresh
+      summary: Exchange a refresh token for a new access token
+      description: >
+        Call it when the access token has expired or is about to (see
+        `expiresAt`), instead of asking for the password again. The account
+        is read again, so the new access token carries a role changed since
+        sign-in, and a deleted account can no longer refresh. The session
+        cannot outlive its refresh token.
+      tags:
+        - auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshTokenRequest"
+      responses:
+        "200":
+          description: New access token issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RefreshTokenResponse"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "401":
+          description: >
+            The refresh token is invalid, expired or is not a refresh token,
+            or its account no longer exists. The user must sign in again.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "500":
+          description: >
+            The account could not be read, a database outage for instance.
+            The refresh token is still valid: retrying later can succeed.
           content:
             application/json:
               schema:
@@ -1979,6 +2030,9 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
+      description: >
+        The `token` of a sign-up, sign-in or refresh response. A refresh token
+        is refused here.
   parameters:
     IdempotencyKey:
       in: header
@@ -2000,11 +2054,16 @@ components:
           type: string
         data:
           nullable: true
+          # The key must be repeated: an extra json tag replaces the generated
+          # one entirely, and ",omitempty" alone makes encoding/json fall back
+          # to the Go field name, "Data".
           x-oapi-codegen-extra-tags:
-            json: ",omitempty"
+            json: "data,omitempty"
 
     JwtToken:
       type: object
+      description: >
+        A session, as opened by sign-up or sign-in and extended by refresh.
       required:
         - token
         - refreshToken
@@ -2013,11 +2072,21 @@ components:
       properties:
         token:
           type: string
+          description: >
+            Access token, sent as `Authorization: Bearer <token>`. Valid one
+            hour.
         refreshToken:
           type: string
+          description: >
+            Valid eight hours from sign-up or sign-in, refreshing does not
+            extend it: once it has expired the user must sign in again. Send
+            it to POST /auth/refresh to get a new access token; it is refused
+            as a Bearer token. Always keep the value returned by the latest
+            call, the server may start rotating it.
         expiresAt:
           type: string
           format: date-time
+          description: When `token` expires. Refresh shortly before.
         user:
           $ref: "#/components/schemas/User"
 
@@ -2112,6 +2181,23 @@ components:
           example: "supersecret"
 
     SignInResponse:
+      allOf:
+        - $ref: "#/components/schemas/APIResponse"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/JwtToken"
+
+    RefreshTokenRequest:
+      type: object
+      required:
+        - refreshToken
+      properties:
+        refreshToken:
+          type: string
+          description: The `refreshToken` of the current session.
+
+    RefreshTokenResponse:
       allOf:
         - $ref: "#/components/schemas/APIResponse"
         - type: object
