@@ -15,7 +15,7 @@ func AddFavoritesRealEstateByUserId(ctx context.Context, userId, realEstateId in
         RETURNING id
     `
 	var id int
-	err = globals.DB.QueryRow(query, userId, realEstateId).Scan(&id)
+	err = globals.DB.QueryRowContext(ctx, query, userId, realEstateId).Scan(&id)
 	if err != nil {
 		return
 	}
@@ -33,7 +33,7 @@ func RemoveFavoritesRealEstateByUserId(ctx context.Context, userId, realEstateId
 	`
 
 	var id int64
-	err = globals.DB.QueryRow(query, userId, realEstateId).Scan(&id)
+	err = globals.DB.QueryRowContext(ctx, query, userId, realEstateId).Scan(&id)
 	if err != nil {
 		return
 	}

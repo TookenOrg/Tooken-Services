@@ -1579,12 +1579,15 @@ paths:
       tags:
         - User
         - Assets
-      summary: Save a real estate in favoris for one user
+      summary: Add a real estate to the favorites of the authenticated user
       operationId: addFavoritesRealEstateForUser
+      security:
+        - bearerAuth: []
       parameters:
         - in: path
           name: userId
           required: true
+          description: The user whose favorites change. It must be the one the token was issued to.
           schema:
             type: integer
         - in: path
@@ -1594,13 +1597,45 @@ paths:
             type: integer
       responses:
         "200":
-          description: OK
+          description: The real estate was added to the favorites.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "401":
+          description: >-
+            No valid token, or the account the token was issued to no longer
+            exists: signing in again is the way out.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "403":
+          description: >-
+            The token belongs to another user. Favorites are personal: nobody,
+            an administrator included, changes the favorites of somebody else.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "404":
+          description: >-
+            The real estate does not exist.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "409":
+          description: >-
+            The real estate already is a favorite of the user. Nothing was
+            written: the client view of the favorites is out of date.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/APIResponse"
         "500":
-          description: "Internal Server Error"
+          description: >-
+            Internal Server Error
           content:
             application/json:
               schema:
@@ -1609,12 +1644,15 @@ paths:
       tags:
         - User
         - Assets
-      summary: Save a real estate in favoris for one user
+      summary: Remove a real estate from the favorites of the authenticated user
       operationId: removeFavoritesRealEstateForUser
+      security:
+        - bearerAuth: []
       parameters:
         - in: path
           name: userId
           required: true
+          description: The user whose favorites change. It must be the one the token was issued to.
           schema:
             type: integer
         - in: path
@@ -1624,13 +1662,38 @@ paths:
             type: integer
       responses:
         "200":
-          description: OK
+          description: The real estate was removed from the favorites.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "403":
+          description: >-
+            The token belongs to another user. Favorites are personal: nobody,
+            an administrator included, changes the favorites of somebody else.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "404":
+          description: >-
+            The real estate is not a favorite of the user. Nothing was removed:
+            answering success would hide a wrong identifier from the caller.
+            A token whose account was deleted also gets this answer, since the
+            deletion removed its favorites.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/APIResponse"
         "500":
-          description: "Internal Server Error"
+          description: >-
+            Internal Server Error
           content:
             application/json:
               schema:
