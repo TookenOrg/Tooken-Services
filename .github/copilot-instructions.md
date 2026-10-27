@@ -81,10 +81,16 @@ blockchain, on-chain `services`/`contracts`).
   The callback must broadcast one transaction and never call `Transact` itself.
   Wait for mining afterwards, outside it, with `utils.WaitDeployedTransaction` /
   `WaitTREXSuiteDeployment`.
-- Long-running deploy/mint/burn operations run in a goroutine and return
+- Long-running deploy/mint/burn operations run in the background and return
   `202 Accepted` immediately. Detach the context first
   (`context.WithoutCancel(reqCtx)` or `context.Background()`) so the work
-  survives the HTTP request.
+  survives the HTTP request, and start it with `h.startBackground(what, job)`,
+  never a bare `go`: on SIGINT/SIGTERM `main.go` `serve` stops the HTTP server,
+  then `Handler.CloseAndWait()` refuses new jobs and waits for the running ones,
+  so a delivery is not cut between the mint and the order update. A shutdown
+  can take up to 15 s (requests) + 2 min (jobs): whatever stops the process
+  must wait that long before killing it (Docker's default is 10 s; set
+  `stop_grace_period` / `terminationGracePeriodSeconds` accordingly).
 - Shared on-chain state (eth client, deployed contract addresses/instances) lives
   in `internal/blockchain/globals` and `internal/blockchain/services/globals.go`.
 - **Token creation goes through the shared `TREXFactory`** (`services/token.go`

@@ -1,28 +1,30 @@
 package main
 
 import (
+	"context"
 	"database/sql"
+	"errors"
+	"net"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"fmt"
 	"log"
+	"net/http"
 	"net/url"
 
 	_ "github.com/lib/pq"
 
 	"github.com/TookenOrg/tooken-services/internal/api/handlers"
-	"github.com/TookenOrg/tooken-services/internal/api/server"
+	"github.com/TookenOrg/tooken-services/internal/api/router"
 	blkGlobals "github.com/TookenOrg/tooken-services/internal/blockchain/globals"
 	"github.com/TookenOrg/tooken-services/internal/blockchain/services"
 	"github.com/TookenOrg/tooken-services/internal/globals"
-	"github.com/TookenOrg/tooken-services/internal/middleware"
 	"github.com/TookenOrg/tooken-services/pkg/logger"
-	"github.com/gin-contrib/cors"
-	"github.com/gin-gonic/gin"
 	_ "github.com/jackc/pgx/v5/stdlib"
-	swgui "github.com/swaggest/swgui/v5"
 )
 
 //go:generate go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen --config ./api/oapi-codegen.yaml ./api/openapi.yaml
@@ -56,46 +58,103 @@ func main() {
 
 func startServer() {
 
-	if err := middleware.InitAuth("./api/openapi.yaml"); err != nil {
-		log.Fatalf("Error during authentication initialization: %v", err)
+	h := handlers.NewHandler()
+	engine, err := router.New(h, "./api/openapi.yaml", getCorsOrigins())
+	if err != nil {
+		log.Fatalf("Error during router initialization: %v", err)
 	}
 
-	router := gin.Default()
-
-	// --- CORS --- //
-	router.Use(cors.New(cors.Config{
-		AllowOrigins: getCorsOrigins(),
-		AllowMethods: []string{
-			"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS",
-		},
-		AllowHeaders: []string{
-			"Origin",
-			"Content-Type",
-			"Authorization",
-		},
-		ExposeHeaders: []string{
-			"Content-Length",
-		},
-		AllowCredentials: true,
-		MaxAge:           12 * time.Hour,
-	}))
-
-	apiV1 := router.Group(globals.BaseURL)
-
-	// Applies automatic middleware
-	apiV1.Use(middleware.AutoAuthMiddleware())
-
-	handler := handlers.NewHandler()
-	server.RegisterHandlers(apiV1, handler)
-
-	// --- Swagger UI ---
-	router.StaticFile("/openapi.yaml", "./api/openapi.yaml")
-	ui := swgui.NewHandler("Tooken API Docs", "/openapi.yaml", "/docs")
-	router.GET("/docs/*any", gin.WrapH(ui))
-
-	logger.LogInfo("Starting server on %s", ":8080")
-	if err := router.Run(":8080"); err != nil {
+	ln, err := net.Listen("tcp", ":8080")
+	if err != nil {
 		log.Fatalf("Failed to start server: %v", err)
+	}
+
+	// The first SIGINT or SIGTERM starts a graceful shutdown. Once it has
+	// begun, the default handling is restored: a second signal kills the
+	// process, for whoever does not want to wait.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	context.AfterFunc(ctx, stop)
+
+	logger.LogInfo("Starting server on %s", ln.Addr())
+	if err := serve(ctx, &http.Server{Handler: engine}, ln, h, defaultStopTimeouts); err != nil {
+		log.Fatalf("Server stopped: %v", err)
+	}
+}
+
+// stopTimeouts bounds the two waits of a shutdown.
+type stopTimeouts struct {
+	// requests is how long the requests in flight get to finish.
+	requests time.Duration
+	// background is how long the jobs they started get to finish. A delivery
+	// may wait up to a minute for the node to take its transaction, then for
+	// the transaction to be mined.
+	background time.Duration
+}
+
+var defaultStopTimeouts = stopTimeouts{
+	requests:   15 * time.Second,
+	background: 2 * time.Minute,
+}
+
+// backgroundJobs is the part of the handler a shutdown waits on.
+type backgroundJobs interface {
+	CloseAndWait()
+}
+
+// serve answers on ln until ctx is cancelled, then shuts down in order:
+//
+//  1. it stops accepting connections and lets the requests in flight finish;
+//  2. it closes the connections of those that do not finish in time, so their
+//     clients learn the outcome is unknown instead of reading an answer;
+//  3. it refuses new background jobs and waits for the running ones.
+//
+// The last step is the point of it all. Those jobs are detached from the
+// request that started them and keep writing to the chain and the database:
+// exiting under a delivery would cut it between the mint and the update of
+// the order. That is why a listener that fails, possibly after hours of
+// service, goes through the same steps before its error is returned.
+func serve(ctx context.Context, srv *http.Server, ln net.Listener, jobs backgroundJobs, timeouts stopTimeouts) error {
+	served := make(chan error, 1)
+	go func() { served <- srv.Serve(ln) }()
+
+	var failure error
+	select {
+	case failure = <-served:
+		logger.LogWarn("⚠️ The server can no longer accept connections: %v", failure)
+	case <-ctx.Done():
+	}
+
+	logger.LogInfo("🛑 Shutting down: waiting up to %s for the requests in flight", timeouts.requests)
+	stopCtx, cancel := context.WithTimeout(context.Background(), timeouts.requests)
+	defer cancel()
+	if err := srv.Shutdown(stopCtx); err != nil {
+		logger.LogWarn("⚠️ Requests still running after %s, closing their connections: %v", timeouts.requests, err)
+		_ = srv.Close()
+	}
+	if failure == nil {
+		<-served
+	}
+
+	return errors.Join(failure, waitForJobs(jobs, timeouts.background))
+}
+
+// waitForJobs refuses new background jobs and waits at most timeout for the
+// running ones.
+func waitForJobs(jobs backgroundJobs, timeout time.Duration) error {
+	logger.LogInfo("⏳ Waiting up to %s for the background jobs", timeout)
+	done := make(chan struct{})
+	go func() {
+		jobs.CloseAndWait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		logger.LogInfo("✅ Background jobs finished, server stopped")
+		return nil
+	case <-time.After(timeout):
+		return fmt.Errorf("background jobs still running after %s, exiting under them", timeout)
 	}
 }
 
