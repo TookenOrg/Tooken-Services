@@ -13,11 +13,28 @@ import (
 	"github.com/samber/lo"
 )
 
+// refuseKyc answers a refusal the caller can act on. The KYC sentinels carry
+// no internal detail, so their text is safe to show.
+func refuseKyc(gCtx *gin.Context, code int, err error) {
+	gCtx.JSON(code, server.APIResponse{Message: err.Error()})
+}
+
+// failKyc answers an error nobody expected. The detail goes to the log only:
+// a database error names tables and connection state a client has no use for.
+func failKyc(gCtx *gin.Context, action string, err error) {
+	logger.LogError("Unable to %s: %v", action, err)
+	gCtx.JSON(http.StatusInternalServerError, server.APIResponse{Message: "Unable to " + action + "."})
+}
+
+func invalidKycPayload(gCtx *gin.Context, err error) {
+	gCtx.JSON(http.StatusBadRequest, server.APIResponse{Message: "Invalid payload: " + err.Error()})
+}
+
 func (h *Handler) PostKycVerifications(gCtx *gin.Context) {
 
 	claims, exists := middleware.GetUserClaims(gCtx)
 	if !exists {
-		gCtx.JSON(http.StatusUnauthorized, logger.LogError("JWT not valid"))
+		gCtx.JSON(http.StatusUnauthorized, server.APIResponse{Message: "Authentication required."})
 		return
 	}
 
@@ -26,21 +43,22 @@ func (h *Handler) PostKycVerifications(gCtx *gin.Context) {
 
 	var req server.KycVerificationRequest
 	if err := gCtx.ShouldBindJSON(&req); err != nil {
-		gCtx.JSON(http.StatusBadRequest, err.Error())
+		invalidKycPayload(gCtx, err)
 		return
 	}
 
 	err := h.userSvc.PostKycVerifications(gCtx.Request.Context(), userId, &req)
 	if err != nil {
 		switch {
+		case errors.Is(err, services.ErrUserNotFound):
+			gCtx.JSON(http.StatusUnauthorized, server.APIResponse{Message: accountGoneMessage})
 		case errors.Is(err, services.ErrMessageKycAlreadyExists), errors.Is(err, services.ErrMessageKycStillValid):
-			gCtx.JSON(http.StatusConflict, err.Error())
-			return
+			refuseKyc(gCtx, http.StatusConflict, err)
 		case errors.Is(err, services.ErrMessageInvalidCountryCode), errors.Is(err, services.ErrMessageInvalidFullName):
-			gCtx.JSON(http.StatusBadRequest, err.Error())
-			return
+			refuseKyc(gCtx, http.StatusBadRequest, err)
+		default:
+			failKyc(gCtx, "submit the KYC verification", err)
 		}
-		gCtx.JSON(http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -51,14 +69,7 @@ func (h *Handler) PostKycVerifications(gCtx *gin.Context) {
 
 func (h *Handler) GetListKycVerifications(gCtx *gin.Context, params server.GetListKycVerificationsParams) {
 
-	claims, exists := middleware.GetUserClaims(gCtx)
-	if !exists {
-		gCtx.JSON(http.StatusUnauthorized, logger.LogError("JWT not valid"))
-		return
-	}
-
-	if claims.Role != authUtils.RoleAdmin {
-		gCtx.JSON(http.StatusForbidden, logger.LogError("Forbidden"))
+	if !middleware.RequireRole(gCtx, authUtils.RoleAdmin) {
 		return
 	}
 
@@ -66,12 +77,20 @@ func (h *Handler) GetListKycVerifications(gCtx *gin.Context, params server.GetLi
 
 	var statusStr *string
 	if params.Status != nil {
+		// The generated wrapper does not enforce the enum: without this check an
+		// unknown status matches nothing and reads as "nobody is in that state".
+		switch *params.Status {
+		case server.GetListKycVerificationsParamsStatusSubmitted, server.GetListKycVerificationsParamsStatusApproved:
+		default:
+			gCtx.JSON(http.StatusBadRequest, server.APIResponse{Message: "Invalid status: use submitted or approved."})
+			return
+		}
 		statusStr = lo.ToPtr(string(*params.Status))
 	}
 
 	kycVerification, err := h.userSvc.GetListKycVerifications(gCtx.Request.Context(), params.UserId, statusStr)
 	if err != nil {
-		gCtx.JSON(http.StatusInternalServerError, err.Error())
+		failKyc(gCtx, "list the KYC verifications", err)
 		return
 	}
 
@@ -80,14 +99,7 @@ func (h *Handler) GetListKycVerifications(gCtx *gin.Context, params server.GetLi
 
 func (h *Handler) GetKycVerificationById(gCtx *gin.Context, verificationId int) {
 
-	claims, exists := middleware.GetUserClaims(gCtx)
-	if !exists {
-		gCtx.JSON(http.StatusUnauthorized, logger.LogError("JWT not valid"))
-		return
-	}
-
-	if claims.Role != authUtils.RoleAdmin {
-		gCtx.JSON(http.StatusForbidden, logger.LogError("Forbidden"))
+	if !middleware.RequireRole(gCtx, authUtils.RoleAdmin) {
 		return
 	}
 
@@ -97,10 +109,10 @@ func (h *Handler) GetKycVerificationById(gCtx *gin.Context, verificationId int) 
 	if err != nil {
 		switch {
 		case errors.Is(err, services.ErrKycVerificationNotFound):
-			gCtx.JSON(http.StatusNotFound, err.Error())
-			return
+			refuseKyc(gCtx, http.StatusNotFound, err)
+		default:
+			failKyc(gCtx, "retrieve the KYC verification", err)
 		}
-		gCtx.JSON(http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -109,22 +121,16 @@ func (h *Handler) GetKycVerificationById(gCtx *gin.Context, verificationId int) 
 
 func (h *Handler) ApproveKycVerification(gCtx *gin.Context, verificationId int) {
 
-	claims, exists := middleware.GetUserClaims(gCtx)
-	if !exists {
-		gCtx.JSON(http.StatusUnauthorized, logger.LogError("JWT not valid"))
+	if !middleware.RequireRole(gCtx, authUtils.RoleAdmin) {
 		return
 	}
-
-	if claims.Role != authUtils.RoleAdmin {
-		gCtx.JSON(http.StatusForbidden, logger.LogError("Forbidden"))
-		return
-	}
+	claims, _ := middleware.GetUserClaims(gCtx)
 
 	logger.LogInfo("🚀 Starting approving KYC verification by ID: %d", verificationId)
 
 	var req server.KycVerificationApproveRequest
 	if err := gCtx.ShouldBindJSON(&req); err != nil {
-		gCtx.JSON(http.StatusBadRequest, err.Error())
+		invalidKycPayload(gCtx, err)
 		return
 	}
 	expiresAt := req.ExpiresAt
@@ -133,16 +139,14 @@ func (h *Handler) ApproveKycVerification(gCtx *gin.Context, verificationId int) 
 	if err != nil {
 		switch {
 		case errors.Is(err, services.ErrKycVerificationNotFound):
-			gCtx.JSON(http.StatusNotFound, err.Error())
-			return
+			refuseKyc(gCtx, http.StatusNotFound, err)
 		case errors.Is(err, services.ErrMessageInvalidExpiresAt):
-			gCtx.JSON(http.StatusBadRequest, err.Error())
-			return
+			refuseKyc(gCtx, http.StatusBadRequest, err)
 		case errors.Is(err, services.ErrMessageInvalidStatus):
-			gCtx.JSON(http.StatusConflict, err.Error())
-			return
+			refuseKyc(gCtx, http.StatusConflict, err)
+		default:
+			failKyc(gCtx, "approve the KYC verification", err)
 		}
-		gCtx.JSON(http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -151,22 +155,16 @@ func (h *Handler) ApproveKycVerification(gCtx *gin.Context, verificationId int) 
 
 func (h *Handler) RejectKycVerification(gCtx *gin.Context, verificationId int) {
 
-	claims, exists := middleware.GetUserClaims(gCtx)
-	if !exists {
-		gCtx.JSON(http.StatusUnauthorized, logger.LogError("JWT not valid"))
+	if !middleware.RequireRole(gCtx, authUtils.RoleAdmin) {
 		return
 	}
-
-	if claims.Role != authUtils.RoleAdmin {
-		gCtx.JSON(http.StatusForbidden, logger.LogError("Forbidden"))
-		return
-	}
+	claims, _ := middleware.GetUserClaims(gCtx)
 
 	logger.LogInfo("🚀 Starting rejecting KYC verification by ID: %d", verificationId)
 
 	var req server.KycVerificationRejectRequest
 	if err := gCtx.ShouldBindJSON(&req); err != nil {
-		gCtx.JSON(http.StatusBadRequest, err.Error())
+		invalidKycPayload(gCtx, err)
 		return
 	}
 	reason := req.Reason
@@ -175,16 +173,14 @@ func (h *Handler) RejectKycVerification(gCtx *gin.Context, verificationId int) {
 	if err != nil {
 		switch {
 		case errors.Is(err, services.ErrKycVerificationNotFound):
-			gCtx.JSON(http.StatusNotFound, err.Error())
-			return
+			refuseKyc(gCtx, http.StatusNotFound, err)
 		case errors.Is(err, services.ErrMessageInvalidReason):
-			gCtx.JSON(http.StatusBadRequest, err.Error())
-			return
+			refuseKyc(gCtx, http.StatusBadRequest, err)
 		case errors.Is(err, services.ErrMessageInvalidStatus):
-			gCtx.JSON(http.StatusConflict, err.Error())
-			return
+			refuseKyc(gCtx, http.StatusConflict, err)
+		default:
+			failKyc(gCtx, "reject the KYC verification", err)
 		}
-		gCtx.JSON(http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -193,22 +189,16 @@ func (h *Handler) RejectKycVerification(gCtx *gin.Context, verificationId int) {
 
 func (h *Handler) RevokeKycVerification(gCtx *gin.Context, verificationId int) {
 
-	claims, exists := middleware.GetUserClaims(gCtx)
-	if !exists {
-		gCtx.JSON(http.StatusUnauthorized, logger.LogError("JWT not valid"))
+	if !middleware.RequireRole(gCtx, authUtils.RoleAdmin) {
 		return
 	}
-
-	if claims.Role != authUtils.RoleAdmin {
-		gCtx.JSON(http.StatusForbidden, logger.LogError("Forbidden"))
-		return
-	}
+	claims, _ := middleware.GetUserClaims(gCtx)
 
 	logger.LogInfo("🚀 Starting revoking KYC verification by ID: %d", verificationId)
 
 	var req server.KycVerificationRevokeRequest
 	if err := gCtx.ShouldBindJSON(&req); err != nil {
-		gCtx.JSON(http.StatusBadRequest, err.Error())
+		invalidKycPayload(gCtx, err)
 		return
 	}
 	reason := req.Reason
@@ -217,16 +207,14 @@ func (h *Handler) RevokeKycVerification(gCtx *gin.Context, verificationId int) {
 	if err != nil {
 		switch {
 		case errors.Is(err, services.ErrKycVerificationNotFound):
-			gCtx.JSON(http.StatusNotFound, err.Error())
-			return
+			refuseKyc(gCtx, http.StatusNotFound, err)
 		case errors.Is(err, services.ErrMessageInvalidReason):
-			gCtx.JSON(http.StatusBadRequest, err.Error())
-			return
+			refuseKyc(gCtx, http.StatusBadRequest, err)
 		case errors.Is(err, services.ErrMessageInvalidStatus):
-			gCtx.JSON(http.StatusConflict, err.Error())
-			return
+			refuseKyc(gCtx, http.StatusConflict, err)
+		default:
+			failKyc(gCtx, "revoke the KYC verification", err)
 		}
-		gCtx.JSON(http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -234,14 +222,8 @@ func (h *Handler) RevokeKycVerification(gCtx *gin.Context, verificationId int) {
 }
 
 func (h *Handler) SyncApprovedKycVerificationOnChain(gCtx *gin.Context, verificationId int) {
-	claims, exists := middleware.GetUserClaims(gCtx)
-	if !exists {
-		gCtx.JSON(http.StatusUnauthorized, logger.LogError("JWT not valid"))
-		return
-	}
 
-	if claims.Role != authUtils.RoleAdmin {
-		gCtx.JSON(http.StatusForbidden, logger.LogError("Forbidden"))
+	if !middleware.RequireRole(gCtx, authUtils.RoleAdmin) {
 		return
 	}
 
@@ -251,16 +233,18 @@ func (h *Handler) SyncApprovedKycVerificationOnChain(gCtx *gin.Context, verifica
 	if err != nil {
 		switch {
 		case errors.Is(err, services.ErrKycVerificationNotFound):
-			gCtx.JSON(http.StatusNotFound, err.Error())
+			refuseKyc(gCtx, http.StatusNotFound, err)
+		// The filing was valid when approved; what blocks it now is the state
+		// it is in, hence a conflict rather than a bad request.
 		case errors.Is(err, services.ErrMessageInvalidStatus),
 			errors.Is(err, services.ErrMessageInvalidExpiresAt),
 			errors.Is(err, services.ErrMessageInvalidCountryCode),
 			errors.Is(err, services.ErrMessageIncoherentUserState),
 			errors.Is(err, services.ErrMessageInvalidWalletAddress),
 			errors.Is(err, services.ErrMessageFailedToVerifyOnChain):
-			gCtx.JSON(http.StatusConflict, err.Error())
+			refuseKyc(gCtx, http.StatusConflict, err)
 		default:
-			gCtx.JSON(http.StatusInternalServerError, err.Error())
+			failKyc(gCtx, "sync the KYC verification on-chain", err)
 		}
 		return
 	}

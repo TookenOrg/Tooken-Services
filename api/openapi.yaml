@@ -183,13 +183,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/KycVerificationResponse"
         "400":
-          description: Malformed request body
+          description: >-
+            Malformed request body, blank full name, or a country code that is
+            not two letters.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/APIResponse"
         "401":
-          description: Unauthorized
+          description: >-
+            Missing or invalid token, or the account it was issued to no longer
+            exists. Either way, the client must sign in again.
           content:
             application/json:
               schema:
@@ -212,6 +216,9 @@ paths:
       tags:
         - KYC
       summary: Get the list of KYC verifications
+      description: >-
+        Lists the KYC filings, for ADMIN only. Both filters are optional and
+        combine.
       operationId: GetListKycVerifications
       security:
         - bearerAuth: []
@@ -236,6 +243,12 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/KycVerification"
+        "400":
+          description: The status filter is neither `submitted` nor `approved`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
         "401":
           description: Unauthorized
           content:
