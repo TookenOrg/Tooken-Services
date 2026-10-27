@@ -15,10 +15,10 @@ package services
 import (
 	"context"
 	"math/big"
-	"os"
 	"testing"
 
 	contracts "github.com/TookenOrg/tooken-services/internal/blockchain/contracts/bindings"
+	"github.com/TookenOrg/tooken-services/internal/testenv"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -65,30 +65,23 @@ type trexFixture struct {
 
 // newTREXFixture dials the local node and deploys the whole T-REX infrastructure.
 // When no node is reachable it skips or fails the test, see
-// integrationUnavailable.
+// testenv.Unavailable.
 func newTREXFixture(ctx context.Context, t *testing.T) *trexFixture {
 	t.Helper()
 
-	rpc := os.Getenv("ETH_TEST_RPC")
-	if rpc == "" {
-		rpc = "http://127.0.0.1:8545"
-	}
-	client, err := ethclient.DialContext(ctx, rpc)
-	if err != nil {
-		integrationUnavailable(t, "no local EVM node at %s: %v", rpc, err)
-	}
+	client := testenv.DialNode(ctx, t)
 	chainID, err := client.ChainID(ctx)
 	if err != nil {
-		integrationUnavailable(t, "local EVM node at %s not reachable: %v", rpc, err)
+		t.Fatal(err)
 	}
 
-	deployerKey, err := crypto.HexToECDSA(hardhatAccount0Key)
+	deployerKey, err := crypto.HexToECDSA(testenv.HardhatAccount0Key)
 	if err != nil {
 		t.Fatalf("parse deployer key: %v", err)
 	}
 	deployer := crypto.PubkeyToAddress(deployerKey.PublicKey)
 	// generateSignatureAddClaim and GenerateTransactOpts both sign with PRIVATE_KEY.
-	t.Setenv("PRIVATE_KEY", hardhatAccount0Key)
+	t.Setenv("PRIVATE_KEY", testenv.HardhatAccount0Key)
 
 	// Leaving Nonce nil and GasLimit 0 lets go-ethereum manage the nonce and estimate
 	// gas for each sequential transaction.

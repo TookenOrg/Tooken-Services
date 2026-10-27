@@ -11,12 +11,9 @@ import (
 	contracts "github.com/TookenOrg/tooken-services/internal/blockchain/contracts/bindings"
 	"github.com/TookenOrg/tooken-services/internal/blockchain/globals"
 	"github.com/TookenOrg/tooken-services/internal/blockchain/utils"
+	"github.com/TookenOrg/tooken-services/internal/testenv"
 	"github.com/TookenOrg/tooken-services/pkg/logger"
-	"github.com/ethereum/go-ethereum/ethclient"
 )
-
-// Default Hardhat / anvil account #0 (publicly known dev key, no 0x prefix).
-const hardhatAccount0Key = "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
 
 // TestDeployTransferRestrictModuleIntegration exercises the real on-chain path
 // against a local EVM node (Hardhat): build the transact options, deploy a real
@@ -32,26 +29,15 @@ const hardhatAccount0Key = "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae78
 func TestDeployTransferRestrictModuleIntegration(t *testing.T) {
 	logger.Init(true) // production wires this in main.go; helpers below call logger.LogInfo
 
-	rpc := os.Getenv("ETH_TEST_RPC")
-	if rpc == "" {
-		rpc = "http://127.0.0.1:8545"
-	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	client, err := ethclient.DialContext(ctx, rpc)
-	if err != nil {
-		integrationUnavailable(t, "no local EVM node at %s: %v", rpc, err)
-	}
-	if _, err := client.ChainID(ctx); err != nil {
-		integrationUnavailable(t, "local EVM node at %s not reachable: %v", rpc, err)
-	}
+	client := testenv.DialNode(ctx, t)
 
 	// Wire the package globals + signer exactly like main.go does at startup.
 	globals.EthClient = client
 	if os.Getenv("PRIVATE_KEY") == "" {
-		t.Setenv("PRIVATE_KEY", hardhatAccount0Key)
+		t.Setenv("PRIVATE_KEY", testenv.HardhatAccount0Key)
 	}
 
 	auth, err := utils.GenerateTransactOpts(ctx)
