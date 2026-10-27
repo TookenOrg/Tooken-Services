@@ -23,7 +23,18 @@ PostgreSQL (raw SQL), and drives Ethereum smart contracts via go-ethereum.
   identity → mint succeeds; mint to a non-KYC wallet reverts). Once
   `TEST_DATABASE_URL` or `ETH_TEST_RPC` is set, an unreachable database or node
   **fails** the chain/delivery integration tests instead of skipping them; run
-  the full suite with `-p 1` (packages share scratch databases).
+  the full suite with `-p 1` (packages share the test database and the signer's
+  nonce).
+- Integration helpers live in **`internal/testenv`** (test-only):
+  `ScratchDatabase(t, "tooken_it_<pkg>")` builds a private database from
+  `tools/db/baseline.sql`, `DialNode(ctx, t)` dials the node. Use them instead of a
+  new harness; `go list -deps . | grep internal/testenv` must stay empty.
+- **End-to-end** tests (`internal/e2e`) drive the real router (`router.New`)
+  over HTTP against the scratch database and Hardhat:
+  `TEST_DATABASE_URL=… go test -race -tags integration -count=1 -timeout 20m ./internal/e2e/`
+  (about 2 min). Background work started by a handler goes through
+  `h.startBackground`; tests call `Handler.WaitBackground()` before reading its
+  effects.
 - `golangci-lint` is referenced in CI but **commented out / disabled** until the
   toolchain catches up to Go 1.25.3 — do not assume it runs.
 
@@ -51,7 +62,9 @@ blockchain, on-chain `services`/`contracts`).
 - Handlers are thin: bind/validate the request, call a service, map the result to
   a generated `server.*Response`. They live in `internal/api/handlers` and hang
   off a single `Handler` struct that holds one service per domain
-  (`handlers.go` → `NewHandler()`).
+  (`handlers.go` → `NewHandler()`). Routes, CORS and the spec-driven auth are
+  wired in one place, `internal/api/router` → `router.New`, which `main.go`
+  and the e2e tests both call.
 - Services are stateless structs created via `NewService()`; business logic and
   orchestration live here.
 - `database` packages hold raw SQL using the global `globals.DB` (`*sql.DB`).
@@ -62,7 +75,7 @@ blockchain, on-chain `services`/`contracts`).
 
 - JWT, HS256, via `internal/auth/utils/jwt.go`. ⚠️ `JwtKey` is hardcoded
   (`"secret_key_to_change"`) — treat as a placeholder, never a real secret.
-- At startup `middleware.InitAuth("./api/openapi.yaml")` parses the spec and
+- `router.New` calls `middleware.InitAuth("./api/openapi.yaml")`, which parses the spec and
   marks every operation carrying `security: - bearerAuth: []` as protected.
   **To require auth on a route, add that `security` block in `openapi.yaml`** —
   there is no per-handler auth code.
