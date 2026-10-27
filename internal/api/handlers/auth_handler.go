@@ -2,10 +2,13 @@ package handlers
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/TookenOrg/tooken-services/internal/api/server"
 	authServices "github.com/TookenOrg/tooken-services/internal/auth/services"
+	authUtils "github.com/TookenOrg/tooken-services/internal/auth/utils"
 	"github.com/TookenOrg/tooken-services/pkg/logger"
 	"github.com/gin-gonic/gin"
 )
@@ -17,6 +20,22 @@ func (h *Handler) PostAuthSignUp(gCtx *gin.Context) {
 	var req server.SignUpRequest
 	if err := gCtx.ShouldBindJSON(&req); err != nil {
 		gCtx.JSON(http.StatusBadRequest, err.Error())
+		return
+	}
+
+	// Binding does not enforce the required fields: a missing one arrives
+	// empty. An empty email and password would make an account anyone can
+	// sign in to.
+	if req.Email == "" || req.Password == "" || strings.TrimSpace(req.FullName) == "" {
+		gCtx.JSON(http.StatusBadRequest, server.APIResponse{
+			Message: "email, password and fullName are required.",
+		})
+		return
+	}
+	if len(req.Password) > authUtils.MaxPasswordBytes {
+		gCtx.JSON(http.StatusBadRequest, server.APIResponse{
+			Message: fmt.Sprintf("The password must not exceed %d bytes.", authUtils.MaxPasswordBytes),
+		})
 		return
 	}
 

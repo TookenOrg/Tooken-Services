@@ -53,7 +53,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/SignUpResponse"
         "400":
-          description: Malformed request body
+          description: >
+            Malformed request body, or email, password or fullName missing or
+            empty.
           content:
             application/json:
               schema:
@@ -2155,6 +2157,9 @@ components:
         password:
           type: string
           format: password
+          description: >
+            At most 72 bytes once UTF-8 encoded (the bcrypt limit): an accented
+            letter counts for two, "€" for three.
           example: "supersecret"
 
     SignUpResponse:

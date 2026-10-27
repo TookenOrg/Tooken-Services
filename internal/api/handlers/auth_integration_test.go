@@ -135,6 +135,47 @@ func TestSignUpOpensASession(t *testing.T) {
 	}
 }
 
+// The body is bound without validation, so a missing field arrives empty. An
+// empty email and password used to make an account anyone could sign in to,
+// and the answer, which renders the email, came back as a 201 with no body.
+// A password bcrypt cannot hash is the client's mistake too, not a 500.
+func TestSignUpValidatesTheBody(t *testing.T) {
+	r, db := authRouter(t)
+
+	const incomplete = `email IN ('', 'no-password@tooken.test', 'no-name@tooken.test', 'long-password@tooken.test')`
+	if _, err := db.Exec(`DELETE FROM usr.users WHERE ` + incomplete); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := map[string]string{
+		"empty object":   `{}`,
+		"no password":    `{"email":"no-password@tooken.test","fullName":"No Password"}`,
+		"no email":       `{"password":"Sup3r-secret!","fullName":"No Email"}`,
+		"blank fullName": `{"email":"no-name@tooken.test","password":"Sup3r-secret!","fullName":"  "}`,
+		// 25 runes, but 75 bytes for bcrypt: "€" is three bytes in UTF-8.
+		"password over 72 bytes": `{"email":"long-password@tooken.test","password":"` +
+			strings.Repeat("€", 25) + `","fullName":"Long Password"}`,
+	}
+
+	for name, body := range tests {
+		t.Run(name, func(t *testing.T) {
+			code, resp := send(r, http.MethodPost, "/auth/sign-up", "", body)
+			if code != http.StatusBadRequest {
+				t.Fatalf("got %d %q, want 400", code, resp)
+			}
+			expectMessage(t, resp)
+		})
+	}
+
+	var n int
+	if err := db.QueryRow(`SELECT count(*) FROM usr.users WHERE ` + incomplete).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Errorf("%d account(s) created from an invalid body", n)
+	}
+}
+
 func TestRefresh(t *testing.T) {
 	r, db := authRouter(t)
 
