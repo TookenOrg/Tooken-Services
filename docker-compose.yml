@@ -1,0 +1,102 @@
+# Local development stack: PostgreSQL, an Anvil EVM node and the API.
+#
+#   docker compose up -d --build              # everything in containers
+#   docker compose down -v                    # wipe the database AND the chain
+#
+# The stack starts empty: no account, no platform, no asset.
+#
+# Every port is published on 127.0.0.1 only; override them with POSTGRES_PORT,
+# EVM_PORT and API_PORT. See README.md.
+name: tooken-dev
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: tooken
+      POSTGRES_USER: tooken
+      POSTGRES_PASSWORD: tooken
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      # Run once, on an empty volume: builds the schema from tools/db.
+      - ./tools/db/docker-init:/docker-entrypoint-initdb.d:ro
+      - ./tools/db:/tooken/db:ro
+    healthcheck:
+      # Over TCP: during the first start the init scripts run against a
+      # server that listens on its Unix socket only.
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "tooken", "-d", "tooken"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  evm:
+    # Anvil: same chain id (31337) and same funded dev accounts as the Hardhat
+    # node of the integration tests, but it can save its state to disk, so the
+    # chain survives a restart together with the database that references it.
+    image: ghcr.io/foundry-rs/foundry:v1.5.1
+    entrypoint: ["anvil"]
+    command:
+      - --host=0.0.0.0
+      - --port=8545
+      - --chain-id=31337
+      # Written every 10 s and on shutdown, read back on start.
+      - --state=/home/foundry/state.json
+      - --state-interval=10
+    ports:
+      # HTTP and WebSocket share this port.
+      - "127.0.0.1:${EVM_PORT:-8555}:8545"
+    volumes:
+      # The home of the image's non-root user, so the volume is writable by it.
+      - evm-data:/home/foundry
+    healthcheck:
+      test: ["CMD", "cast", "block-number", "--rpc-url", "http://127.0.0.1:8545"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  api:
+    build:
+      context: .
+      target: api
+    image: tooken-api:dev
+    environment:
+      DATABASE_URL: postgres://tooken:tooken@postgres:5432/tooken?sslmode=disable
+      WS_RPC_URL: ws://evm:8545
+      # Hardhat/Anvil dev account #0. This key is PUBLIC and known to everyone:
+      # it is fine for a local chain and must never hold anything real.
+      PRIVATE_KEY: ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000}
+      GIN_MODE: ${GIN_MODE:-release}
+      LOG_TRACE: ${LOG_TRACE:-false}
+      ORDER_RESERVATION_TTL: ${ORDER_RESERVATION_TTL:-15m}
+      ETH_MIN_TIP_GWEI: ${ETH_MIN_TIP_GWEI:-1}
+      ETH_TX_WAIT: ${ETH_TX_WAIT:-5m}
+    ports:
+      - "127.0.0.1:${API_PORT:-8080}:8080"
+    depends_on:
+      # The server exits at startup when either one is unreachable. Restarting
+      # either one through compose restarts the API too, so that it connects
+      # again from scratch.
+      postgres:
+        condition: service_healthy
+        restart: true
+      evm:
+        condition: service_healthy
+        restart: true
+    # `docker compose restart` restarts every service at once, without waiting
+    # for the database: the API may start too early and exit, so let it retry.
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/api/v1/health"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    # On SIGTERM the server drains requests for up to 15 s, then waits up to
+    # 2 min for on-chain jobs (deliveries, deployments) to finish.
+    stop_grace_period: 2m30s
+
+volumes:
+  postgres-data:
+  evm-data:
