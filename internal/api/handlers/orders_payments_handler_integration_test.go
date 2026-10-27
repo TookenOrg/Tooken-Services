@@ -404,6 +404,63 @@ func TestConfirmPaymentStartsTheDelivery(t *testing.T) {
 	}
 }
 
+// heldDelivery starts, says so, then waits to be released: it stands for a
+// mint still waiting for its block when the server is asked to stop.
+type heldDelivery struct {
+	started chan string
+	release chan struct{}
+}
+
+func (d heldDelivery) Deliver(_ context.Context, orderRef string) {
+	d.started <- orderRef
+	<-d.release
+}
+
+// The delivery outlives the request on purpose. Whoever stops the process —
+// a test dropping its database, a server shutting down — must be able to wait
+// for it, or it is cut halfway between the mint and the status it records.
+func TestConfirmPaymentDeliveryIsWaitedFor(t *testing.T) {
+	delivery := heldDelivery{started: make(chan string, 1), release: make(chan struct{})}
+	h := newOrderHarnessDelivering(t, delivery)
+	admin := h.admin(t)
+	asset := h.newAsset(t, villaBelair())
+	investor := h.investor(t)
+
+	ref := h.rawOrderRef(t, investor.id, asset, 2, "15 minutes")
+	code, body := h.confirm(admin.token, ref)
+	expectCode(t, code, body, http.StatusOK)
+
+	select {
+	case got := <-delivery.started:
+		if got != ref {
+			t.Fatalf("delivery started for %s, want %s", got, ref)
+		}
+	case <-time.After(5 * time.Second):
+		close(delivery.release)
+		t.Fatalf("no delivery started for %s", ref)
+	}
+
+	waited := make(chan struct{})
+	go func() {
+		h.handler.WaitBackground()
+		close(waited)
+	}()
+
+	select {
+	case <-waited:
+		close(delivery.release)
+		t.Fatal("WaitBackground returned while the delivery was still running")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	close(delivery.release)
+	select {
+	case <-waited:
+	case <-time.After(5 * time.Second):
+		t.Fatal("WaitBackground did not return once the delivery had")
+	}
+}
+
 func TestConfirmPaymentConcurrency(t *testing.T) {
 	h := newOrderHarness(t)
 	admin := h.admin(t)

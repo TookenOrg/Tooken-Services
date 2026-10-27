@@ -147,7 +147,7 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 	// The test lives in package handlers, so no seam has to be opened in the
 	// production code to do this.
 	deployer := &fakeTokenDeployer{db: db}
-	h := NewHandler().(*Handler)
+	h := NewHandler()
 	h.realEstateSvc = assetsService.NewService(deployer)
 	server.RegisterHandlers(g, h)
 

@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/TookenOrg/tooken-services/internal/api/server"
@@ -19,7 +20,7 @@ func (h *Handler) DeployAllImplementationsAsync(gCtx *gin.Context) {
 		return
 	}
 
-	go func() {
+	h.startBackground("deployment of all implementations", func() {
 		logger.LogInfo("🚀 Starting asynchronous deployment of all implementations")
 
 		_, err := h.blockchainSvc.DeployAllImplementations(context.Background())
@@ -28,7 +29,7 @@ func (h *Handler) DeployAllImplementationsAsync(gCtx *gin.Context) {
 			return
 		}
 		logger.LogInfo("🆗 Asynchronous deployment of all implementations completed successfully.")
-	}()
+	})
 
 	gCtx.JSON(http.StatusAccepted, server.APIResponse{
 		Message: "The deployment of all implementations has been started asynchronously.",
@@ -49,6 +50,7 @@ func (h *Handler) DeployIdentityFactory(gCtx *gin.Context) {
 		gCtx.JSON(http.StatusInternalServerError, server.InitializeIdentityFactoryResponse{
 			Message: "Failed to deploy Identity Factory: " + err.Error(),
 		})
+		return
 	}
 
 	logger.LogInfo("🆗 Identity Factory deployed successfully")
@@ -87,7 +89,7 @@ func (h *Handler) DeployAndInitTrexFactoryAsync(gCtx *gin.Context) {
 	if !middleware.RequireRole(gCtx, authUtils.RoleManager, authUtils.RoleAdmin) {
 		return
 	}
-	go func() {
+	h.startBackground("deployment of the TREX factory", func() {
 		logger.LogInfo("🚀 Starting asynchronous deployment of TREX Factory")
 		err := h.blockchainSvc.DeployAndInitTrexFactory(context.Background())
 		if err != nil {
@@ -95,7 +97,7 @@ func (h *Handler) DeployAndInitTrexFactoryAsync(gCtx *gin.Context) {
 			return
 		}
 		logger.LogInfo("🆗 Asynchronous deployment of TREX Factory completed successfully.")
-	}()
+	})
 
 	gCtx.JSON(http.StatusAccepted, server.APIResponse{
 		Message: "The deployment of TREX Factory has been started asynchronously.",
@@ -106,7 +108,7 @@ func (h *Handler) DeployTrexSuiteAsync(gCtx *gin.Context) {
 	if !middleware.RequireRole(gCtx, authUtils.RoleManager, authUtils.RoleAdmin) {
 		return
 	}
-	go func() {
+	h.startBackground("deployment of the TREX suite", func() {
 		logger.LogInfo("🚀 Starting asynchronous deployment of TREX Suite")
 		_, err := h.blockchainSvc.DeployTrexSuite(context.Background())
 		if err != nil {
@@ -114,7 +116,7 @@ func (h *Handler) DeployTrexSuiteAsync(gCtx *gin.Context) {
 			return
 		}
 		logger.LogInfo("🆗 Asynchronous deployment of TREX Suite completed successfully.")
-	}()
+	})
 
 	gCtx.JSON(http.StatusAccepted, server.APIResponse{
 		Message: "The deployment of TREX Suite has been started asynchronously.",
@@ -263,13 +265,14 @@ func (h *Handler) BurnTokenAsync(gCtx *gin.Context) {
 
 	ctx := context.WithoutCancel(reqCtx)
 
-	go func(ctx context.Context) {
+	what := fmt.Sprintf("burn of %v tokens of %s held by %s", req.Amount, req.TokenContractAddress, req.To)
+	h.startBackground(what, func() {
 		_, err := h.blockchainSvc.Burn(ctx, req.TokenContractAddress, req.To, req.Amount)
 		if err != nil {
 			logger.LogError("Failed to Burn: %s", err.Error())
 			return
 		}
-	}(ctx)
+	})
 
 	gCtx.JSON(http.StatusAccepted, server.BurnTokenResponse{
 		Message: "Burn started successfully.",
