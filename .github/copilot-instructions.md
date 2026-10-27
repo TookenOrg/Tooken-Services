@@ -7,7 +7,8 @@ PostgreSQL (raw SQL), and drives Ethereum smart contracts via go-ethereum.
 ## Build, test, lint
 
 - Build everything: `go build ./...`
-- Run the server: `go run .` (entry point is `main.go` at the repo root; listens on `:8080`)
+- Run the server: `go run .` (entry point is `main.go` at the repo root; listens on `:8080`;
+  refuses to start without `JWT_SECRET`)
 - Run all tests with the race detector (matches CI): `go test -race -timeout 5m ./...`
 - Run a single test: `go test -run '^TestName$' ./internal/path/to/pkg`
 - Vet: `go vet ./...`; format with `gofmt -w` before committing.
@@ -50,6 +51,10 @@ into `internal/api/server/server.gen.go`.
 - Adding/changing an endpoint = edit `openapi.yaml` → regenerate → implement the
   method on `Handler` in `internal/api/handlers/`. `Handler` must satisfy
   `server.ServerInterface`; a missing method breaks the build.
+- An `x-oapi-codegen-extra-tags` `json` entry **replaces** the generated tag
+  entirely: write `json: "data,omitempty"`, never `",omitempty"` alone (the
+  field would then serialize as `"Data"`). `encoding/json` decodes keys
+  case-insensitively, so only a check on the raw bytes catches that.
 
 ## Architecture & layering
 
@@ -73,15 +78,31 @@ blockchain, on-chain `services`/`contracts`).
 
 ## Auth (route protection is driven by the spec)
 
-- JWT, HS256, via `internal/auth/utils/jwt.go`. ⚠️ `JwtKey` is hardcoded
-  (`"secret_key_to_change"`) — treat as a placeholder, never a real secret.
-- `router.New` calls `middleware.InitAuth("./api/openapi.yaml")`, which parses the spec and
+- JWT, HS256, via `internal/auth/utils/jwt.go`. The key comes from
+  `JWT_SECRET` (at least 32 bytes, no surrounding whitespace): `main` installs it with
+  `authUtils.SetSecret` and refuses to start without it. There is no default:
+  until a secret is set, signing and parsing both fail, because the HMAC
+  library would accept an empty key. Tests that issue or parse tokens install
+  their own secret in a `TestMain`, in the `main_test.go` of their package.
+- `router.New` calls `middleware.InitAuth(specPath)` (`main.go` passes
+  `"./api/openapi.yaml"`, relative to the working directory), which parses the spec and
   marks every operation carrying `security: - bearerAuth: []` as protected.
-  **To require auth on a route, add that `security` block in `openapi.yaml`** —
-  there is no per-handler auth code.
+  **To require auth on a route, add that `security` block in `openapi.yaml`**;
+  role checks then happen in the handler with
+  `middleware.RequireRole(gCtx, authUtils.RoleManager, authUtils.RoleAdmin)`.
 - `AutoAuthMiddleware` validates the `Bearer` token and stores `*CustomClaims`
   in the Gin context under `"user_claims"`. Read it with
   `middleware.GetUserClaims(gCtx)` (returns claims + ok).
+- Tokens are typed by a `tokenUse` claim (`access` / `refresh`): `ParseJWT`
+  accepts only access tokens, `ParseRefreshToken` only refresh tokens, so a
+  refresh token is never a Bearer token. Sign-up and sign-in both return the
+  same session (`server.JwtToken`, built in `auth/services/session.go`); the
+  access token lives 1 h, the refresh token 8 h from sign-in.
+  `POST /auth/refresh` issues a new access token with the role re-read from
+  the database and returns the **same** refresh token (no rotation: the
+  session ends 8 h after sign-in, no revocation).
+- Generated request structs carry no `binding:"required"`: a missing field
+  binds as its zero value, so handlers must check required fields themselves.
 
 ## Blockchain conventions
 
@@ -142,9 +163,18 @@ code**, so variables must be exported in the process environment. The committed
 VS Code `launch.json` injects `.env` (gitignored) only when debugging.
 
 Required/used vars: `DATABASE_URL`, `WS_RPC_URL` (Ethereum WS RPC), `PRIVATE_KEY`
-(signer), `CORS_ALLOWED_ORIGINS` (comma-separated), `LOG_TRACE`,
+(signer), `JWT_SECRET` (session signing key, at least 32 bytes, no default),
+`CORS_ALLOWED_ORIGINS` (comma-separated), `LOG_TRACE`,
 `ORDER_RESERVATION_TTL` (Go duration, default `15m`: how long an unpaid order
-holds its shares).
+holds its shares), `ETH_MIN_TIP_GWEI` (priority fee floor, default 1),
+`ETH_TX_WAIT` (Go duration, default `5m`: how long to wait for mining), and
+`GIN_MODE`, read by Gin itself.
+
+Local stack: `docker compose up -d --build` (PostgreSQL built from
+`tools/db/baseline.sql`, an Anvil node, the API; ports on `127.0.0.1` only,
+see `README.md`). It starts **empty on purpose**: the project runs in
+production, so no demo data, default account or seed script is shipped.
+Never add one.
 
 ## Git / PR conventions
 
@@ -153,9 +183,3 @@ holds its shares).
 - PR titles follow Conventional Commits (`feat:`, `fix:`, `docs:`, …); target
   `develop` for integration and `main` for releases (see
   `.github/PULL_REQUEST_TEMPLATE.md`).
-
-## Known gotcha
-
-The `Dockerfile` builds `./cmd/server`, but the entry point is `main.go` at the
-repo root (there is no `cmd/` directory), so the Docker build is currently stale.
-Build/run against `main.go` until that is reconciled.

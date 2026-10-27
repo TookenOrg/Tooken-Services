@@ -416,8 +416,9 @@ Endpoints → service methods (all under `globals.BaseURL` = `/api/v1`):
 There is no mint endpoint: `SendMintShares` is reached only through the
 delivery of a paid order.
 
-These routes are **not** marked `bearerAuth` in `api/openapi.yaml`, so they are
-currently public (auth is spec-driven — see the repo `copilot-instructions.md`).
+Every `POST` above is marked `bearerAuth` in `api/openapi.yaml` and its handler
+requires the MANAGER or ADMIN role: without a token it answers `401`, with a
+USER token `403`. The two `GET` stubs are public.
 
 ### Environment variables
 
