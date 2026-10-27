@@ -2,12 +2,62 @@ package utils
 
 import (
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 )
 
-var JwtKey = []byte("secret_key_to_change")
+// MinSecretBytes is the shortest signing secret accepted: HS256 wants a key at
+// least as long as its 256-bit hash.
+const MinSecretBytes = 32
+
+var (
+	ErrSecretMissing  = errors.New("JWT secret is not set")
+	ErrSecretPadded   = errors.New("JWT secret starts or ends with whitespace")
+	ErrSecretTooShort = fmt.Errorf("JWT secret is shorter than %d bytes", MinSecretBytes)
+)
+
+// jwtKey signs and verifies every token. The HMAC library accepts an empty
+// key, which anyone can sign with, so until SetSecret is called both signing
+// and parsing fail instead.
+var jwtKey []byte
+
+// SetSecret installs the signing secret, read by the server from JWT_SECRET.
+// Call it once at startup, before any request is served. A refused secret
+// leaves the current one in place.
+func SetSecret(secret string) error {
+	switch {
+	case secret == "":
+		return ErrSecretMissing
+	// A secret read from a file often ends with a newline that counts towards
+	// the length. Refused rather than trimmed, so the key in use is exactly
+	// the one configured.
+	case strings.TrimSpace(secret) != secret:
+		return ErrSecretPadded
+	case len(secret) < MinSecretBytes:
+		return ErrSecretTooShort
+	}
+
+	jwtKey = []byte(secret)
+	return nil
+}
+
+func signingKey() ([]byte, error) {
+	if len(jwtKey) == 0 {
+		return nil, ErrSecretMissing
+	}
+	return jwtKey, nil
+}
+
+func signHS256(claims jwt.Claims) (string, error) {
+	key, err := signingKey()
+	if err != nil {
+		return "", err
+	}
+	return jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(key)
+}
 
 // Role values, mirroring the CHECK constraint on usr.users.role added by
 // migration 000009.
@@ -88,7 +138,7 @@ func NewAccessToken(userID int, email, role string) (token string, expiresAt tim
 		},
 	}
 
-	token, err = jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(JwtKey)
+	token, err = signHS256(claims)
 	if err != nil {
 		return "", time.Time{}, err
 	}
@@ -108,7 +158,7 @@ func GenerateRefreshToken(userID int) (string, error) {
 		},
 	}
 
-	return jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(JwtKey)
+	return signHS256(claims)
 }
 
 // ParseJWT validates an access token. A refresh token is refused.
@@ -141,7 +191,7 @@ func ParseRefreshToken(tokenStr string) (*RefreshClaims, error) {
 
 func parse(tokenStr string, claims jwt.Claims) error {
 	token, err := jwt.ParseWithClaims(tokenStr, claims,
-		func(*jwt.Token) (interface{}, error) { return JwtKey, nil },
+		func(*jwt.Token) (interface{}, error) { return signingKey() },
 		jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
 		// Every token this package issues expires; one that does not was not
 		// issued here.

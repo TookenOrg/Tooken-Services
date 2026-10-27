@@ -67,6 +67,9 @@ services:
       # Hardhat/Anvil dev account #0. This key is PUBLIC and known to everyone:
       # it is fine for a local chain and must never hold anything real.
       PRIVATE_KEY: ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
+      # Signs the sessions of this stack only. Fixed here rather than read from
+      # .env, so that a production secret kept there never signs local tokens.
+      JWT_SECRET: local-compose-stack-only-never-use-in-production
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000}
       GIN_MODE: ${GIN_MODE:-release}
       LOG_TRACE: ${LOG_TRACE:-false}

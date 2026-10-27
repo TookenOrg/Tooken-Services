@@ -20,6 +20,7 @@ import (
 
 	"github.com/TookenOrg/tooken-services/internal/api/handlers"
 	"github.com/TookenOrg/tooken-services/internal/api/router"
+	authUtils "github.com/TookenOrg/tooken-services/internal/auth/utils"
 	blkGlobals "github.com/TookenOrg/tooken-services/internal/blockchain/globals"
 	"github.com/TookenOrg/tooken-services/internal/blockchain/services"
 	"github.com/TookenOrg/tooken-services/internal/globals"
@@ -35,6 +36,12 @@ func main() {
 
 	// init logs
 	logger.Init(true)
+
+	// Without its own secret the server would trust tokens anyone can sign:
+	// refuse to start rather than fall back on a default.
+	if err := authUtils.SetSecret(os.Getenv("JWT_SECRET")); err != nil {
+		log.Fatalf("Error on JWT_SECRET: %v (generate one with: openssl rand -base64 48)", err)
+	}
 
 	// init db
 	globals.DB, err = setupDatabase()

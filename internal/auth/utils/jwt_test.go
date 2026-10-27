@@ -1,7 +1,9 @@
 package utils
 
 import (
+	"bytes"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,7 +12,7 @@ import (
 
 func sign(t *testing.T, claims jwt.Claims) string {
 	t.Helper()
-	return signHS256With(t, claims, JwtKey)
+	return signHS256With(t, claims, jwtKey)
 }
 
 // Refresh tokens used to carry nothing but an expiry. Signed with the same key,
@@ -79,10 +81,10 @@ func TestParsersAcceptHS256Only(t *testing.T) {
 
 	for _, method := range []jwt.SigningMethod{jwt.SigningMethodHS384, jwt.SigningMethodHS512} {
 		t.Run(method.Alg(), func(t *testing.T) {
-			if claims, err := ParseJWT(signWith(method, access, JwtKey)); err == nil {
+			if claims, err := ParseJWT(signWith(method, access, jwtKey)); err == nil {
 				t.Errorf("access token accepted: %+v", claims)
 			}
-			if claims, err := ParseRefreshToken(signWith(method, refresh, JwtKey)); err == nil {
+			if claims, err := ParseRefreshToken(signWith(method, refresh, jwtKey)); err == nil {
 				t.Errorf("refresh token accepted: %+v", claims)
 			}
 		})
@@ -119,6 +121,11 @@ func TestParseRefreshTokenRefusals(t *testing.T) {
 	}
 }
 
+func adminClaims() CustomClaims {
+	return CustomClaims{UserID: 1, Email: "admin@tooken.test", Role: RoleAdmin, TokenUse: tokenUseAccess,
+		RegisteredClaims: jwt.RegisteredClaims{ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour))}}
+}
+
 func signHS256With(t *testing.T, claims jwt.Claims, key []byte) string {
 	t.Helper()
 	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(key)
@@ -126,4 +133,91 @@ func signHS256With(t *testing.T, claims jwt.Claims, key []byte) string {
 		t.Fatal(err)
 	}
 	return token
+}
+
+// The key used to be a constant in this file, so it is public: a token signed
+// with it must not authenticate anyone.
+func TestATokenSignedWithTheFormerBuiltInKeyIsRefused(t *testing.T) {
+	forged := signHS256With(t, adminClaims(), []byte("secret_key_to_change"))
+	if claims, err := ParseJWT(forged); err == nil {
+		t.Fatalf("forged ADMIN token accepted: %+v", claims)
+	}
+}
+
+func TestSetSecretRefusesAWeakSecret(t *testing.T) {
+	previous := jwtKey
+	t.Cleanup(func() { jwtKey = previous })
+
+	for _, tc := range []struct {
+		secret string
+		want   error
+	}{
+		{"", ErrSecretMissing},
+		{"secret_key_to_change", ErrSecretTooShort},
+		{strings.Repeat("k", MinSecretBytes-1), ErrSecretTooShort},
+		{strings.Repeat("k", MinSecretBytes-1) + "\n", ErrSecretPadded},
+		{" " + strings.Repeat("k", MinSecretBytes), ErrSecretPadded},
+		{strings.Repeat(" ", MinSecretBytes), ErrSecretPadded},
+	} {
+		if err := SetSecret(tc.secret); !errors.Is(err, tc.want) {
+			t.Errorf("SetSecret(%q) = %v, want %v", tc.secret, err, tc.want)
+		}
+		if !bytes.Equal(jwtKey, previous) {
+			t.Fatalf("SetSecret(%q) was refused but replaced the key", tc.secret)
+		}
+	}
+
+	issuedBefore, err := GenerateJWT(42, "investor@tooken.test", RoleUser)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := SetSecret(strings.Repeat("k", MinSecretBytes)); err != nil {
+		t.Fatalf("SetSecret(%d bytes) = %v, want nil", MinSecretBytes, err)
+	}
+	token, err := GenerateJWT(42, "investor@tooken.test", RoleUser)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ParseJWT(token); err != nil {
+		t.Errorf("token signed with the new secret refused: %v", err)
+	}
+	if _, err := ParseJWT(issuedBefore); err == nil {
+		t.Error("token signed with the replaced secret still accepted")
+	}
+}
+
+// The HMAC library signs and verifies with an empty key. Until a secret is
+// installed nothing is issued and nothing is accepted, not even a token signed
+// with that empty key.
+func TestWithoutASecretNoTokenIsIssuedOrAccepted(t *testing.T) {
+	access, err := GenerateJWT(42, "investor@tooken.test", RoleUser)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refresh, err := GenerateRefreshToken(42)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	previous := jwtKey
+	jwtKey = nil
+	t.Cleanup(func() { jwtKey = previous })
+
+	if _, _, err := NewAccessToken(42, "investor@tooken.test", RoleUser); !errors.Is(err, ErrSecretMissing) {
+		t.Errorf("NewAccessToken without a secret = %v, want ErrSecretMissing", err)
+	}
+	if _, err := GenerateRefreshToken(42); !errors.Is(err, ErrSecretMissing) {
+		t.Errorf("GenerateRefreshToken without a secret = %v, want ErrSecretMissing", err)
+	}
+	for name, token := range map[string]string{
+		"issued with the previous secret": access,
+		"signed with an empty key":        signHS256With(t, adminClaims(), []byte{}),
+	} {
+		if claims, err := ParseJWT(token); err == nil {
+			t.Errorf("access token %s accepted: %+v", name, claims)
+		}
+	}
+	if claims, err := ParseRefreshToken(refresh); err == nil {
+		t.Errorf("refresh token accepted: %+v", claims)
+	}
 }

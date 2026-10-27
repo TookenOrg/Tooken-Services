@@ -73,7 +73,8 @@ API_PORT=18080 docker compose up -d
 
 The API signs every transaction with the first development account of
 Hardhat and Anvil. Its private key is public knowledge: it is only acceptable
-on a local chain.
+on a local chain. Likewise, `JWT_SECRET` is fixed in `docker-compose.yml` to a
+public value that only suits this stack.
 
 ### Everyday commands
 
@@ -115,14 +116,27 @@ Run PostgreSQL and the node in Docker, and the API on your machine:
 ```bash
 docker compose up -d postgres evm
 set -a; . ./.env.example; set +a      # the server does not read .env files itself
+export JWT_SECRET="$(openssl rand -base64 48)"
 go run .                              # serves on :8080
 ```
 
-`.env.example` holds working values for this setup. To change them, copy it to
-`.env` (ignored by git) and source that file instead.
+`.env.example` holds working values for this setup, except `JWT_SECRET`: it is
+left empty so that no environment inherits a known one, and the server refuses
+to start without a secret of at least 32 bytes. A new secret logs every user
+out. To keep your settings, copy the file to `.env` (ignored by git), fill it
+in and source that file instead.
 
 The API port is fixed to 8080 in this mode: stop the API container first if
 it runs (`docker compose stop api`).
+
+## Production
+
+Besides the database, the node and the signer key, the server needs
+`JWT_SECRET`: at least 32 random bytes (`openssl rand -base64 48`), with no
+leading or trailing whitespace (a trailing newline is refused), kept in the
+secret store of the host, never in the repository. It signs every session:
+whoever holds it can sign an ADMIN token. The server refuses to start without
+it. Replacing it logs every user out.
 
 ## Build and test
 
