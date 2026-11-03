@@ -225,9 +225,8 @@ func checkStillPublishable(statusID int, before, after database.RealEstateWriteD
 	}
 
 	if len(lost) > 0 {
-		return conflict(
-			"a published asset cannot lose what investors rely on, missing: %s",
-			strings.Join(lost, ", "))
+		return missingFieldsConflict(
+			"a published asset cannot lose what investors rely on", lost)
 	}
 
 	return nil
@@ -275,9 +274,8 @@ func (s *Service) PublishRealEstate(ctx context.Context, id int) (server.RealEst
 	}
 
 	if missing := publicationRequirements(in); len(missing) > 0 {
-		return server.RealEstate{}, conflict(
-			"this asset is not complete enough to be published, missing: %s",
-			strings.Join(missing, ", "))
+		return server.RealEstate{}, missingFieldsConflict(
+			"this asset is not complete enough to be published", missing)
 	}
 
 	// Naming a vehicle is not enough: it has to still stand behind the offer.

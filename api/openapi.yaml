@@ -199,6 +199,118 @@ paths:
               schema:
                 $ref: "#/components/schemas/APIResponse"
 
+  /users/me/kyc/onchain:
+    get:
+      operationId: GetCurrentUserKycOnChain
+      summary: Read the current user's on-chain KYC status
+      description: >
+        Reads verification from the shared identity registry without creating a
+        wallet, identity or transaction. An account without a wallet is not
+        verified. Database approval and on-chain verification are distinct.
+      tags: [User, KYC]
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Current on-chain verification state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KycOnChainStatus"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "404":
+          description: Account no longer exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "500":
+          description: Unable to read the account or wallet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "503":
+          description: The chain or shared identity registry is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+
+  /users/{userId}/role:
+    patch:
+      operationId: UpdateUserRole
+      summary: Change an account's role
+      description: >
+        ADMIN only; the caller's administrator role is re-read from the
+        database. Self-demotion and demotion of the last administrator are
+        refused. Existing access tokens retain their previous role until they
+        expire; refreshing or signing in issues a token with the current role.
+      tags: [User]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: userId
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateUserRoleRequest"
+      responses:
+        "200":
+          description: Updated account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          description: Invalid account identifier or role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "401":
+          description: Authentication required or account no longer exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "403":
+          description: The caller is not an administrator
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "404":
+          description: Target account not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "409":
+          description: Self-demotion or demotion of the last administrator
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "500":
+          description: Unable to update the account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+
   # KYC
   /users/kyc/verifications:
     post:
@@ -1640,6 +1752,58 @@ paths:
                 $ref: "#/components/schemas/APIResponse"
 
   # Users actions
+  /users/{userId}/favorites/real-estates:
+    get:
+      operationId: GetFavoritesRealEstatesForUser
+      summary: List the authenticated user's favorite real estates
+      description: >
+        Only the owner can read this list, including when the caller is an
+        administrator. Uses the same visibility rules as the real estate list;
+        deleted assets and assets hidden from the caller are omitted.
+      tags: [User, Assets]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: userId
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Favorite real estates, or an empty array
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RealEstateSummary"
+        "400":
+          description: Invalid user identifier
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "401":
+          description: Authentication required or account no longer exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "403":
+          description: The caller is not the owner
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "500":
+          description: Unable to retrieve favorites
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+
   /users/{userId}/favorites/real-estates/{realEstateId}:
     post:
       tags:
@@ -2054,6 +2218,14 @@ components:
       properties:
         message:
           type: string
+        missing_fields:
+          type: array
+          description: >
+            On a real estate or issuer completeness conflict (409), the fields to
+            complete, using request paths such as configuration.total_shares.
+            Absent for conflicts unrelated to missing fields.
+          items:
+            type: string
         data:
           nullable: true
           # The key must be repeated: an extra json tag replaces the generated
@@ -2209,6 +2381,27 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/JwtToken"
+
+    UpdateUserRoleRequest:
+      type: object
+      required: [role]
+      properties:
+        role:
+          type: string
+          enum: [USER, MANAGER, ADMIN]
+
+    KycOnChainStatus:
+      type: object
+      required: [user_id, is_verified]
+      properties:
+        user_id:
+          type: integer
+        is_verified:
+          type: boolean
+          description: Actual verification result from the shared identity registry
+        wallet_address:
+          type: string
+          description: Absent when the account has no wallet
 
     User:
       type: object
@@ -2757,6 +2950,24 @@ components:
           type: string
           description: Exact integer count, NUMERIC(20,0)
           example: "100"
+        min_investment:
+          type: string
+          description: Minimum investment amount in the asset's currency, exact decimal
+        max_investment:
+          type: string
+          description: Maximum investment amount in the asset's currency, exact decimal
+        entry_fee_rate:
+          type: string
+          description: Entry fee percentage between 0 and 100, exact decimal
+        mgmt_fee_rate:
+          type: string
+          description: Management fee percentage between 0 and 100, exact decimal
+        exit_fee_rate:
+          type: string
+          description: Exit fee percentage between 0 and 100, exact decimal
+        compartment_ref:
+          type: string
+          description: Luxembourg compartment reference
 
     RealEstateProgression:
       type: object

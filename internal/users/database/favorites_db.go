@@ -7,6 +7,24 @@ import (
 	"github.com/TookenOrg/tooken-services/pkg/logger"
 )
 
+func GetFavoriteRealEstateIDs(ctx context.Context, userID int) (map[int]struct{}, error) {
+	rows, err := globals.DB.QueryContext(ctx, `
+		SELECT real_estate_id FROM rel.user_asset_favorite WHERE user_id = $1`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	ids := make(map[int]struct{})
+	for rows.Next() {
+		var id int
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids[id] = struct{}{}
+	}
+	return ids, rows.Err()
+}
+
 func AddFavoritesRealEstateByUserId(ctx context.Context, userId, realEstateId int) (err error) {
 	query := `
         INSERT INTO rel.user_asset_favorite

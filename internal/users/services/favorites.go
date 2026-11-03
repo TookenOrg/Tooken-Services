@@ -5,9 +5,37 @@ import (
 	"database/sql"
 	"errors"
 
+	"github.com/TookenOrg/tooken-services/internal/api/server"
+	assetServices "github.com/TookenOrg/tooken-services/internal/assets_managements/services"
 	"github.com/TookenOrg/tooken-services/internal/users/database"
 	"github.com/lib/pq"
 )
+
+func (s *Service) GetFavoritesRealEstatesForUser(ctx context.Context, userID int, isStaff bool) ([]server.RealEstateSummary, error) {
+	if _, err := s.GetUserByID(ctx, userID); err != nil {
+		return nil, err
+	}
+	ids, err := database.GetFavoriteRealEstateIDs(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if len(ids) == 0 {
+		return []server.RealEstateSummary{}, nil
+	}
+	// Reuse the catalogue's visibility and safe summary mapping in one query,
+	// rather than loading every favorite's sensitive detail separately.
+	estates, err := assetServices.NewService(nil).GetRealEstates(ctx, isStaff)
+	if err != nil {
+		return nil, err
+	}
+	favorites := make([]server.RealEstateSummary, 0, len(ids))
+	for _, estate := range estates {
+		if _, ok := ids[estate.Id]; ok {
+			favorites = append(favorites, estate)
+		}
+	}
+	return favorites, nil
+}
 
 var (
 	// ErrFavoriteExists is returned when the real estate already is a

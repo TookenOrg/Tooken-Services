@@ -366,9 +366,12 @@ func checkIssuerStatusChange(state database.IssuerGuardStateDTO, in database.Iss
 
 	if target == database.IssuerStatusActive {
 		if missing := activeRequirements(in); len(missing) > 0 {
-			return issuerConflict(
-				"this issuer cannot be activated while it lacks %s",
-				strings.Join(missing, ", "))
+			return &MissingFieldsConflict{
+				Fields: missing,
+				Message: fmt.Sprintf("this issuer cannot be activated while it lacks %s",
+					strings.Join(missing, ", ")),
+				kind: ErrIssuerConflict,
+			}
 		}
 	}
 
@@ -431,9 +434,12 @@ func checkIssuerStillIdentifiable(before, after database.IssuerWriteDTO) error {
 	}
 
 	if len(lost) > 0 {
-		return issuerConflict(
-			"an active issuer cannot lose what identifies it, missing: %s",
-			strings.Join(lost, ", "))
+		return &MissingFieldsConflict{
+			Fields: lost,
+			Message: fmt.Sprintf("an active issuer cannot lose what identifies it, missing: %s",
+				strings.Join(lost, ", ")),
+			kind: ErrIssuerConflict,
+		}
 	}
 
 	return nil

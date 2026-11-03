@@ -24,7 +24,12 @@ func respondRealEstateError(gCtx *gin.Context, err error, fallback string) {
 	case errors.Is(err, services.ErrInvalidRealEstate):
 		gCtx.JSON(http.StatusBadRequest, server.APIResponse{Message: err.Error()})
 	case errors.Is(err, services.ErrRealEstateConflict):
-		gCtx.JSON(http.StatusConflict, server.APIResponse{Message: err.Error()})
+		response := server.APIResponse{Message: err.Error()}
+		var incomplete *services.MissingFieldsConflict
+		if errors.As(err, &incomplete) {
+			response.MissingFields = &incomplete.Fields
+		}
+		gCtx.JSON(http.StatusConflict, response)
 	default:
 		logger.LogError("%s: %v", fallback, err)
 		gCtx.JSON(http.StatusInternalServerError, server.APIResponse{Message: fallback})

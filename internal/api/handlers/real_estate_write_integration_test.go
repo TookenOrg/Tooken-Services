@@ -1000,6 +1000,13 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 			if code != http.StatusConflict {
 				t.Fatalf("want 409 got %d: %s", code, body)
 			}
+			var response server.APIResponse
+			if err := json.Unmarshal([]byte(body), &response); err != nil {
+				t.Fatal(err)
+			}
+			if response.MissingFields == nil || len(*response.MissingFields) != 9 {
+				t.Fatalf("want nine structured missing fields, got %s", body)
+			}
 			// issuer_id is absent from this list on purpose: since migration
 			// 000016 an asset cannot be created without one, so it can no
 			// longer be among the things a draft is still missing.

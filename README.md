@@ -138,6 +138,24 @@ secret store of the host, never in the repository. It signs every session:
 whoever holds it can sign an ADMIN token. The server refuses to start without
 it. Replacing it logs every user out.
 
+### Deploying on Render
+
+`render.yaml` describes the API as a Render Blueprint; `docker-compose.yml` is
+for local development only. The database (Aiven) and the Ethereum node are
+external.
+
+1. Push the repository, then in Render: *New > Blueprint*, and pick it.
+2. Fill in the five variables Render asks for: `JWT_SECRET`, `PRIVATE_KEY` (a
+   dedicated key, funded for gas only), `DATABASE_URL` (Aiven URI with
+   `sslmode=require`), `WS_RPC_URL` (`wss://…`) and `CORS_ALLOWED_ORIGINS`.
+3. Add the service's outbound IPs (dashboard: *Connect > Outbound*) to the
+   Aiven IP allowlist, otherwise the server cannot reach the database and exits.
+4. Keep a single instance and a paid plan: the signer's nonce lock is in
+   memory, and an idle spin-down would cut the on-chain jobs.
+
+The first start against a real chain deploys the platform contracts and spends
+gas: try it on a testnet first.
+
 ## Build and test
 
 ```bash
