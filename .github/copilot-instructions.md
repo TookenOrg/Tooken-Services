@@ -166,7 +166,8 @@ Required/used vars: `DATABASE_URL`, `WS_RPC_URL` (Ethereum WS RPC), `PRIVATE_KEY
 (signer), `JWT_SECRET` (session signing key, at least 32 bytes, no default),
 `CORS_ALLOWED_ORIGINS` (comma-separated), `LOG_TRACE`,
 `ORDER_RESERVATION_TTL` (Go duration, default `15m`: how long an unpaid order
-holds its shares), `ETH_MIN_TIP_GWEI` (priority fee floor, default 1),
+holds its shares), `TREX_INIT_ENABLED` (exactly `true` enables the initialization
+routes; disabled by default), `ETH_MIN_TIP_GWEI` (priority fee floor, default 1),
 `ETH_TX_WAIT` (Go duration, default `5m`: how long to wait for mining), and
 `GIN_MODE`, read by Gin itself.
 

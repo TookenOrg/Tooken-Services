@@ -14,16 +14,28 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func (h *Handler) DeployAllImplementationsAsync(gCtx *gin.Context) {
-
+func (h *Handler) requireTrexInitialization(gCtx *gin.Context) bool {
 	if !middleware.RequireRole(gCtx, authUtils.RoleManager, authUtils.RoleAdmin) {
+		return false
+	}
+	if !h.trexInitEnabled {
+		gCtx.AbortWithStatusJSON(http.StatusForbidden, server.APIResponse{
+			Message: "TREX initialization is disabled.",
+		})
+		return false
+	}
+	return true
+}
+
+func (h *Handler) DeployAllImplementationsAsync(gCtx *gin.Context) {
+	if !h.requireTrexInitialization(gCtx) {
 		return
 	}
 
 	h.startBackground("deployment of all implementations", func() {
 		logger.LogInfo("🚀 Starting asynchronous deployment of all implementations")
 
-		_, err := h.blockchainSvc.DeployAllImplementations(context.Background())
+		_, err := h.trexInitSvc.DeployAllImplementations(context.Background())
 		if err != nil {
 			logger.LogError("Failed to deploy all implementations: %v", err.Error())
 			return
@@ -37,14 +49,13 @@ func (h *Handler) DeployAllImplementationsAsync(gCtx *gin.Context) {
 }
 
 func (h *Handler) DeployIdentityFactory(gCtx *gin.Context) {
-
-	if !middleware.RequireRole(gCtx, authUtils.RoleManager, authUtils.RoleAdmin) {
+	if !h.requireTrexInitialization(gCtx) {
 		return
 	}
 
 	logger.LogInfo("🚀 Starting deployment of Identity Factory")
 
-	deploymentContractDetails, err := h.blockchainSvc.DeployIdentityFactory(gCtx.Request.Context())
+	deploymentContractDetails, err := h.trexInitSvc.DeployIdentityFactory(gCtx.Request.Context())
 	if err != nil {
 		logger.LogError("Failed to deploy Identity Factory: %v", err)
 		gCtx.JSON(http.StatusInternalServerError, server.InitializeIdentityFactoryResponse{
@@ -62,14 +73,13 @@ func (h *Handler) DeployIdentityFactory(gCtx *gin.Context) {
 }
 
 func (h *Handler) ConfigureAuthority(gCtx *gin.Context) {
-
-	if !middleware.RequireRole(gCtx, authUtils.RoleManager, authUtils.RoleAdmin) {
+	if !h.requireTrexInitialization(gCtx) {
 		return
 	}
 
 	logger.LogInfo("🚀 Starting deployment of configure Authority")
 
-	txDetails, err := h.blockchainSvc.ConfigureAuthority(gCtx.Request.Context())
+	txDetails, err := h.trexInitSvc.ConfigureAuthority(gCtx.Request.Context())
 	if err != nil {
 		gCtx.JSON(http.StatusInternalServerError, server.ConfigureAuthorityResponse{
 			Message: "Failed to configure Authority: " + err.Error(),
@@ -86,12 +96,12 @@ func (h *Handler) ConfigureAuthority(gCtx *gin.Context) {
 }
 
 func (h *Handler) DeployAndInitTrexFactoryAsync(gCtx *gin.Context) {
-	if !middleware.RequireRole(gCtx, authUtils.RoleManager, authUtils.RoleAdmin) {
+	if !h.requireTrexInitialization(gCtx) {
 		return
 	}
 	h.startBackground("deployment of the TREX factory", func() {
 		logger.LogInfo("🚀 Starting asynchronous deployment of TREX Factory")
-		err := h.blockchainSvc.DeployAndInitTrexFactory(context.Background())
+		err := h.trexInitSvc.DeployAndInitTrexFactory(context.Background())
 		if err != nil {
 			logger.LogError("Failed to deploy and init TREX Factory: %v", err.Error())
 			return
@@ -105,12 +115,12 @@ func (h *Handler) DeployAndInitTrexFactoryAsync(gCtx *gin.Context) {
 }
 
 func (h *Handler) DeployTrexSuiteAsync(gCtx *gin.Context) {
-	if !middleware.RequireRole(gCtx, authUtils.RoleManager, authUtils.RoleAdmin) {
+	if !h.requireTrexInitialization(gCtx) {
 		return
 	}
 	h.startBackground("deployment of the TREX suite", func() {
 		logger.LogInfo("🚀 Starting asynchronous deployment of TREX Suite")
-		_, err := h.blockchainSvc.DeployTrexSuite(context.Background())
+		_, err := h.trexInitSvc.DeployTrexSuite(context.Background())
 		if err != nil {
 			logger.LogError("Failed to deploy TREX Suite: %v", err.Error())
 			return

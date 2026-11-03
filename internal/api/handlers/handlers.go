@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"os"
 	"sync"
 
 	"github.com/TookenOrg/tooken-services/internal/api/server"
@@ -24,16 +25,26 @@ type orderDeliverer interface {
 	Deliver(ctx context.Context, orderRef string)
 }
 
+type trexInitializer interface {
+	DeployAllImplementations(ctx context.Context) ([]server.ContractDetails, error)
+	DeployIdentityFactory(ctx context.Context) (server.ContractDetails, error)
+	ConfigureAuthority(ctx context.Context) (server.TxHashName, error)
+	DeployAndInitTrexFactory(ctx context.Context) error
+	DeployTrexSuite(ctx context.Context) ([]server.ContractDetails, error)
+}
+
 var _ server.ServerInterface = (*Handler)(nil)
 
 type Handler struct {
-	blockchainSvc *blockchainService.Service
-	paymentsSvc   *paymentsService.Service
-	authSvc       *authService.Service
-	userSvc       *usersService.Service
-	realEstateSvc *assetsService.Service
-	orderSvc      *ordersService.Service
-	deliverySvc   orderDeliverer
+	blockchainSvc   *blockchainService.Service
+	trexInitSvc     trexInitializer
+	trexInitEnabled bool
+	paymentsSvc     *paymentsService.Service
+	authSvc         *authService.Service
+	userSvc         *usersService.Service
+	realEstateSvc   *assetsService.Service
+	orderSvc        *ordersService.Service
+	deliverySvc     orderDeliverer
 
 	// background counts the jobs a request started and left running after
 	// its answer: deployments, burns, deliveries. Start them with
@@ -99,15 +110,26 @@ func NewHandler() *Handler {
 
 	// Share the same blockchain service instance across all dependent services.
 	blockchainSvc := blockchainService.NewService()
+	trexInitSetting := os.Getenv("TREX_INIT_ENABLED")
+	switch trexInitSetting {
+	case "true":
+		logger.LogWarn("⚠️ TREX_INIT_ENABLED is enabled; initialization routes can send transactions")
+	case "", "false":
+		logger.LogInfo("🔒 TREX_INIT_ENABLED is disabled; initialization routes are blocked")
+	default:
+		logger.LogWarn("⚠️ Invalid TREX_INIT_ENABLED value; initialization routes are disabled")
+	}
 
 	return &Handler{
-		blockchainSvc: blockchainSvc,
-		paymentsSvc:   paymentsService.NewService(),
-		authSvc:       authService.NewService(),
-		realEstateSvc: assetsService.NewService(blockchainSvc),
-		orderSvc:      ordersService.NewService(),
-		userSvc:       usersService.NewService(),
-		deliverySvc:   deliveryService.NewService(blockchainSvc),
+		blockchainSvc:   blockchainSvc,
+		trexInitSvc:     blockchainSvc,
+		trexInitEnabled: trexInitSetting == "true",
+		paymentsSvc:     paymentsService.NewService(),
+		authSvc:         authService.NewService(),
+		realEstateSvc:   assetsService.NewService(blockchainSvc),
+		orderSvc:        ordersService.NewService(),
+		userSvc:         usersService.NewService(),
+		deliverySvc:     deliveryService.NewService(blockchainSvc),
 	}
 }
 

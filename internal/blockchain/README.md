@@ -136,7 +136,15 @@ token's `ModularCompliance`. They keep their state **per compliance**, so one sh
 ## 4. Platform bootstrap (one-time, ordered)
 
 These five endpoints must be called in order; each step consumes addresses
-produced by earlier ones. Steps 1, 4 and 5 are asynchronous (`202`).
+produced by earlier ones. They are disabled unless `TREX_INIT_ENABLED` is
+exactly `true` when the API starts, and still require a MANAGER or ADMIN
+session. The startup log reports whether initialization is enabled. A disabled
+endpoint answers `403` before starting work.
+
+Steps 1, 4 and 5 are asynchronous (`202` means accepted, not completed). Wait
+for each step to finish before calling the next one, and wait for all jobs to
+finish before disabling initialization and restarting the API. The flag does
+not prevent repeated calls while enabled; they can spend gas.
 
 ```mermaid
 graph TD
@@ -426,12 +434,13 @@ USER token `403`. The two `GET` stubs are public.
 |---|---|---|
 | `WS_RPC_URL` | `services/blockchain.go` | EVM node endpoint (`ethclient.Dial`) |
 | `PRIVATE_KEY` | `utils/keys_utils.go`, `identity_claim.go` | platform signer (hex, `0x` optional) |
+| `TREX_INIT_ENABLED` | `internal/api/handlers/handlers.go` | exactly `true` enables the initialization routes; otherwise they are disabled. Read once at startup |
 | `ETH_MIN_TIP_GWEI` | `utils/transactions_utils.go` | floor for the miner tip, in gwei, fractional allowed. Default **1**, capped at 1000. Applied as `max(floor, SuggestGasTipCap())` |
 | `ETH_TX_WAIT` | `utils/transactions_utils.go` | how long to wait for a transaction to be mined, as a Go duration (`"5m"`, `"90s"`). Default **5m** |
 
-Both optional variables fall back to their default — with a `logger.LogWarn` — on
-any unusable value: a mistyped variable must not stop the server from sending
-transactions.
+The tip floor and transaction wait fall back to their defaults — with a
+`logger.LogWarn` — on any unusable value: a mistyped variable must not stop the
+server from sending transactions.
 
 ### Fees: why `GasPrice` and `GasLimit` are never set
 

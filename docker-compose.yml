@@ -74,6 +74,7 @@ services:
       GIN_MODE: ${GIN_MODE:-release}
       LOG_TRACE: ${LOG_TRACE:-false}
       ORDER_RESERVATION_TTL: ${ORDER_RESERVATION_TTL:-15m}
+      TREX_INIT_ENABLED: ${TREX_INIT_ENABLED:-false}
       ETH_MIN_TIP_GWEI: ${ETH_MIN_TIP_GWEI:-1}
       ETH_TX_WAIT: ${ETH_TX_WAIT:-5m}
     ports:

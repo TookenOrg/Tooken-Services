@@ -117,6 +117,7 @@ func bootPlatform(t *testing.T) *platform {
 	previousDB, previousClient := appglobals.DB, chainglobals.EthClient
 	appglobals.DB, chainglobals.EthClient = db, client
 	t.Setenv("PRIVATE_KEY", testenv.HardhatAccount0Key)
+	t.Setenv("TREX_INIT_ENABLED", "true")
 
 	previousWriter, previousMode := gin.DefaultWriter, gin.Mode()
 	gin.SetMode(gin.TestMode)

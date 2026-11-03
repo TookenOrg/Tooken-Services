@@ -44,9 +44,27 @@ no platform, no asset. Nothing is loaded by default.
 
    The role travels in the access token: sign in again, or call
    `POST /api/v1/auth/refresh`, to get a token that carries it.
-3. Deploy the T-REX platform once, through the five `/trex/init/*` routes, in
+3. Enable initialization and restart the API:
+
+   ```bash
+   TREX_INIT_ENABLED=true docker compose up -d api
+   ```
+
+   The API reports the initialization setting at startup:
+   `docker compose logs api`.
+
+   Deploy the T-REX platform once, through the five `/trex/init/*` routes, in
    the order given in
    [`internal/blockchain/README.md`](internal/blockchain/README.md#4-platform-bootstrap-one-time-ordered).
+   Wait for every asynchronous deployment to finish; a `202` only means it
+   started. Then disable initialization and restart the API again:
+
+   ```bash
+   TREX_INIT_ENABLED=false docker compose up -d api
+   ```
+
+   Use `up -d api`, not `restart`, to apply a changed environment. The explicit
+   `false` also closes the routes if the shell or `.env` still contains `true`.
 
 ### Configuration
 
@@ -62,6 +80,7 @@ Compose reads these variables from your shell or from a `.env` file next to
 | `GIN_MODE` | `release` | `debug` also prints the route table and Gin's warnings at startup |
 | `LOG_TRACE` | `false` | `true` adds trace logs |
 | `ORDER_RESERVATION_TTL` | `15m` | How long an unpaid order holds its shares |
+| `TREX_INIT_ENABLED` | `false` | Exactly `true` enables the five platform initialization routes |
 | `ETH_MIN_TIP_GWEI` | `1` | Minimum priority fee of the transactions |
 | `ETH_TX_WAIT` | `5m` | How long to wait for a transaction to be mined |
 
@@ -126,6 +145,10 @@ to start without a secret of at least 32 bytes. A new secret logs every user
 out. To keep your settings, copy the file to `.env` (ignored by git), fill it
 in and source that file instead.
 
+For an initialization in host mode, start with `TREX_INIT_ENABLED=true go run .`
+and check the startup log. Once the background jobs have finished, restart with
+the setting absent or `false`.
+
 The API port is fixed to 8080 in this mode: stop the API container first if
 it runs (`docker compose stop api`).
 
@@ -153,8 +176,13 @@ external.
 4. Keep a single instance and a paid plan: the signer's nonce lock is in
    memory, and an idle spin-down would cut the on-chain jobs.
 
-The first start against a real chain deploys the platform contracts and spends
-gas: try it on a testnet first.
+The initialization routes are disabled by default. To bootstrap a platform,
+set `TREX_INIT_ENABLED` to exactly `true` in the host environment and redeploy;
+only MANAGER and ADMIN sessions can call them. Once every background deployment
+has finished, set it to `false` or remove it and redeploy again. Changing the
+environment does not affect a running process; the startup log reports whether
+initialization is enabled. While it is enabled, repeated calls can send
+transactions and spend gas: try it on a testnet first.
 
 ## Build and test
 
