@@ -3579,6 +3579,11 @@ components:
         verification_message:
           type: string
           description: Additional message or reason for the verification status
+        user_role:
+          type: string
+          enum: [USER, MANAGER, ADMIN]
+          x-enum-varnames: [KycVerificationUserRoleUSER, KycVerificationUserRoleMANAGER, KycVerificationUserRoleADMIN]
+          description: Current account role, read from the user rather than the filing.
         email:
           type: string
         submitted_at:
