@@ -229,8 +229,14 @@ func (s *Service) CompareTotalSupply(ctx context.Context, tokenAddress string, s
 	if !common.IsHexAddress(tokenAddress) {
 		return 0, fmt.Errorf("not a valid token address: %s", tokenAddress)
 	}
+	if globals.EthClient == nil {
+		return 0, errors.New("ethereum client is not initialized")
+	}
 
-	token, err := database.GetTokenByAddress(ctx, tokenAddress)
+	readCtx, cancel := context.WithTimeout(ctx, supplyReadTimeout)
+	defer cancel()
+
+	token, err := database.GetTokenByAddress(readCtx, tokenAddress)
 	if err != nil {
 		return 0, err
 	}
@@ -244,9 +250,6 @@ func (s *Service) CompareTotalSupply(ctx context.Context, tokenAddress string, s
 	if err != nil {
 		return 0, fmt.Errorf("bind token %s: %w", tokenAddress, err)
 	}
-
-	readCtx, cancel := context.WithTimeout(ctx, supplyReadTimeout)
-	defer cancel()
 
 	supply, err := tokenInstance.TotalSupply(&bind.CallOpts{Context: readCtx})
 	if err != nil {

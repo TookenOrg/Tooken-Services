@@ -410,6 +410,7 @@ SET status_id = $2,
     updated_at = now()
 WHERE id = $1
   AND deleted_at IS NULL
+  AND status_id <= $2
 `
 
 	res, err := globals.DB.ExecContext(ctx, query, realEstateID, StatusPublished, tokenID)

@@ -35,7 +35,7 @@ func GetContractRoleByName(ctx context.Context, contractName string) (contract s
         LIMIT 1`
 
 	var contractDB ContractDTO
-	err = globals.DB.QueryRow(query, contractName).Scan(
+	err = globals.DB.QueryRowContext(ctx, query, contractName).Scan(
 		&contractDB.ID,
 		&contractDB.TxHash,
 		&contractDB.Address,
@@ -69,7 +69,7 @@ func InsertContractRole(ctx context.Context, txHash, address, contractName strin
         RETURNING id
     `
 
-	err = globals.DB.QueryRow(query, txHash, address, contractName).Scan(&id)
+	err = globals.DB.QueryRowContext(ctx, query, txHash, address, contractName).Scan(&id)
 	if err != nil {
 		return 0, fmt.Errorf("failed to insert contract role %s: %w", contractName, err)
 	}

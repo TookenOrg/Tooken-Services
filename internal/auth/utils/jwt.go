@@ -87,6 +87,10 @@ const (
 // ErrWrongTokenUse: the token is genuine but meant for the other purpose.
 var ErrWrongTokenUse = errors.New("token not valid for this use")
 
+// ErrSessionExpired: the session ceiling has already elapsed, so no new access
+// token can be issued under it.
+var ErrSessionExpired = errors.New("session has expired")
+
 type CustomClaims struct {
 	UserID   int    `json:"userId"`
 	Email    string `json:"email"`
@@ -126,14 +130,30 @@ func GenerateJWT(userID int, email, role string) (string, error) {
 // NewAccessToken also returns the expiry written in the token, so a client
 // can schedule its refresh without decoding it.
 func NewAccessToken(userID int, email, role string) (token string, expiresAt time.Time, err error) {
+	return NewAccessTokenUntil(userID, email, role, time.Time{})
+}
+
+// NewAccessTokenUntil issues an access token whose expiry never exceeds
+// maxExpiresAt when maxExpiresAt is non-zero, so a refreshed access token
+// cannot outlive the session ceiling carried by its refresh token.
+func NewAccessTokenUntil(userID int, email, role string, maxExpiresAt time.Time) (token string, expiresAt time.Time, err error) {
 	now := time.Now()
+	expiry := now.Add(AccessTokenLifetime)
+	if !maxExpiresAt.IsZero() && expiry.After(maxExpiresAt) {
+		expiry = maxExpiresAt
+	}
+	expClaim := jwt.NewNumericDate(expiry)
+	if !maxExpiresAt.IsZero() && !expClaim.Time.After(now.Truncate(time.Second)) {
+		return "", time.Time{}, ErrSessionExpired
+	}
+
 	claims := CustomClaims{
 		UserID:   userID,
 		Email:    email,
 		Role:     role,
 		TokenUse: tokenUseAccess,
 		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(now.Add(AccessTokenLifetime)),
+			ExpiresAt: expClaim,
 			IssuedAt:  jwt.NewNumericDate(now),
 		},
 	}

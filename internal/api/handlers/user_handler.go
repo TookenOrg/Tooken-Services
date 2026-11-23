@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/TookenOrg/tooken-services/internal/api/server"
+	authUtils "github.com/TookenOrg/tooken-services/internal/auth/utils"
 	"github.com/TookenOrg/tooken-services/internal/middleware"
 	"github.com/TookenOrg/tooken-services/internal/users/services"
 	"github.com/TookenOrg/tooken-services/pkg/logger"
@@ -82,9 +83,12 @@ func (h *Handler) AddFavoritesRealEstateForUser(gCtx *gin.Context, userId, realE
 		return
 	}
 
+	claims, _ := middleware.GetUserClaims(gCtx)
+	isStaff := claims.HasRole(authUtils.RoleManager, authUtils.RoleAdmin)
+
 	logger.LogInfo("🚀 Starting adding favorite real-estate for one user")
 
-	err := h.userSvc.AddFavoritesRealEstateForUser(gCtx.Request.Context(), userId, realEstateId)
+	err := h.userSvc.AddFavoritesRealEstateForUser(gCtx.Request.Context(), userId, realEstateId, isStaff)
 	if err != nil {
 		respondFavoriteError(gCtx, err, "Unable to add the favorite.")
 		return

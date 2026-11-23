@@ -20,7 +20,7 @@ func GetTokenByName(ctx context.Context, tokenName string, emptyResultAllowed bo
 
 	tokenRow := &server.TokenInfos{}
 
-	err = globals.DB.QueryRow(query, tokenName).Scan(
+	err = globals.DB.QueryRowContext(ctx, query, tokenName).Scan(
 		&tokenRow.Id,
 		&tokenRow.Symbol,
 		&tokenRow.TokenName,
@@ -52,7 +52,7 @@ func GetTokenBySalt(ctx context.Context, salt string, emptyResultAllowed bool) (
 
 	tokenRow := &server.TokenInfos{}
 
-	err = globals.DB.QueryRow(query, salt).Scan(
+	err = globals.DB.QueryRowContext(ctx, query, salt).Scan(
 		&tokenRow.Id,
 		&tokenRow.Symbol,
 		&tokenRow.TokenName,
@@ -88,7 +88,7 @@ func GetTokenByAddress(ctx context.Context, address string) (token *server.Token
 
 	tokenRow := &server.TokenInfos{}
 
-	err = globals.DB.QueryRow(query, common.HexToAddress(address).Hex()).Scan(
+	err = globals.DB.QueryRowContext(ctx, query, common.HexToAddress(address).Hex()).Scan(
 		&tokenRow.Id,
 		&tokenRow.Symbol,
 		&tokenRow.TokenName,
@@ -123,7 +123,7 @@ func InsertToken(ctx context.Context, symbol, tokenName, salt, address string, n
 	// value that is neither NULL nor a 0x-address — insert NULL instead of "".
 	mcAddr := sql.NullString{String: modularComplianceAddr, Valid: modularComplianceAddr != ""}
 
-	err = globals.DB.QueryRow(query, symbol, tokenName, salt, address, nbDecimal, mcAddr).Scan(&id)
+	err = globals.DB.QueryRowContext(ctx, query, symbol, tokenName, salt, address, nbDecimal, mcAddr).Scan(&id)
 	if err != nil {
 		return 0, fmt.Errorf("failed to insert token %s: %w", tokenName, err)
 	}

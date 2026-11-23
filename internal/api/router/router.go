@@ -36,8 +36,10 @@ func New(h server.ServerInterface, specPath string, corsOrigins []string) (*gin.
 		},
 		AllowHeaders: []string{
 			"Origin",
+			"Accept",
 			"Content-Type",
 			"Authorization",
+			"Idempotency-Key",
 		},
 		ExposeHeaders: []string{
 			"Content-Length",

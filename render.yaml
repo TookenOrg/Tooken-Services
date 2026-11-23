@@ -18,8 +18,9 @@ services:
     numInstances: 1
     healthCheckPath: /api/v1/health
     # On SIGTERM the server drains requests for up to 15 s, then waits up to
-    # 2 min for on-chain jobs: Render must not kill it before that.
-    maxShutdownDelaySeconds: 150
+    # 1 min (broadcast) + ETH_TX_WAIT for on-chain jobs. Render caps shutdown
+    # delay at 300 s, so ETH_TX_WAIT is set to 3m30s (15 s + 1m + 3m30s = 285 s).
+    maxShutdownDelaySeconds: 300
     envVars:
       # The server listens on 8080 (not on Render's default 10000).
       - key: PORT
@@ -31,7 +32,7 @@ services:
       - key: ETH_MIN_TIP_GWEI
         value: "1"
       - key: ETH_TX_WAIT
-        value: 5m
+        value: 3m30s
       - key: ORDER_RESERVATION_TTL
         value: 15m
       # Secrets and environment-specific values: asked for in the Render

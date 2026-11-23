@@ -1,16 +1,20 @@
 -- Destructive maintenance: back up the database and stop the API first,
 -- including its background jobs. Run preview_restart.sql before this file.
--- Deletes ALL assets, orders, payments, fees, order history and favorites;
--- deletes account 2, its wallets and KYC records involving it.
--- This includes other users' KYC decisions made or revoked by account 2.
--- Clears ALL blockchain deployment records, identities and transaction logs.
--- Other accounts, their wallets, issuers and chain definitions are preserved.
--- Remaining KYC approvals require synchronization with the new platform.
+-- Deletes ALL user accounts (including administrators), user wallets, KYC
+-- verifications, favorites, assets, orders, payments, fees and order history.
+-- Clears ALL blockchain deployment records, identities, tokens and transaction
+-- logs. Issuers, chain definitions and reference status/type catalogs are
+-- preserved.
 -- This resets the DATABASE ONLY: old blockchain contracts, claims and balances
--- are NOT deleted or revoked. Follow restart.md for a fresh local node or a
--- new platform deployment on a public network before reopening the site.
--- Keep sequence values: reusing user IDs can revive old JWTs, and reusing
--- asset IDs can collide with existing deterministic token deployment salts.
+-- are NOT deleted or revoked. After committing:
+--   1. Rotate JWT_SECRET so every pre-reset access or refresh token stops
+--      working immediately.
+--   2. Sign up a new user and grant it the initial ADMIN role via SQL (see
+--      README.md).
+--   3. Run tools/db/deploy_fresh_platform.sh against a fresh local node or a
+--      new platform deployment on a public network before reopening traffic.
+-- Keep sequence values: reusing user IDs can revive old JWTs if JWT_SECRET was
+-- not rotated, and reusing asset IDs can collide with deterministic token salts.
 -- Default is a dry run. Replace ONLY the final ROLLBACK with COMMIT to apply.
 BEGIN;
 SET LOCAL lock_timeout = '10s';
@@ -35,23 +39,21 @@ blk.contract_instance,
 blk.contract_implementation,
 blk.contract_role,
 blk.eth_transaction IN ACCESS EXCLUSIVE MODE;
-DO $$ BEGIN IF EXISTS (
-    SELECT 1
-    FROM usr.users
-    WHERE id = 2
-        AND role = 'ADMIN'
-)
-AND NOT EXISTS (
-    SELECT 1
-    FROM usr.users
-    WHERE id <> 2
-        AND role = 'ADMIN'
-) THEN RAISE EXCEPTION 'Account 2 is the last administrator; create another administrator before purging';
-END IF;
-END $$;
--- Explicit tables avoid TRUNCATE CASCADE silently including an unrelated table.
--- TRUNCATE also allows this one-off purge of the append-only order history
--- without disabling its protection against ordinary UPDATE/DELETE operations.
+LOCK TABLE ass.issuer,
+blk.chains IN ACCESS SHARE MODE;
+CREATE TEMP TABLE _purge_expected ON COMMIT DROP AS
+SELECT (
+        SELECT count(*)
+        FROM ass.issuer
+    ) AS issuers,
+    (
+        SELECT count(*)
+        FROM blk.chains
+    ) AS chains;
+-- Explicit tables avoid TRUNCATE CASCADE silently including an unrelated table,
+-- while RESTRICT aborts if a new table still references any purged table.
+-- TRUNCATE also clears the append-only order history and KYC rows cleanly
+-- without firing row-level UPDATE/DELETE triggers.
 TRUNCATE TABLE iss.issuance_order_status_history,
 iss.issuance_order_payments,
 iss.issuance_order_fees,
@@ -63,46 +65,71 @@ ass.real_estate_shares_config,
 ass.real_estate_specification,
 ass.real_estate,
 blk.identity,
+blk.user_wallet,
+usr.kyc_verification,
+usr.users,
 blk.token_transaction,
 blk.token,
 blk.contract_instance,
 blk.contract_implementation,
 blk.contract_role,
 blk.eth_transaction CONTINUE IDENTITY RESTRICT;
--- DELETE, not TRUNCATE, lets the KYC trigger refresh affected user profiles.
-DELETE FROM usr.kyc_verification;
-DELETE FROM blk.user_wallet;
-DELETE FROM usr.users;
--- Approval documents survive for other users, but verification on the old
--- registry cannot authorize investment on a new platform.
-UPDATE usr.users
-SET kyc_status = 'approved',
-    kyc_verified_at = NULL,
-    updated_at = now()
-WHERE kyc_status = 'verified';
-UPDATE usr.users
-SET kyc_verified_at = NULL,
-    updated_at = now()
-WHERE kyc_verified_at IS NOT NULL;
-SELECT 'remaining_real_estates' AS scope,
+DO $$
+DECLARE
+    expected RECORD;
+    actual_issuers bigint;
+    actual_chains bigint;
+BEGIN
+    SELECT * INTO STRICT expected FROM _purge_expected;
+    IF EXISTS (SELECT 1 FROM usr.users) THEN
+        RAISE EXCEPTION 'usr.users is not empty after purge';
+    END IF;
+    IF EXISTS (SELECT 1 FROM usr.kyc_verification) THEN
+        RAISE EXCEPTION 'usr.kyc_verification is not empty after purge';
+    END IF;
+    IF EXISTS (SELECT 1 FROM blk.user_wallet) THEN
+        RAISE EXCEPTION 'blk.user_wallet is not empty after purge';
+    END IF;
+    SELECT count(*) INTO actual_issuers FROM ass.issuer;
+    IF actual_issuers <> expected.issuers THEN
+        RAISE EXCEPTION 'Preserved issuer count changed from % to %', expected.issuers, actual_issuers;
+    END IF;
+    SELECT count(*) INTO actual_chains FROM blk.chains;
+    IF actual_chains <> expected.chains THEN
+        RAISE EXCEPTION 'Preserved chain count changed from % to %', expected.chains, actual_chains;
+    END IF;
+END $$;
+SELECT 'remaining_users' AS scope,
     count(*) AS rows
+FROM usr.users
+UNION ALL
+SELECT 'remaining_user_wallets',
+    count(*)
+FROM blk.user_wallet
+UNION ALL
+SELECT 'remaining_kyc_verifications',
+    count(*)
+FROM usr.kyc_verification
+UNION ALL
+SELECT 'remaining_identities',
+    count(*)
+FROM blk.identity
+UNION ALL
+SELECT 'remaining_favorites',
+    count(*)
+FROM rel.user_asset_favorite
+UNION ALL
+SELECT 'remaining_real_estates',
+    count(*)
 FROM ass.real_estate
 UNION ALL
 SELECT 'remaining_orders',
     count(*)
 FROM iss.issuance_orders
 UNION ALL
-SELECT 'remaining_user_2',
-    count(*)
-FROM usr.users
-UNION ALL
 SELECT 'remaining_tokens',
     count(*)
 FROM blk.token
-UNION ALL
-SELECT 'remaining_identities',
-    count(*)
-FROM blk.identity
 UNION ALL
 SELECT 'remaining_contract_roles',
     count(*)
@@ -116,13 +143,16 @@ SELECT 'remaining_contract_instances',
     count(*)
 FROM blk.contract_instance
 UNION ALL
-SELECT 'remaining_onchain_verified_users',
+SELECT 'remaining_chain_transaction_logs',
     count(*)
-FROM usr.users
-WHERE kyc_status = 'verified'
+FROM blk.eth_transaction
 UNION ALL
-SELECT 'preserved_other_users',
+SELECT 'preserved_issuers',
     count(*)
-FROM usr.users;
+FROM ass.issuer
+UNION ALL
+SELECT 'preserved_chains',
+    count(*)
+FROM blk.chains;
 ROLLBACK;
-# Change to COMMIT to commit the script
+-- Replace ROLLBACK above with COMMIT to apply the purge.

@@ -1,9 +1,36 @@
--- Read-only preview of purge_restart.sql, including blockchain database records.
--- No account details are exposed. Actual chain state is not read or changed.
+-- Read-only preview of purge_restart.sql: counts every user, wallet, KYC,
+-- asset, order and blockchain record that will be wiped, alongside preserved
+-- issuers and chain definitions. No personal account details are exposed.
+-- Actual chain state is not read or changed.
 SELECT current_database() AS database_name,
     current_user AS database_user;
-SELECT 'real_estates' AS scope,
+SELECT 'users' AS scope,
     count(*) AS rows
+FROM usr.users
+UNION ALL
+SELECT 'admin_users',
+    count(*)
+FROM usr.users
+WHERE role = 'ADMIN'
+UNION ALL
+SELECT 'user_wallets',
+    count(*)
+FROM blk.user_wallet
+UNION ALL
+SELECT 'kyc_verifications',
+    count(*)
+FROM usr.kyc_verification
+UNION ALL
+SELECT 'identities',
+    count(*)
+FROM blk.identity
+UNION ALL
+SELECT 'favorites',
+    count(*)
+FROM rel.user_asset_favorite
+UNION ALL
+SELECT 'real_estates',
+    count(*)
 FROM ass.real_estate
 UNION ALL
 SELECT 'orders',
@@ -21,26 +48,6 @@ UNION ALL
 SELECT 'order_history',
     count(*)
 FROM iss.issuance_order_status_history
-UNION ALL
-SELECT 'favorites',
-    count(*)
-FROM rel.user_asset_favorite
-UNION ALL
-SELECT 'user_2',
-    count(*)
-FROM usr.users
-UNION ALL
-SELECT 'user_2_wallets',
-    count(*)
-FROM blk.user_wallet
-UNION ALL
-SELECT 'user_2_identities',
-    count(*)
-FROM blk.identity
-UNION ALL
-SELECT 'all_identities',
-    count(*)
-FROM blk.identity
 UNION ALL
 SELECT 'tokens',
     count(*)
@@ -66,15 +73,10 @@ SELECT 'chain_transaction_logs',
     count(*)
 FROM blk.eth_transaction
 UNION ALL
-SELECT 'kyc_onchain_statuses_to_reset',
+SELECT 'preserved_issuers',
     count(*)
-FROM usr.users
-WHERE kyc_status = 'verified'
+FROM ass.issuer
 UNION ALL
-SELECT 'related_kyc',
+SELECT 'preserved_chains',
     count(*)
-FROM usr.kyc_verification
-UNION ALL
-SELECT 'other_users_kyc_decided_by_user_2',
-    count(*)
-FROM usr.kyc_verification;
+FROM blk.chains;

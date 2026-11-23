@@ -6,6 +6,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"testing"
@@ -64,6 +65,52 @@ func TestFavoriteRealEstates(t *testing.T) {
 		expectAPIMessage(t, body, "Real estate not found.")
 		if n := h.count(t, `SELECT count(*) FROM rel.user_asset_favorite WHERE user_id = $1`, investor.id); n != 0 {
 			t.Fatalf("%d favorite row(s) written for a missing real estate", n)
+		}
+	})
+
+	t.Run("an unpublished draft cannot be bookmarked by an investor", func(t *testing.T) {
+		draft := fixtures.asset(t, issuer, false)
+		investor := newTrackedUser(t, h, authUtils.RoleUser)
+
+		code, body := callAPI(h, http.MethodPost, favoritePath(investor.id, draft), investor.token, "")
+		expectCode(t, code, body, http.StatusNotFound)
+		expectAPIMessage(t, body, "Real estate not found.")
+		if n := favorites(t, investor.id, draft); n != 0 {
+			t.Fatalf("%d favorite row(s) written for an unpublished draft", n)
+		}
+	})
+
+	t.Run("a manager can bookmark an unpublished draft", func(t *testing.T) {
+		draft := fixtures.asset(t, issuer, false)
+		manager := newTrackedUser(t, h, authUtils.RoleManager)
+
+		code, body := callAPI(h, http.MethodPost, favoritePath(manager.id, draft), manager.token, "")
+		expectCode(t, code, body, http.StatusOK)
+		if n := favorites(t, manager.id, draft); n != 1 {
+			t.Fatalf("%d favorite row(s), want 1", n)
+		}
+	})
+
+	t.Run("listing favorites returns only the bookmarked active real estates", func(t *testing.T) {
+		investor := newTrackedUser(t, h, authUtils.RoleUser)
+		listPath := fmt.Sprintf("/users/%d/favorites/real-estates", investor.id)
+
+		code, body := callAPI(h, http.MethodGet, listPath, investor.token, "")
+		expectCode(t, code, body, http.StatusOK)
+
+		code, body = callAPI(h, http.MethodPost, favoritePath(investor.id, villa), investor.token, "")
+		expectCode(t, code, body, http.StatusOK)
+
+		code, body = callAPI(h, http.MethodGet, listPath, investor.token, "")
+		expectCode(t, code, body, http.StatusOK)
+		var listed []struct {
+			Id int `json:"id"`
+		}
+		if err := json.Unmarshal([]byte(body), &listed); err != nil {
+			t.Fatalf("decode response: %v (%s)", err, body)
+		}
+		if len(listed) != 1 || listed[0].Id != villa {
+			t.Fatalf("got favorites %+v, want only [%d]", listed, villa)
 		}
 	})
 

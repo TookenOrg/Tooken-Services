@@ -30,7 +30,7 @@ func InsertUser(ctx context.Context, email, hasedPassword, fullName string) (id 
         RETURNING id
     `
 
-	err = globals.DB.QueryRow(query, fullName, email, hasedPassword).Scan(&id)
+	err = globals.DB.QueryRowContext(ctx, query, fullName, email, hasedPassword).Scan(&id)
 	if err != nil {
 		return 0, fmt.Errorf("failed to insert user: %w", err)
 	}
@@ -44,7 +44,7 @@ func GetUserByEmail(ctx context.Context, email string) (user UserDTO, err error)
        SELECT id, full_name, email, password, created_at, last_connexion, role FROM usr.users WHERE email=$1
     `
 
-	err = globals.DB.QueryRow(query, email).Scan(&user.Id, &user.FullName, &user.Email, &user.HashedPassword, &user.CreatedAt, &user.LastConnexion, &user.Role)
+	err = globals.DB.QueryRowContext(ctx, query, email).Scan(&user.Id, &user.FullName, &user.Email, &user.HashedPassword, &user.CreatedAt, &user.LastConnexion, &user.Role)
 	if err != nil {
 		return UserDTO{}, fmt.Errorf("failed to get user: %w", err)
 	}

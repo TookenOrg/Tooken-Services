@@ -23,6 +23,7 @@ import (
 	authUtils "github.com/TookenOrg/tooken-services/internal/auth/utils"
 	blkGlobals "github.com/TookenOrg/tooken-services/internal/blockchain/globals"
 	"github.com/TookenOrg/tooken-services/internal/blockchain/services"
+	blkUtils "github.com/TookenOrg/tooken-services/internal/blockchain/utils"
 	"github.com/TookenOrg/tooken-services/internal/globals"
 	"github.com/TookenOrg/tooken-services/pkg/logger"
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -84,7 +85,7 @@ func startServer() {
 	context.AfterFunc(ctx, stop)
 
 	logger.LogInfo("Starting server on %s", ln.Addr())
-	if err := serve(ctx, &http.Server{Handler: engine}, ln, h, defaultStopTimeouts); err != nil {
+	if err := serve(ctx, &http.Server{Handler: engine}, ln, h, runtimeStopTimeouts()); err != nil {
 		log.Fatalf("Server stopped: %v", err)
 	}
 }
@@ -101,7 +102,17 @@ type stopTimeouts struct {
 
 var defaultStopTimeouts = stopTimeouts{
 	requests:   15 * time.Second,
-	background: 2 * time.Minute,
+	background: 6 * time.Minute,
+}
+
+// runtimeStopTimeouts sizes the background drain window above the 1-minute
+// transaction broadcast limit plus the configured ETH_TX_WAIT mining wait so a
+// shutdown does not abandon an in-flight delivery before its chain wait ends.
+func runtimeStopTimeouts() stopTimeouts {
+	return stopTimeouts{
+		requests:   defaultStopTimeouts.requests,
+		background: blkUtils.TxWaitTimeout() + time.Minute,
+	}
 }
 
 // backgroundJobs is the part of the handler a shutdown waits on.

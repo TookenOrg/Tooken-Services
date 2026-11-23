@@ -262,6 +262,29 @@ func TestRefresh(t *testing.T) {
 		expectMessage(t, body)
 	})
 
+	t.Run("an expired KYC is projected as expired on refresh", func(t *testing.T) {
+		const kycEmail = "refresh-expired-kyc@tooken.test"
+		kycSession := signUpFresh(t, r, db, kycEmail)
+		if _, err := db.Exec(`
+			UPDATE usr.users
+			SET kyc_status = 'verified',
+			    kyc_verified_at = now() - interval '2 years',
+			    kyc_expires_at = now() - interval '1 minute'
+			WHERE email = $1
+		`, kycEmail); err != nil {
+			t.Fatal(err)
+		}
+
+		code, body := refresh(kycSession.RefreshToken)
+		if code != http.StatusOK {
+			t.Fatalf("got %d %s, want 200", code, body)
+		}
+		renewed := decodeSession(t, body)
+		if renewed.User.KycStatus == nil || string(*renewed.User.KycStatus) != "expired" {
+			t.Fatalf("got kycStatus %v, want expired", renewed.User.KycStatus)
+		}
+	})
+
 	// The refresh token is still good: telling the client to sign in again
 	// would throw away a session that a retry can save.
 	t.Run("a database outage is a 500, not a 401", func(t *testing.T) {

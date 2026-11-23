@@ -35,7 +35,9 @@ no platform, no asset. Nothing is loaded by default.
 
 1. Create your account with `POST /api/v1/auth/sign-up`. It answers with a
    session: send `data.token` as `Authorization: Bearer <token>`.
-2. Grant yourself a back-office role. No route does it, on purpose:
+2. Bootstrap the first administrator via SQL (no self-service route grants the
+   initial `ADMIN` role; once one exists, `PATCH /api/v1/users/{userId}/role`
+   manages roles):
 
    ```bash
    docker compose exec postgres psql -U tooken -d tooken \

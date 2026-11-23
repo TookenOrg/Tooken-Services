@@ -6,6 +6,7 @@ import (
 
 	"github.com/TookenOrg/tooken-services/internal/globals"
 	"github.com/TookenOrg/tooken-services/pkg/logger"
+	"github.com/lib/pq"
 )
 
 // TODO: add user isFavorite
@@ -70,6 +71,36 @@ func GetRealEstates(ctx context.Context, includeUnpublished bool) ([]RealEstateD
 	defer rows.Close()
 
 	var estates []RealEstateDTO
+	for rows.Next() {
+		e, err := scanRealEstate(rows, cols)
+		if err != nil {
+			return nil, err
+		}
+		estates = append(estates, e)
+	}
+
+	return estates, rows.Err()
+}
+
+// GetRealEstatesByIDs serves a filtered summary list for a known set of asset
+// identifiers (such as a user's favorites) without scanning the whole
+// catalogue. Visibility and ordering follow GetRealEstates.
+func GetRealEstatesByIDs(ctx context.Context, ids []int, includeUnpublished bool) ([]RealEstateDTO, error) {
+	if len(ids) == 0 {
+		return []RealEstateDTO{}, nil
+	}
+
+	cols := realEstateCoreColumns
+	query := buildRealEstateQuery(cols,
+		"WHERE re.id = ANY($1) AND re.deleted_at IS NULL AND (re.active = true OR $2)\nORDER BY re.id")
+
+	rows, err := globals.DB.QueryContext(ctx, query, pq.Array(ids), includeUnpublished)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	estates := make([]RealEstateDTO, 0, len(ids))
 	for rows.Next() {
 		e, err := scanRealEstate(rows, cols)
 		if err != nil {

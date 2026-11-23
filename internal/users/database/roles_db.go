@@ -20,9 +20,22 @@ func UpdateUserRole(ctx context.Context, actorID, userID int, role server.UserRo
 	}
 	defer tx.Rollback()
 
-	// Serialize role changes and user deletions before checking the current
-	// administrator and the last-admin invariant.
-	if _, err := tx.ExecContext(ctx, `LOCK TABLE usr.users IN SHARE ROW EXCLUSIVE MODE`); err != nil {
+	// Bound wait time and lock only administrator rows plus the actor and
+	// target accounts in primary-key order, so concurrent role changes
+	// serialize without blocking ordinary sign-ups or profile updates.
+	if _, err := tx.ExecContext(ctx, `SET LOCAL lock_timeout = '5s'`); err != nil {
+		return nil, err
+	}
+	lockedRows, err := tx.QueryContext(ctx, `
+		SELECT id
+		FROM usr.users
+		WHERE role = 'ADMIN' OR id IN ($1, $2)
+		ORDER BY id
+		FOR UPDATE`, actorID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if err := lockedRows.Close(); err != nil {
 		return nil, err
 	}
 	var isAdmin bool

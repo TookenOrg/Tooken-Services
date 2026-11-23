@@ -200,3 +200,11 @@ func TestServeWaitsForTheJobsWhenTheListenerFails(t *testing.T) {
 		t.Fatal("serve returned without waiting for the background jobs")
 	}
 }
+
+func TestRuntimeStopTimeoutsCoversConfiguredChainWait(t *testing.T) {
+	t.Setenv("ETH_TX_WAIT", "3m30s")
+	got := runtimeStopTimeouts()
+	if got.background != 4*time.Minute+30*time.Second {
+		t.Fatalf("background timeout = %s, want 4m30s", got.background)
+	}
+}

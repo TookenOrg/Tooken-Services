@@ -98,8 +98,8 @@ services:
       timeout: 3s
       retries: 20
     # On SIGTERM the server drains requests for up to 15 s, then waits up to
-    # 2 min for on-chain jobs (deliveries, deployments) to finish.
-    stop_grace_period: 2m30s
+    # 1 min (broadcast) + ETH_TX_WAIT (5 min) for on-chain jobs to finish.
+    stop_grace_period: 6m30s
 
 volumes:
   postgres-data:

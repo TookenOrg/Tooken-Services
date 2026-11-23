@@ -10,7 +10,16 @@ set -eu
 
 db_dir=/tooken/db
 
-latest=$(ls "$db_dir"/migrations/*.up.sql | sed 's#.*/\([0-9]*\)_.*#\1#' | sort | tail -n 1)
+if [ ! -s "$db_dir/baseline.sql" ]; then
+    echo "tooken: missing or empty $db_dir/baseline.sql" >&2
+    exit 1
+fi
+
+latest=$(ls "$db_dir"/migrations/*.up.sql | sed 's#.*/0*\([0-9][0-9]*\)_.*#\1#' | sort -n | tail -n 1)
+if [ -z "$latest" ]; then
+    echo "tooken: no migration files found in $db_dir/migrations" >&2
+    exit 1
+fi
 
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
     --single-transaction --quiet -f "$db_dir/baseline.sql"

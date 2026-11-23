@@ -120,6 +120,23 @@ func TestNewAppliesTheCORSPolicy(t *testing.T) {
 		t.Fatalf("Access-Control-Allow-Headers = %q, want Authorization allowed", got)
 	}
 
+	// Order placement requires Idempotency-Key alongside Authorization and JSON
+	// Content-Type, so a browser preflight requesting all three must pass.
+	orderPreflight := httptest.NewRequest(http.MethodOptions, globals.BaseURL+"/assets/real-estate/issuance/orders", nil)
+	orderPreflight.Header.Set("Origin", allowedOrigin)
+	orderPreflight.Header.Set("Access-Control-Request-Method", http.MethodPost)
+	orderPreflight.Header.Set("Access-Control-Request-Headers", "Authorization, Content-Type, Idempotency-Key")
+	wOrder := serve(engine, orderPreflight)
+	if wOrder.Code != http.StatusNoContent {
+		t.Fatalf("order preflight from an allowed origin = %d, want 204", wOrder.Code)
+	}
+	allowHeaders := strings.ToLower(wOrder.Header().Get("Access-Control-Allow-Headers"))
+	for _, want := range []string{"authorization", "content-type", "idempotency-key"} {
+		if !strings.Contains(allowHeaders, want) {
+			t.Fatalf("Access-Control-Allow-Headers = %q, want %q allowed", wOrder.Header().Get("Access-Control-Allow-Headers"), want)
+		}
+	}
+
 	w = preflight("https://evil.example")
 	if got := w.Header().Get("Access-Control-Allow-Origin"); got != "" {
 		t.Fatalf("an unknown origin was allowed: Access-Control-Allow-Origin = %q", got)

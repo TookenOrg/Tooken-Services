@@ -221,3 +221,26 @@ func TestWithoutASecretNoTokenIsIssuedOrAccepted(t *testing.T) {
 		t.Errorf("refresh token accepted: %+v", claims)
 	}
 }
+
+func TestNewAccessTokenUntilCapsAtSessionCeiling(t *testing.T) {
+	ceiling := time.Now().Add(10 * time.Minute).Truncate(time.Second)
+	token, expiresAt, err := NewAccessTokenUntil(42, "investor@tooken.test", RoleUser, ceiling)
+	if err != nil {
+		t.Fatalf("NewAccessTokenUntil: %v", err)
+	}
+	if !expiresAt.Equal(ceiling) {
+		t.Fatalf("expiresAt = %s, want capped at %s", expiresAt, ceiling)
+	}
+	claims, err := ParseJWT(token)
+	if err != nil {
+		t.Fatalf("ParseJWT: %v", err)
+	}
+	if !claims.ExpiresAt.Time.Equal(ceiling) {
+		t.Fatalf("token exp = %s, want %s", claims.ExpiresAt.Time, ceiling)
+	}
+
+	expiredCeiling := time.Now().Add(-time.Second)
+	if _, _, err := NewAccessTokenUntil(42, "investor@tooken.test", RoleUser, expiredCeiling); !errors.Is(err, ErrSessionExpired) {
+		t.Fatalf("expired ceiling err = %v, want ErrSessionExpired", err)
+	}
+}

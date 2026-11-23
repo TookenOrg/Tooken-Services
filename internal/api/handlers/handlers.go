@@ -120,15 +120,17 @@ func NewHandler() *Handler {
 		logger.LogWarn("⚠️ Invalid TREX_INIT_ENABLED value; initialization routes are disabled")
 	}
 
+	realEstateSvc := assetsService.NewService(blockchainSvc)
+
 	return &Handler{
 		blockchainSvc:   blockchainSvc,
 		trexInitSvc:     blockchainSvc,
 		trexInitEnabled: trexInitSetting == "true",
 		paymentsSvc:     paymentsService.NewService(),
 		authSvc:         authService.NewService(),
-		realEstateSvc:   assetsService.NewService(blockchainSvc),
+		realEstateSvc:   realEstateSvc,
 		orderSvc:        ordersService.NewService(),
-		userSvc:         usersService.NewService(),
+		userSvc:         usersService.NewServiceWithDependencies(blockchainSvc, realEstateSvc),
 		deliverySvc:     deliveryService.NewService(blockchainSvc),
 	}
 }

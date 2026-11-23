@@ -25,6 +25,21 @@ func (s *Service) GetRealEstates(ctx context.Context, isStaff bool) (realEstates
 	return toServerRealEstates(dtos), nil
 }
 
+// GetRealEstatesByIDs returns summary representations for the requested asset
+// identifiers while enforcing the same catalogue visibility as GetRealEstates.
+func (s *Service) GetRealEstatesByIDs(ctx context.Context, ids []int, isStaff bool) ([]server.RealEstateSummary, error) {
+	if len(ids) == 0 {
+		return []server.RealEstateSummary{}, nil
+	}
+
+	dtos, err := database.GetRealEstatesByIDs(ctx, ids, isStaff)
+	if err != nil {
+		return nil, err
+	}
+
+	return toServerRealEstates(dtos), nil
+}
+
 // GetRealEstateById serves the detail.
 //
 // isStaff decides two things at once: whether an unpublished asset is readable
