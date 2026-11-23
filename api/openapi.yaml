@@ -5,7 +5,7 @@ info:
   description: Minimal API with health check
 
 servers:
-  - url: http://localhost:8080
+  - url: http://localhost:8080/api/v1
     description: Development server
   - url: https://api.tooken.fr/api/v1 # Production
     description: Production
@@ -33,7 +33,10 @@ paths:
   /auth/sign-up:
     post:
       operationId: PostAuthSignUp
-      summary: Create a new user and return a JWT
+      summary: Create an account and open a session
+      description: >
+        Answers the same session as POST /auth/sign-in, so the new user is
+        signed in right away.
       tags:
         - auth
       requestBody:
@@ -44,13 +47,15 @@ paths:
               $ref: "#/components/schemas/SignUpRequest"
       responses:
         "201":
-          description: User created successfully
+          description: Account created and session opened
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/SignUpResponse"
         "400":
-          description: Malformed request body
+          description: >
+            Malformed request body, or email, password or fullName missing or
+            empty.
           content:
             application/json:
               schema:
@@ -111,6 +116,54 @@ paths:
               schema:
                 $ref: "#/components/schemas/APIResponse"
 
+  /auth/refresh:
+    post:
+      operationId: PostAuthRefresh
+      summary: Exchange a refresh token for a new access token
+      description: >
+        Call it when the access token has expired or is about to (see
+        `expiresAt`), instead of asking for the password again. The account
+        is read again, so the new access token carries a role changed since
+        sign-in, and a deleted account can no longer refresh. The session
+        cannot outlive its refresh token.
+      tags:
+        - auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshTokenRequest"
+      responses:
+        "200":
+          description: New access token issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RefreshTokenResponse"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "401":
+          description: >
+            The refresh token is invalid, expired or is not a refresh token,
+            or its account no longer exists. The user must sign in again.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "500":
+          description: >
+            The account could not be read, a database outage for instance.
+            The refresh token is still valid: retrying later can succeed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+
   # Users
   /users/me:
     get:
@@ -141,6 +194,118 @@ paths:
                 $ref: "#/components/schemas/APIResponse"
         "500":
           description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+
+  /users/me/kyc/onchain:
+    get:
+      operationId: GetCurrentUserKycOnChain
+      summary: Read the current user's on-chain KYC status
+      description: >
+        Reads verification from the shared identity registry without creating a
+        wallet, identity or transaction. An account without a wallet is not
+        verified. Database approval and on-chain verification are distinct.
+      tags: [User, KYC]
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Current on-chain verification state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KycOnChainStatus"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "404":
+          description: Account no longer exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "500":
+          description: Unable to read the account or wallet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "503":
+          description: The chain or shared identity registry is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+
+  /users/{userId}/role:
+    patch:
+      operationId: UpdateUserRole
+      summary: Change an account's role
+      description: >
+        ADMIN only; the caller's administrator role is re-read from the
+        database. Self-demotion and demotion of the last administrator are
+        refused. Existing access tokens retain their previous role until they
+        expire; refreshing or signing in issues a token with the current role.
+      tags: [User]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: userId
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateUserRoleRequest"
+      responses:
+        "200":
+          description: Updated account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          description: Invalid account identifier or role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "401":
+          description: Authentication required or account no longer exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "403":
+          description: The caller is not an administrator
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "404":
+          description: Target account not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "409":
+          description: Self-demotion or demotion of the last administrator
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "500":
+          description: Unable to update the account
           content:
             application/json:
               schema:
@@ -183,13 +348,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/KycVerificationResponse"
         "400":
-          description: Malformed request body
+          description: >-
+            Malformed request body, blank full name, or a country code that is
+            not two letters.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/APIResponse"
         "401":
-          description: Unauthorized
+          description: >-
+            Missing or invalid token, or the account it was issued to no longer
+            exists. Either way, the client must sign in again.
           content:
             application/json:
               schema:
@@ -212,6 +381,9 @@ paths:
       tags:
         - KYC
       summary: Get the list of KYC verifications
+      description: >-
+        Lists the KYC filings, for ADMIN only. Both filters are optional and
+        combine.
       operationId: GetListKycVerifications
       security:
         - bearerAuth: []
@@ -236,6 +408,12 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/KycVerification"
+        "400":
+          description: The status filter is neither `submitted` nor `approved`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
         "401":
           description: Unauthorized
           content:
@@ -1574,17 +1752,72 @@ paths:
                 $ref: "#/components/schemas/APIResponse"
 
   # Users actions
+  /users/{userId}/favorites/real-estates:
+    get:
+      operationId: GetFavoritesRealEstatesForUser
+      summary: List the authenticated user's favorite real estates
+      description: >
+        Only the owner can read this list, including when the caller is an
+        administrator. Uses the same visibility rules as the real estate list;
+        deleted assets and assets hidden from the caller are omitted.
+      tags: [User, Assets]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: userId
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Favorite real estates, or an empty array
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RealEstateSummary"
+        "400":
+          description: Invalid user identifier
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "401":
+          description: Authentication required or account no longer exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "403":
+          description: The caller is not the owner
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "500":
+          description: Unable to retrieve favorites
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+
   /users/{userId}/favorites/real-estates/{realEstateId}:
     post:
       tags:
         - User
         - Assets
-      summary: Save a real estate in favoris for one user
+      summary: Add a real estate to the favorites of the authenticated user
       operationId: addFavoritesRealEstateForUser
+      security:
+        - bearerAuth: []
       parameters:
         - in: path
           name: userId
           required: true
+          description: The user whose favorites change. It must be the one the token was issued to.
           schema:
             type: integer
         - in: path
@@ -1594,13 +1827,45 @@ paths:
             type: integer
       responses:
         "200":
-          description: OK
+          description: The real estate was added to the favorites.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "401":
+          description: >-
+            No valid token, or the account the token was issued to no longer
+            exists: signing in again is the way out.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "403":
+          description: >-
+            The token belongs to another user. Favorites are personal: nobody,
+            an administrator included, changes the favorites of somebody else.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "404":
+          description: >-
+            The real estate does not exist.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "409":
+          description: >-
+            The real estate already is a favorite of the user. Nothing was
+            written: the client view of the favorites is out of date.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/APIResponse"
         "500":
-          description: "Internal Server Error"
+          description: >-
+            Internal Server Error
           content:
             application/json:
               schema:
@@ -1609,12 +1874,15 @@ paths:
       tags:
         - User
         - Assets
-      summary: Save a real estate in favoris for one user
+      summary: Remove a real estate from the favorites of the authenticated user
       operationId: removeFavoritesRealEstateForUser
+      security:
+        - bearerAuth: []
       parameters:
         - in: path
           name: userId
           required: true
+          description: The user whose favorites change. It must be the one the token was issued to.
           schema:
             type: integer
         - in: path
@@ -1624,13 +1892,38 @@ paths:
             type: integer
       responses:
         "200":
-          description: OK
+          description: The real estate was removed from the favorites.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "403":
+          description: >-
+            The token belongs to another user. Favorites are personal: nobody,
+            an administrator included, changes the favorites of somebody else.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "404":
+          description: >-
+            The real estate is not a favorite of the user. Nothing was removed:
+            answering success would hide a wrong identifier from the caller.
+            A token whose account was deleted also gets this answer, since the
+            deletion removed its favorites.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/APIResponse"
         "500":
-          description: "Internal Server Error"
+          description: >-
+            Internal Server Error
           content:
             application/json:
               schema:
@@ -1648,7 +1941,19 @@ paths:
         - bearerAuth: []
       responses:
         "202":
-          description: Request sent
+          description: Request accepted; deployment continues in the background.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "403":
+          description: The caller is not MANAGER or ADMIN, or TREX initialization is disabled.
           content:
             application/json:
               schema:
@@ -1670,6 +1975,18 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/InitializeIdentityFactoryResponse"
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "403":
+          description: The caller is not MANAGER or ADMIN, or TREX initialization is disabled.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
         "500":
           description: "Internal Server Error"
           content:
@@ -1693,6 +2010,18 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ConfigureAuthorityResponse"
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "403":
+          description: The caller is not MANAGER or ADMIN, or TREX initialization is disabled.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
         "500":
           description: "Internal Server Error"
           content:
@@ -1711,7 +2040,19 @@ paths:
         - bearerAuth: []
       responses:
         "202":
-          description: Request sent
+          description: Request accepted; deployment continues in the background.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "403":
+          description: The caller is not MANAGER or ADMIN, or TREX initialization is disabled.
           content:
             application/json:
               schema:
@@ -1729,7 +2070,19 @@ paths:
         - bearerAuth: []
       responses:
         "202":
-          description: Request sent
+          description: Request accepted; deployment continues in the background.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "403":
+          description: The caller is not MANAGER or ADMIN, or TREX initialization is disabled.
           content:
             application/json:
               schema:
@@ -1903,6 +2256,9 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
+      description: >
+        The `token` of a sign-up, sign-in or refresh response. A refresh token
+        is refused here.
   parameters:
     IdempotencyKey:
       in: header
@@ -1922,13 +2278,26 @@ components:
       properties:
         message:
           type: string
+        missing_fields:
+          type: array
+          description: >
+            On a real estate or issuer completeness conflict (409), the fields to
+            complete, using request paths such as configuration.total_shares.
+            Absent for conflicts unrelated to missing fields.
+          items:
+            type: string
         data:
           nullable: true
+          # The key must be repeated: an extra json tag replaces the generated
+          # one entirely, and ",omitempty" alone makes encoding/json fall back
+          # to the Go field name, "Data".
           x-oapi-codegen-extra-tags:
-            json: ",omitempty"
+            json: "data,omitempty"
 
     JwtToken:
       type: object
+      description: >
+        A session, as opened by sign-up or sign-in and extended by refresh.
       required:
         - token
         - refreshToken
@@ -1937,11 +2306,21 @@ components:
       properties:
         token:
           type: string
+          description: >
+            Access token, sent as `Authorization: Bearer <token>`. Valid one
+            hour.
         refreshToken:
           type: string
+          description: >
+            Valid eight hours from sign-up or sign-in, refreshing does not
+            extend it: once it has expired the user must sign in again. Send
+            it to POST /auth/refresh to get a new access token; it is refused
+            as a Bearer token. Always keep the value returned by the latest
+            call, the server may start rotating it.
         expiresAt:
           type: string
           format: date-time
+          description: When `token` expires. Refresh shortly before.
         user:
           $ref: "#/components/schemas/User"
 
@@ -2010,6 +2389,9 @@ components:
         password:
           type: string
           format: password
+          description: >
+            At most 72 bytes once UTF-8 encoded (the bcrypt limit): an accented
+            letter counts for two, "€" for three.
           example: "supersecret"
 
     SignUpResponse:
@@ -2042,6 +2424,44 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/JwtToken"
+
+    RefreshTokenRequest:
+      type: object
+      required:
+        - refreshToken
+      properties:
+        refreshToken:
+          type: string
+          description: The `refreshToken` of the current session.
+
+    RefreshTokenResponse:
+      allOf:
+        - $ref: "#/components/schemas/APIResponse"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/JwtToken"
+
+    UpdateUserRoleRequest:
+      type: object
+      required: [role]
+      properties:
+        role:
+          type: string
+          enum: [USER, MANAGER, ADMIN]
+
+    KycOnChainStatus:
+      type: object
+      required: [user_id, is_verified]
+      properties:
+        user_id:
+          type: integer
+        is_verified:
+          type: boolean
+          description: Actual verification result from the shared identity registry
+        wallet_address:
+          type: string
+          description: Absent when the account has no wallet
 
     User:
       type: object
@@ -2590,6 +3010,24 @@ components:
           type: string
           description: Exact integer count, NUMERIC(20,0)
           example: "100"
+        min_investment:
+          type: string
+          description: Minimum investment amount in the asset's currency, exact decimal
+        max_investment:
+          type: string
+          description: Maximum investment amount in the asset's currency, exact decimal
+        entry_fee_rate:
+          type: string
+          description: Entry fee percentage between 0 and 100, exact decimal
+        mgmt_fee_rate:
+          type: string
+          description: Management fee percentage between 0 and 100, exact decimal
+        exit_fee_rate:
+          type: string
+          description: Exit fee percentage between 0 and 100, exact decimal
+        compartment_ref:
+          type: string
+          description: Luxembourg compartment reference
 
     RealEstateProgression:
       type: object
@@ -3201,6 +3639,11 @@ components:
         verification_message:
           type: string
           description: Additional message or reason for the verification status
+        user_role:
+          type: string
+          enum: [USER, MANAGER, ADMIN]
+          x-enum-varnames: [KycVerificationUserRoleUSER, KycVerificationUserRoleMANAGER, KycVerificationUserRoleADMIN]
+          description: Current account role, read from the user rather than the filing.
         email:
           type: string
         submitted_at:

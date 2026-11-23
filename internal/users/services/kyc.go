@@ -43,6 +43,9 @@ func (s *Service) PostKycVerifications(ctx context.Context, userId int, request 
 
 	// 1 - Get user to check if they exist
 	_, err = database.GetUserByID(ctx, userId)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrUserNotFound
+	}
 	if err != nil {
 		return
 	}

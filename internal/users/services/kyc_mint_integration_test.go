@@ -7,8 +7,6 @@ import (
 	"database/sql"
 	"fmt"
 	"math/big"
-	"net/url"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +16,7 @@ import (
 	blkGlobals "github.com/TookenOrg/tooken-services/internal/blockchain/globals"
 	blkServices "github.com/TookenOrg/tooken-services/internal/blockchain/services"
 	appGlobals "github.com/TookenOrg/tooken-services/internal/globals"
+	"github.com/TookenOrg/tooken-services/internal/testenv"
 	"github.com/TookenOrg/tooken-services/pkg/logger"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
@@ -26,11 +25,7 @@ import (
 	_ "github.com/lib/pq"
 )
 
-const (
-	scratchDatabaseName = "tooken_it_users_services_kyc_mint"
-	baselineSQLPath     = "../../../tools/db/baseline.sql"
-	hardhatAccount0Key  = "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
-)
+const scratchDatabaseName = "tooken_it_users_services_kyc_mint"
 
 type integrationEnv struct {
 	DB     *sql.DB
@@ -180,27 +175,20 @@ func TestApprovedKYCEnablesMintAndNonKYCWalletReverts(t *testing.T) {
 func newIntegrationEnv(ctx context.Context, t *testing.T) *integrationEnv {
 	t.Helper()
 
-	dsn := os.Getenv("TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("TEST_DATABASE_URL is not set")
-	}
+	db := testenv.ScratchDatabase(t, scratchDatabaseName)
 	logger.Init(true)
-
-	client := dialTestNode(ctx, t)
-	db := createScratchDatabase(t, dsn)
+	client := testenv.DialNode(ctx, t)
 
 	previousDB := appGlobals.DB
 	appGlobals.DB = db
 	previousClient := blkGlobals.EthClient
 	blkGlobals.EthClient = client
 
-	t.Setenv("PRIVATE_KEY", hardhatAccount0Key)
+	t.Setenv("PRIVATE_KEY", testenv.HardhatAccount0Key)
 
 	t.Cleanup(func() {
 		blkGlobals.EthClient = previousClient
 		appGlobals.DB = previousDB
-		db.Close()
-		dropScratchDatabase(t, dsn)
 	})
 
 	return &integrationEnv{DB: db, Client: client}
@@ -241,97 +229,6 @@ func deployTestToken(ctx context.Context, t *testing.T, chainSvc *blkServices.Se
 		t.Fatalf("token address = %q", token.Address)
 	}
 	return token
-}
-
-func dialTestNode(ctx context.Context, t *testing.T) *ethclient.Client {
-	t.Helper()
-
-	rpc := os.Getenv("ETH_TEST_RPC")
-	if rpc == "" {
-		rpc = "ws://127.0.0.1:8545"
-	}
-	client, err := ethclient.DialContext(ctx, rpc)
-	if err != nil {
-		integrationUnavailable(t, "no local EVM node at %s: %v", rpc, err)
-	}
-	if _, err := client.ChainID(ctx); err != nil {
-		integrationUnavailable(t, "local EVM node at %s not reachable: %v", rpc, err)
-	}
-	return client
-}
-
-func createScratchDatabase(t *testing.T, dsn string) *sql.DB {
-	t.Helper()
-
-	adminDSN, scratchDSN, err := scratchDSNs(dsn)
-	if err != nil {
-		integrationUnavailable(t, "TEST_DATABASE_URL is not a URL a database can be derived from: %v", err)
-	}
-
-	admin, err := sql.Open("postgres", adminDSN)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer admin.Close()
-	if err := admin.Ping(); err != nil {
-		integrationUnavailable(t, "database server not reachable: %v", err)
-	}
-
-	if _, err := admin.Exec(`DROP DATABASE IF EXISTS ` + scratchDatabaseName); err != nil {
-		integrationUnavailable(t, "cannot drop %s (the test user needs CREATEDB): %v", scratchDatabaseName, err)
-	}
-	if _, err := admin.Exec(`CREATE DATABASE ` + scratchDatabaseName); err != nil {
-		integrationUnavailable(t, "cannot create %s (the test user needs CREATEDB): %v", scratchDatabaseName, err)
-	}
-
-	baseline, err := os.ReadFile(baselineSQLPath)
-	if err != nil {
-		t.Fatalf("read %s: %v", baselineSQLPath, err)
-	}
-
-	db, err := sql.Open("postgres", scratchDSN)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec(string(baseline)); err != nil {
-		db.Close()
-		t.Fatalf("apply %s: %v", baselineSQLPath, err)
-	}
-
-	return db
-}
-
-func dropScratchDatabase(t *testing.T, dsn string) {
-	t.Helper()
-
-	adminDSN, _, err := scratchDSNs(dsn)
-	if err != nil {
-		return
-	}
-	admin, err := sql.Open("postgres", adminDSN)
-	if err != nil {
-		return
-	}
-	defer admin.Close()
-	_, _ = admin.Exec(`DROP DATABASE IF EXISTS ` + scratchDatabaseName)
-}
-
-func scratchDSNs(dsn string) (adminDSN, scratchDSN string, err error) {
-	parsed, err := url.Parse(dsn)
-	if err != nil {
-		return "", "", err
-	}
-	if parsed.Scheme != "postgres" && parsed.Scheme != "postgresql" {
-		return "", "", fmt.Errorf("unsupported scheme %q", parsed.Scheme)
-	}
-
-	admin := *parsed
-	admin.Path = "/postgres"
-
-	scratch := *parsed
-	scratch.Path = "/" + scratchDatabaseName
-
-	return admin.String(), scratch.String(), nil
 }
 
 func insertUser(t *testing.T, db *sql.DB, emailPrefix, role string) int {
@@ -442,15 +339,4 @@ func mintShares(ctx context.Context, svc *blkServices.Service, tokenAddr, wallet
 	}
 
 	return txHash, nil
-}
-
-// integrationUnavailable skips the test when no integration run was asked for,
-// and fails it when one was: with TEST_DATABASE_URL or ETH_TEST_RPC set, a
-// missing database or node must not let the suite pass without running.
-func integrationUnavailable(t *testing.T, format string, args ...any) {
-	t.Helper()
-	if os.Getenv("TEST_DATABASE_URL") != "" || os.Getenv("ETH_TEST_RPC") != "" {
-		t.Fatalf(format, args...)
-	}
-	t.Skipf(format, args...)
 }

@@ -1,6 +1,8 @@
 package services
 
 import (
+	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -128,6 +130,13 @@ func TestCheckStillPublishable(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "description") {
 			t.Errorf("the lost field is not named: %v", err)
+		}
+		var incomplete *MissingFieldsConflict
+		if !errors.Is(err, ErrRealEstateConflict) || !errors.As(err, &incomplete) {
+			t.Fatalf("missing fields conflict lost its type: %v", err)
+		}
+		if !reflect.DeepEqual(incomplete.Fields, []string{"description"}) {
+			t.Errorf("missing fields = %v", incomplete.Fields)
 		}
 	})
 

@@ -1,0 +1,55 @@
+# Render Blueprint: the production API.
+#
+# Render builds the repository's Dockerfile (its last stage is the API image)
+# and runs it. PostgreSQL (Aiven) and the Ethereum node are external services,
+# reached through the variables below. docker-compose.yml is for local
+# development only and is not used here.
+services:
+  - type: web
+    name: tooken-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    # The free plan spins the service down when idle, which would cut the
+    # on-chain jobs in flight: use a paid plan.
+    plan: starter
+    region: frankfurt
+    # One instance only: the signer's nonce lock lives in memory, so two
+    # instances would race each other for the same nonce.
+    numInstances: 1
+    healthCheckPath: /api/v1/health
+    # On SIGTERM the server drains requests for up to 15 s, then waits up to
+    # 1 min (broadcast) + ETH_TX_WAIT for on-chain jobs. Render caps shutdown
+    # delay at 300 s, so ETH_TX_WAIT is set to 3m30s (15 s + 1m + 3m30s = 285 s).
+    maxShutdownDelaySeconds: 300
+    envVars:
+      # The server listens on 8080 (not on Render's default 10000).
+      - key: PORT
+        value: "8080"
+      - key: GIN_MODE
+        value: release
+      - key: LOG_TRACE
+        value: "false"
+      - key: ETH_MIN_TIP_GWEI
+        value: "1"
+      - key: ETH_TX_WAIT
+        value: 3m30s
+      - key: ORDER_RESERVATION_TTL
+        value: 15m
+      # Secrets and environment-specific values: asked for in the Render
+      # dashboard on the first sync, never stored in the repository.
+      # Signs every session: openssl rand -base64 48 (at least 32 bytes).
+      - key: JWT_SECRET
+        sync: false
+      # Signer key, hex without 0x. A dedicated key funded for gas only.
+      - key: PRIVATE_KEY
+        sync: false
+      # Aiven service URI, with ?sslmode=require. Aiven's IP allowlist must
+      # contain this service's outbound IPs (Render dashboard > Connect).
+      - key: DATABASE_URL
+        sync: false
+      # WebSocket RPC of the real network (wss://...).
+      - key: WS_RPC_URL
+        sync: false
+      # Comma-separated, no spaces: the front-end origin(s).
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false

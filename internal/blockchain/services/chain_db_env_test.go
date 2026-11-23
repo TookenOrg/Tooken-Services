@@ -7,7 +7,8 @@
 // the shared whitelist is anchored at, which ONCHAINID authority to deploy proxies
 // from. Rebuilding that context from local variables is exactly what let B4 live.
 //
-// Each run builds its own database from tools/db/baseline.sql and drops it at the end.
+// Each run builds its own database from tools/db/baseline.sql and drops it at the end
+// (see testenv.ScratchDatabase).
 // Sharing one database across packages does not work here: the handler suite leaves
 // rows in blk.token, and "no token deployed yet" is a case this package has to be able
 // to reproduce. Isolation also means these tests can neither be broken by, nor break,
@@ -23,17 +24,15 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"net/url"
-	"os"
 	"strings"
 	"testing"
 	"time"
 
 	chainglobals "github.com/TookenOrg/tooken-services/internal/blockchain/globals"
 	appglobals "github.com/TookenOrg/tooken-services/internal/globals"
+	"github.com/TookenOrg/tooken-services/internal/testenv"
 	"github.com/TookenOrg/tooken-services/pkg/logger"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/ethclient"
 	_ "github.com/lib/pq"
 )
 
@@ -41,7 +40,6 @@ const (
 	// scratchDatabaseName is rebuilt on every run, so a suite interrupted halfway
 	// never poisons the next one.
 	scratchDatabaseName = "tooken_it_blockchain_services"
-	baselineSQLPath     = "../../../tools/db/baseline.sql"
 
 	// blk tables CHECK that a transaction hash is 0x followed by 64 hex characters,
 	// so a marker has to be made of hex digits too.
@@ -64,14 +62,9 @@ type chainDBEnv struct {
 func newBareChainDBEnv(ctx context.Context, t *testing.T) *chainDBEnv {
 	t.Helper()
 
-	dsn := os.Getenv("TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("TEST_DATABASE_URL is not set")
-	}
+	db := testenv.ScratchDatabase(t, scratchDatabaseName)
 	logger.Init(true)
-
-	client := dialTestNode(ctx, t)
-	db := createScratchDatabase(t, dsn)
+	client := testenv.DialNode(ctx, t)
 
 	previousDB := appglobals.DB
 	appglobals.DB = db
@@ -79,13 +72,11 @@ func newBareChainDBEnv(ctx context.Context, t *testing.T) *chainDBEnv {
 	chainglobals.EthClient = client
 
 	// GenerateTransactOpts signs with this key, exactly like production does.
-	t.Setenv("PRIVATE_KEY", hardhatAccount0Key)
+	t.Setenv("PRIVATE_KEY", testenv.HardhatAccount0Key)
 
 	t.Cleanup(func() {
 		chainglobals.EthClient = previousClient
 		appglobals.DB = previousDB
-		db.Close()
-		dropScratchDatabase(t, dsn)
 	})
 
 	return &chainDBEnv{DB: db}
@@ -107,111 +98,6 @@ func newChainDBEnv(ctx context.Context, t *testing.T) *chainDBEnv {
 	env.SetContractRole(t, chainglobals.ClaimIssuerName, env.Fixture.ClaimIssuer)
 
 	return env
-}
-
-// dialTestNode connects to the local EVM node; when none answers, see
-// integrationUnavailable.
-//
-// It dials WebSocket by default because production does: SetupEthClient reads
-// WS_RPC_URL. The transport is not a detail — eth_subscribe does not exist over
-// HTTP, so a subscription bug looks like "notifications not supported" there and
-// like a silent timeout in production. Testing over the transport production uses is
-// what makes the difference visible.
-func dialTestNode(ctx context.Context, t *testing.T) *ethclient.Client {
-	t.Helper()
-
-	rpc := os.Getenv("ETH_TEST_RPC")
-	if rpc == "" {
-		rpc = "ws://127.0.0.1:8545"
-	}
-	client, err := ethclient.DialContext(ctx, rpc)
-	if err != nil {
-		integrationUnavailable(t, "no local EVM node at %s: %v", rpc, err)
-	}
-	if _, err := client.ChainID(ctx); err != nil {
-		integrationUnavailable(t, "local EVM node at %s not reachable: %v", rpc, err)
-	}
-	return client
-}
-
-// createScratchDatabase rebuilds this package's own database from the committed
-// baseline, so the tests read the real schema — constraints, triggers and all —
-// rather than a hand-made approximation of it.
-func createScratchDatabase(t *testing.T, dsn string) *sql.DB {
-	t.Helper()
-
-	adminDSN, scratchDSN, err := scratchDSNs(dsn)
-	if err != nil {
-		integrationUnavailable(t, "TEST_DATABASE_URL is not a URL a database can be derived from: %v", err)
-	}
-
-	admin, err := sql.Open("postgres", adminDSN)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer admin.Close()
-	if err := admin.Ping(); err != nil {
-		integrationUnavailable(t, "database server not reachable: %v", err)
-	}
-
-	if _, err := admin.Exec(`DROP DATABASE IF EXISTS ` + scratchDatabaseName); err != nil {
-		integrationUnavailable(t, "cannot drop %s (the test user needs CREATEDB): %v", scratchDatabaseName, err)
-	}
-	if _, err := admin.Exec(`CREATE DATABASE ` + scratchDatabaseName); err != nil {
-		integrationUnavailable(t, "cannot create %s (the test user needs CREATEDB): %v", scratchDatabaseName, err)
-	}
-
-	baseline, err := os.ReadFile(baselineSQLPath)
-	if err != nil {
-		t.Fatalf("read %s: %v", baselineSQLPath, err)
-	}
-
-	db, err := sql.Open("postgres", scratchDSN)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec(string(baseline)); err != nil {
-		db.Close()
-		t.Fatalf("apply %s: %v", baselineSQLPath, err)
-	}
-
-	return db
-}
-
-func dropScratchDatabase(t *testing.T, dsn string) {
-	t.Helper()
-
-	adminDSN, _, err := scratchDSNs(dsn)
-	if err != nil {
-		return
-	}
-	admin, err := sql.Open("postgres", adminDSN)
-	if err != nil {
-		return
-	}
-	defer admin.Close()
-	_, _ = admin.Exec(`DROP DATABASE IF EXISTS ` + scratchDatabaseName)
-}
-
-// scratchDSNs turns the configured DSN into one pointing at the maintenance database
-// and one pointing at this package's scratch database, keeping every other parameter
-// — credentials, host, sslmode — as configured.
-func scratchDSNs(dsn string) (adminDSN, scratchDSN string, err error) {
-	parsed, err := url.Parse(dsn)
-	if err != nil {
-		return "", "", err
-	}
-	if parsed.Scheme != "postgres" && parsed.Scheme != "postgresql" {
-		return "", "", fmt.Errorf("unsupported scheme %q", parsed.Scheme)
-	}
-
-	admin := *parsed
-	admin.Path = "/postgres"
-
-	scratch := *parsed
-	scratch.Path = "/" + scratchDatabaseName
-
-	return admin.String(), scratch.String(), nil
 }
 
 // NewUser inserts an investor and returns its id.
@@ -300,15 +186,4 @@ func probeTxHash(seed string) string {
 		return hash[:66]
 	}
 	return hash + strings.Repeat("0", 66-len(hash))
-}
-
-// integrationUnavailable skips the test when no integration run was asked for,
-// and fails it when one was: with TEST_DATABASE_URL or ETH_TEST_RPC set, a
-// missing database or node must not let the suite pass without running.
-func integrationUnavailable(t *testing.T, format string, args ...any) {
-	t.Helper()
-	if os.Getenv("TEST_DATABASE_URL") != "" || os.Getenv("ETH_TEST_RPC") != "" {
-		t.Fatalf(format, args...)
-	}
-	t.Skipf(format, args...)
 }

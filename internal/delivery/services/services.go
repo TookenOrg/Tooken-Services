@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 
+	assetsDb "github.com/TookenOrg/tooken-services/internal/assets_managements/database"
 	"github.com/TookenOrg/tooken-services/internal/delivery/database"
 )
 
@@ -18,6 +19,11 @@ type TokenMinter interface {
 	// mined — undecided, not failed.
 	MintReceipt(ctx context.Context, txHash, wallet string, shares int) (
 		found bool, succeeded bool, err error)
+
+	// CompareTotalSupply reads totalSupply() of the token at the latest block
+	// and compares it to shares whole shares in base units. It returns -1, 0 or
+	// +1 like big.Int.Cmp, all in integers.
+	CompareTotalSupply(ctx context.Context, tokenAddress string, shares int64) (int, error)
 }
 
 // The database work Deliver relies on, as function types.
@@ -26,6 +32,7 @@ type (
 	recordTxHashFn     func(ctx context.Context, orderID int64, txHash string) error
 	failDeliveryFn     func(ctx context.Context, orderRef, reason string, txHash *string, reachedNetwork bool) error
 	completeDeliveryFn func(ctx context.Context, orderRef, txHash string) error
+	markFundedFn       func(ctx context.Context, realEstateID int) error
 )
 
 type Service struct {
@@ -37,6 +44,7 @@ type Service struct {
 	recordTxHash     recordTxHashFn
 	failDelivery     failDeliveryFn
 	completeDelivery completeDeliveryFn
+	markFunded       markFundedFn
 }
 
 func NewService(minter TokenMinter) *Service {
@@ -46,5 +54,6 @@ func NewService(minter TokenMinter) *Service {
 		recordTxHash:     database.RecordDeliveryTxHash,
 		failDelivery:     database.FailDelivery,
 		completeDelivery: database.CompleteDelivery,
+		markFunded:       assetsDb.MarkRealEstateFunded,
 	}
 }

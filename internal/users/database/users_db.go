@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"database/sql"
 	"time"
 
 	"github.com/TookenOrg/tooken-services/internal/api/server"
@@ -15,8 +16,18 @@ func GetUserByID(ctx context.Context, userID int) (user *server.User, err error)
         FROM usr.users
         WHERE id = $1
     `
-	user = &server.User{}
-	err = globals.DB.QueryRow(query, userID).Scan(
+	user, err = scanUser(globals.DB.QueryRowContext(ctx, query, userID))
+	if err != nil {
+		return
+	}
+
+	logger.LogDebug("User retrieved with ID [%d]", userID)
+	return
+}
+
+func scanUser(row *sql.Row) (*server.User, error) {
+	user := &server.User{}
+	err := row.Scan(
 		&user.Id,
 		&user.FullName,
 		&user.Email,
@@ -29,12 +40,7 @@ func GetUserByID(ctx context.Context, userID int) (user *server.User, err error)
 		&user.UpdatedAt,
 		&user.LastConnexion,
 	)
-	if err != nil {
-		return
-	}
-
-	logger.LogDebug("User retrieved with ID [%d]", userID)
-	return
+	return user, err
 }
 
 func MarkUserKycVerified(ctx context.Context, userID int) (verifiedAt time.Time, err error) {

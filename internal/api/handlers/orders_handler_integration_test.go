@@ -49,11 +49,12 @@ const ordersPath = "/assets/real-estate/issuance/orders"
 
 // orderHarness is the router plus the database the fixtures write to.
 type orderHarness struct {
-	t   *testing.T
-	db  *sql.DB
-	r   *gin.Engine
-	run int64
-	seq atomic.Int64
+	t       *testing.T
+	db      *sql.DB
+	r       *gin.Engine
+	handler *Handler
+	run     int64
+	seq     atomic.Int64
 }
 
 func newOrderHarness(t *testing.T) *orderHarness {
@@ -84,9 +85,10 @@ func newOrderHarnessDelivering(t *testing.T, d orderDeliverer) *orderHarness {
 	r := gin.New()
 	g := r.Group(globals.BaseURL)
 	g.Use(middleware.AutoAuthMiddleware())
-	server.RegisterHandlers(g, newHandlerDelivering(d))
+	handler := newHandlerDelivering(d)
+	server.RegisterHandlers(g, handler)
 
-	return &orderHarness{t: t, db: db, r: r, run: time.Now().UnixNano() % 1_000_000_000}
+	return &orderHarness{t: t, db: db, r: r, handler: handler, run: time.Now().UnixNano() % 1_000_000_000}
 }
 
 // newHandlerDelivering builds the production handler, then puts d in place of
@@ -101,8 +103,8 @@ func newOrderHarnessDelivering(t *testing.T, d orderDeliverer) *orderHarness {
 //
 // The test lives in package handlers, so no seam has to be opened in the
 // production code to do this.
-func newHandlerDelivering(d orderDeliverer) server.ServerInterface {
-	h := NewHandler().(*Handler)
+func newHandlerDelivering(d orderDeliverer) *Handler {
+	h := NewHandler()
 	h.deliverySvc = d
 	return h
 }

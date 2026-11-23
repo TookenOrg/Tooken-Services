@@ -111,4 +111,32 @@ func TestAfterLostFundraisingRace(t *testing.T) {
 			t.Fatalf("want not found, got %v", err)
 		}
 	})
+
+	t.Run("publish race: another manager published it first returns published", func(t *testing.T) {
+		id := assetIn(t, 3, false)
+		if _, err := db.Exec(`UPDATE ass.real_estate SET active = true WHERE id = $1`, id); err != nil {
+			t.Fatal(err)
+		}
+		re, err := s.afterLostPublishRace(ctx, id)
+		if err != nil {
+			t.Fatalf("want no error, got %v", err)
+		}
+		if re.Status == nil || *re.Status != "published" {
+			t.Errorf("want published, got %v", re.Status)
+		}
+	})
+
+	t.Run("publish race: already in fundraising returns conflict", func(t *testing.T) {
+		id := assetIn(t, 4, false)
+		if _, err := s.afterLostPublishRace(ctx, id); !errors.Is(err, ErrRealEstateConflict) {
+			t.Fatalf("want conflict, got %v", err)
+		}
+	})
+
+	t.Run("publish race: deleted meanwhile returns not found", func(t *testing.T) {
+		id := assetIn(t, 0, true)
+		if _, err := s.afterLostPublishRace(ctx, id); !errors.Is(err, ErrRealEstateNotFound) {
+			t.Fatalf("want not found, got %v", err)
+		}
+	})
 }

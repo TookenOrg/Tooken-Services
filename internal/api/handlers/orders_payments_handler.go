@@ -34,7 +34,8 @@ func (h *Handler) ConfirmIssuanceOrderPayment(gCtx *gin.Context, orderRef string
 	logger.LogInfo("✅ Successfully confirmed issuance order payment for orderRef: %s", orderRef)
 
 	logger.LogInfo("Starting async delivery for orderRef %s ....", orderRef)
-	go h.deliverySvc.Deliver(context.WithoutCancel(gCtx.Request.Context()), orderRef)
+	deliveryCtx := context.WithoutCancel(gCtx.Request.Context())
+	h.startBackground("delivery of the paid order "+orderRef, func() { h.deliverySvc.Deliver(deliveryCtx, orderRef) })
 
 	gCtx.JSON(http.StatusOK, server.CreateIssuanceOrderResponse{
 		Data:    &order,

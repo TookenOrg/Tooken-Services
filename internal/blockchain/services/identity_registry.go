@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"math"
 	"math/big"
 
@@ -149,16 +150,38 @@ func fetchIsVerifiedByTokenAddress(ctx context.Context, tokenAddr, walletAddrToC
 	return isVerified, nil
 }
 
+// FetchIsVerifiedOnSharedIdentityRegistry checks whether wallet holds a valid,
+// trusted identity on the shared investor whitelist without requiring a
+// transaction signer key.
 func FetchIsVerifiedOnSharedIdentityRegistry(ctx context.Context, wallet string) (bool, error) {
-	irInstance, err := resolveIdentityRegistryInstance(ctx)
+	if globals.EthClient == nil {
+		return false, errors.New("ethereum client is not initialized")
+	}
+	storage, err := database.GetContractRoleByName(ctx, globals.SharedIdentityRegistryStorageName)
+	if err != nil {
+		return false, err
+	}
+	if !common.IsHexAddress(storage.Address) || common.HexToAddress(storage.Address) == (common.Address{}) {
+		return false, errors.New("shared identity storage is not configured")
+	}
+	irsInstance, err := contracts.NewIdentityRegistryStorage(common.HexToAddress(storage.Address), globals.EthClient)
+	if err != nil {
+		return false, err
+	}
+	opts := &bind.CallOpts{Context: ctx}
+	registries, err := irsInstance.LinkedIdentityRegistries(opts)
+	if err != nil {
+		return false, err
+	}
+	if len(registries) == 0 {
+		return false, errors.New("no registry is bound to the shared identity storage")
+	}
+	irInstance, err := contracts.NewIdentityRegistry(registries[0], globals.EthClient)
 	if err != nil {
 		return false, err
 	}
 
-	return irInstance.IsVerified(
-		&bind.CallOpts{Context: ctx},
-		common.HexToAddress(wallet),
-	)
+	return irInstance.IsVerified(opts, common.HexToAddress(wallet))
 }
 
 func RegisterIdentityInSharedRegistry(ctx context.Context, walletAddress, identityAddress common.Address, countryCode int) (txHash *string, err error) {

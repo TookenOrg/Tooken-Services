@@ -13,14 +13,12 @@ import (
 // longer forces a change in the SQL, and the other way around.
 //
 // The DTO models the whole v3 schema; this file decides what actually leaves
-// the server. Two deliberate omissions:
+// the server. One deliberate omission:
 //
 //   - the full address (street, postal code, coordinates), served only to a
 //     MANAGER or an ADMIN. The endpoints are public, and a precise address
 //     pinpoints a tokenized asset; the coarse location is what everyone else
 //     gets.
-//   - the fee grid, the investment bounds and the compartment reference, which
-//     only mean something once the subscription funnel exists.
 //
 // Amounts cross the boundary as exact decimal strings: decimal.Decimal.String()
 // never rounds, where a float32 turned 199.99 into 199.99001.
@@ -76,6 +74,12 @@ func toServerRealEstateSummary(dto database.RealEstateDTO) server.RealEstateSumm
 			PaymentFrequencyTypeId: c.PaymentFrequencyTypeId,
 			PaymentFrequencyType:   c.PaymentFrequencyTypeName,
 			MaxSharesPerInvestor:   nullDecimalToString(c.MaxSharesPerInvestor),
+			MinInvestment:          nullDecimalToString(c.MinInvestment),
+			MaxInvestment:          nullDecimalToString(c.MaxInvestment),
+			EntryFeeRate:           nullDecimalToString(c.EntryFeeRate),
+			MgmtFeeRate:            nullDecimalToString(c.MgmtFeeRate),
+			ExitFeeRate:            nullDecimalToString(c.ExitFeeRate),
+			CompartmentRef:         c.CompartmentRef,
 		}
 	}
 

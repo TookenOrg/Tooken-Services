@@ -460,6 +460,10 @@ func TestCheckIssuerStillIdentifiable(t *testing.T) {
 		if !errors.Is(err, ErrIssuerConflict) {
 			t.Fatalf("expected a conflict, got %v", err)
 		}
+		var incomplete *MissingFieldsConflict
+		if !errors.As(err, &incomplete) || len(incomplete.Fields) != 1 || incomplete.Fields[0] != "registration_number" {
+			t.Fatalf("missing registration number is not structured: %v", err)
+		}
 	})
 
 	t.Run("a legacy row missing it stays editable", func(t *testing.T) {

@@ -136,7 +136,15 @@ token's `ModularCompliance`. They keep their state **per compliance**, so one sh
 ## 4. Platform bootstrap (one-time, ordered)
 
 These five endpoints must be called in order; each step consumes addresses
-produced by earlier ones. Steps 1, 4 and 5 are asynchronous (`202`).
+produced by earlier ones. They are disabled unless `TREX_INIT_ENABLED` is
+exactly `true` when the API starts, and still require a MANAGER or ADMIN
+session. The startup log reports whether initialization is enabled. A disabled
+endpoint answers `403` before starting work.
+
+Steps 1, 4 and 5 are asynchronous (`202` means accepted, not completed). Wait
+for each step to finish before calling the next one, and wait for all jobs to
+finish before disabling initialization and restarting the API. The flag does
+not prevent repeated calls while enabled; they can spend gas.
 
 ```mermaid
 graph TD
@@ -164,13 +172,13 @@ name `TREXSuiteV1`, symbol `TOOK`, 18 decimals, compliance = `TransferRestrictMo
 claim topic `7` (KYC), salt `TookenSuiteV1Salt`. It waits on the
 `TREXSuiteDeployed` event rather than the tx receipt.
 
-> ⚠️ **Operational gotcha:** the config tables `blk.contract_role`,
-> `blk.contract_implementation` and `blk.contract_instance` are *read* during
-> bootstrap (e.g. `GetContractRoleByName(IDENTITY_FACTORY)`,
-> `GetImplementationContractByName(...)`) but the corresponding **inserts are
-> currently commented out / `TODO`** in the deploy functions. In the current state
-> these tables must be populated out-of-band for steps 2–5 to resolve addresses.
-> See [§8 Known gaps](#8-known-gaps--caveats).
+Each step records what it deploys, so the next one finds it without any manual
+seeding: step 1 writes the nine rows of `blk.contract_implementation`, steps 2,
+4 and 5 write `IDENTITY_FACTORY`, `TREX_FACTORY`, `CLAIM_ISSUER`,
+`TRANSFER_RESTRICTION_MODULE` and `SHARED_IRS` to `blk.contract_role`. The
+end-to-end test (`internal/e2e`, see [§9](#9-tests)) runs the five steps on an
+empty database through the API and checks those rows. Step 2 is idempotent: a
+second call answers with the factory already recorded and sends no transaction.
 
 ---
 
@@ -298,6 +306,11 @@ transaction may land later and a second mint would then double the shares.
 `Transfer(0x0 → wallet, amount)` among its logs — a receipt alone only says the
 call did not revert.
 
+`CompareTotalSupply` answers whether the token's `totalSupply` (latest block,
+10 s timeout) is below, equal to or above a number of shares. The comparison is
+made on integers, in the token's own decimals read from `blk.token`. The
+delivery uses it to mark an asset funded once every share exists on chain.
+
 The lock is there because `GenerateTransactOpts` reads `PendingNonceAt`: two
 transactions prepared at the same instant — two mints, or a mint and a KYC
 registration — would claim the same nonce and one would be rejected. For a
@@ -388,8 +401,8 @@ Tables touched by this module:
 | `blk.user_wallet` | `InsertWallet` | `GetWalletByUserId` *(mocked)* |
 | `blk.identity` | `InsertIdentity` | `GetIdentityAddrByUserId` |
 | `blk.token` | `InsertToken` | `GetTokenByName`, `GetTokenByAddress` |
-| `blk.contract_implementation` | *(TODO — commented out)* | impl lookups |
-| `blk.contract_role` | `InsertContractRole` (factory, claim issuer, module, shared IRS) | `GetContractRoleByName` |
+| `blk.contract_implementation` | `InsertContractImplementation` (the nine implementations of bootstrap step 1) | impl lookups |
+| `blk.contract_role` | `InsertContractRole` (identity factory, TREX factory, claim issuer, module, shared IRS) | `GetContractRoleByName` |
 | `blk.contract_instance` | *(TODO)* | instance lookups |
 
 Endpoints → service methods (all under `globals.BaseURL` = `/api/v1`):
@@ -411,8 +424,9 @@ Endpoints → service methods (all under `globals.BaseURL` = `/api/v1`):
 There is no mint endpoint: `SendMintShares` is reached only through the
 delivery of a paid order.
 
-These routes are **not** marked `bearerAuth` in `api/openapi.yaml`, so they are
-currently public (auth is spec-driven — see the repo `copilot-instructions.md`).
+Every `POST` above is marked `bearerAuth` in `api/openapi.yaml` and its handler
+requires the MANAGER or ADMIN role: without a token it answers `401`, with a
+USER token `403`. The two `GET` stubs are public.
 
 ### Environment variables
 
@@ -420,12 +434,13 @@ currently public (auth is spec-driven — see the repo `copilot-instructions.md`
 |---|---|---|
 | `WS_RPC_URL` | `services/blockchain.go` | EVM node endpoint (`ethclient.Dial`) |
 | `PRIVATE_KEY` | `utils/keys_utils.go`, `identity_claim.go` | platform signer (hex, `0x` optional) |
+| `TREX_INIT_ENABLED` | `internal/api/handlers/handlers.go` | exactly `true` enables the initialization routes; otherwise they are disabled. Read once at startup |
 | `ETH_MIN_TIP_GWEI` | `utils/transactions_utils.go` | floor for the miner tip, in gwei, fractional allowed. Default **1**, capped at 1000. Applied as `max(floor, SuggestGasTipCap())` |
 | `ETH_TX_WAIT` | `utils/transactions_utils.go` | how long to wait for a transaction to be mined, as a Go duration (`"5m"`, `"90s"`). Default **5m** |
 
-Both optional variables fall back to their default — with a `logger.LogWarn` — on
-any unusable value: a mistyped variable must not stop the server from sending
-transactions.
+The tip floor and transaction wait fall back to their defaults — with a
+`logger.LogWarn` — on any unusable value: a mistyped variable must not stop the
+server from sending transactions.
 
 ### Fees: why `GasPrice` and `GasLimit` are never set
 
@@ -465,11 +480,9 @@ re-adds those fields.
 These are real, present in the code today — keep them in mind before relying on the
 module or extending it.
 
-- **Config tables only partially auto-populated.** Singleton roles (TREX factory,
-  claim issuer, compliance module, shared IRS) are now persisted to
-  `blk.contract_role` via `InsertContractRole` at their creation sites, and created
-  tokens to `blk.token` via `InsertToken`. `blk.contract_implementation` inserts are
-  still `TODO`/commented, so those rows must be seeded manually.
+- ✅ **Config tables are populated by the bootstrap** (checked on 2026-10-26):
+  implementations, singleton roles and created tokens are all written at their
+  creation sites; nothing has to be seeded by hand (see [§4](#4-platform-bootstrap-one-time-ordered)).
 - **`GetWalletByUserId` is mocked** (`wallet_db.go`) — returns `common.MaxAddress`,
   so `CreateIdentity`'s idempotency check never sees "no wallet".
 - ✅ **Removed on 2026-09-18**: `SetGlobals` and its commented
@@ -524,3 +537,43 @@ module or extending it.
   (defaults to a publicly-known Hardhat dev account). With neither
   `TEST_DATABASE_URL` nor `ETH_TEST_RPC` set, a missing node skips the test;
   with either set, it fails it, so a requested run cannot pass without running.
+- **Shared test environment** (`internal/testenv`, imported by tests only): one
+  `ScratchDatabase(t, name)` rebuilt from `tools/db/baseline.sql` and dropped at
+  the end, one `DialNode(ctx, t)` on `ETH_TEST_RPC` (default
+  `ws://127.0.0.1:8545`), and the Hardhat account 0 key. Each package passes its
+  own database name, so packages never drop each other's rows; run the full
+  integration suite with `-p 1`, because every package signs with the same
+  account and would race for its nonce. `go list -deps . | grep internal/testenv`
+  must print nothing: the server binary never links it.
+- **HTTP router** (`internal/api/router`, unit tests): `router.New` is the one
+  place routes, CORS, the spec-driven auth and `/api/v1` are wired, used by
+  `main.go` and by the end-to-end test alike. A bad CORS origin is an error, not
+  a panic.
+- **End to end** (`internal/e2e`, integration tag, needs `TEST_DATABASE_URL` and
+  a node): a real `httptest` server built by `router.New`, a scratch database
+  and Hardhat, driven only through the public API. The operator runs the five
+  bootstrap steps of [§4](#4-platform-bootstrap-one-time-ordered); then each
+  journey lists its own asset and onboards its own investors:
+  - a paid order is minted and closed, a replayed idempotency key returns the
+    same order, a payment confirmed twice at once mints once;
+  - an investor removed from the identity registry on chain is refused by the
+    token, and the order ends `DELIVERY_FAILED` with the revert reason;
+  - six investors race for the last thirty shares, ten each, all held on the
+    asset's row until every one of them waits: three orders are accepted and
+    three refused, and the asset turns `funded` once the three are delivered;
+  - the orders the platform must refuse: no session; a KYC missing, pending,
+    approved but not on chain, or expired; an asset unknown, still a draft or
+    not yet open; a bad quantity; a limit or the stock exceeded; a reused key;
+    a payment confirmed by an investor or for an unknown order;
+  - a per-investor limit raised in the database above the token's own limit
+    is still enforced on chain, and an asset whose shares are all reserved
+    but not all minted stays `fundraising`.
+
+  ```bash
+  cd tools/hardhat && npx hardhat node                    # terminal 1
+  TEST_DATABASE_URL="postgres://…" \
+    go test -race -tags integration -count=1 -timeout 20m ./internal/e2e/
+  ```
+
+  It takes about two minutes under `-race`, most of it spent hashing passwords
+  (bcrypt cost 14), which is why investors are onboarded in parallel.

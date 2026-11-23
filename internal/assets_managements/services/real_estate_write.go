@@ -89,6 +89,29 @@ func conflict(format string, args ...any) error {
 	return fmt.Errorf("%w: %s", ErrRealEstateConflict, fmt.Sprintf(format, args...))
 }
 
+type MissingFieldsConflict struct {
+	Fields  []string
+	Message string
+	kind    error
+}
+
+func (e *MissingFieldsConflict) Error() string {
+	return fmt.Errorf("%w: %s", e.Unwrap(), e.Message).Error()
+}
+func (e *MissingFieldsConflict) Unwrap() error {
+	if e.kind != nil {
+		return e.kind
+	}
+	return ErrRealEstateConflict
+}
+
+func missingFieldsConflict(message string, fields []string) error {
+	return &MissingFieldsConflict{
+		Fields:  append([]string(nil), fields...),
+		Message: fmt.Sprintf("%s, missing: %s", message, strings.Join(fields, ", ")),
+	}
+}
+
 // CreateRealEstate validates the payload, writes the asset in one transaction
 // and returns it as it now reads.
 //

@@ -225,9 +225,8 @@ func checkStillPublishable(statusID int, before, after database.RealEstateWriteD
 	}
 
 	if len(lost) > 0 {
-		return conflict(
-			"a published asset cannot lose what investors rely on, missing: %s",
-			strings.Join(lost, ", "))
+		return missingFieldsConflict(
+			"a published asset cannot lose what investors rely on", lost)
 	}
 
 	return nil
@@ -275,9 +274,8 @@ func (s *Service) PublishRealEstate(ctx context.Context, id int) (server.RealEst
 	}
 
 	if missing := publicationRequirements(in); len(missing) > 0 {
-		return server.RealEstate{}, conflict(
-			"this asset is not complete enough to be published, missing: %s",
-			strings.Join(missing, ", "))
+		return server.RealEstate{}, missingFieldsConflict(
+			"this asset is not complete enough to be published", missing)
 	}
 
 	// Naming a vehicle is not enough: it has to still stand behind the offer.
@@ -304,13 +302,31 @@ func (s *Service) PublishRealEstate(ctx context.Context, id int) (server.RealEst
 	// Publishing an already published asset changes nothing and is not an
 	// error: two managers clicking the same button must not produce a failure.
 	if err := database.PublishRealEstate(ctx, id, tokenID); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return server.RealEstate{}, ErrRealEstateNotFound
+		if !errors.Is(err, sql.ErrNoRows) {
+			return server.RealEstate{}, translateWriteError(err)
 		}
-		return server.RealEstate{}, translateWriteError(err)
+		return s.afterLostPublishRace(ctx, id)
 	}
 
 	return s.GetRealEstateById(ctx, id, true)
+}
+
+func (s *Service) afterLostPublishRace(ctx context.Context, id int) (server.RealEstate, error) {
+	state, err := database.GetRealEstateGuardState(ctx, id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return server.RealEstate{}, ErrRealEstateNotFound
+		}
+		return server.RealEstate{}, err
+	}
+	if state.Deleted {
+		return server.RealEstate{}, ErrRealEstateNotFound
+	}
+	if state.StatusId == database.StatusPublished {
+		return s.GetRealEstateById(ctx, id, true)
+	}
+	return server.RealEstate{}, conflict(
+		"an asset currently published cannot be published again")
 }
 
 // OpenFundraisingRealEstate opens the subscription of a published asset.

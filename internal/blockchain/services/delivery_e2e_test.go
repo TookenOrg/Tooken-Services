@@ -50,6 +50,13 @@ type deliveryScene struct {
 // fundraising share it, which is what a real one looks like.
 func seedAsset(t *testing.T, env *chainDBEnv, suite *deployedSuite) int {
 	t.Helper()
+	return seedAssetOffering(t, env, suite, 1000)
+}
+
+// seedAssetOffering is seedAsset for an asset that offers totalShares shares.
+// It is open for subscription (fundraising), like any asset that has orders.
+func seedAssetOffering(t *testing.T, env *chainDBEnv, suite *deployedSuite, totalShares int) int {
+	t.Helper()
 
 	unique := time.Now().UnixNano()
 
@@ -68,11 +75,17 @@ func seedAsset(t *testing.T, env *chainDBEnv, suite *deployedSuite) int {
 
 	var assetID int
 	if err := env.DB.QueryRow(`
-		INSERT INTO ass.real_estate (title, description, estate_type, issuer_id, token_id)
-		VALUES ($1, 'e2e asset', 1, $2, $3) RETURNING id`,
+		INSERT INTO ass.real_estate (title, description, estate_type, issuer_id, token_id, status_id)
+		VALUES ($1, 'e2e asset', 1, $2, $3, 4) RETURNING id`,
 		fmt.Sprintf("Tooken Villa %d", unique), issuerID, tokenID,
 	).Scan(&assetID); err != nil {
 		t.Fatalf("insert real estate: %v", err)
+	}
+
+	if _, err := env.DB.Exec(`
+		INSERT INTO ass.real_estate_shares_config (real_estate_id, total_shares, price_per_share)
+		VALUES ($1, $2, 204.00)`, assetID, totalShares); err != nil {
+		t.Fatalf("insert shares config: %v", err)
 	}
 
 	return assetID
@@ -210,6 +223,93 @@ func TestDeliveryE2ENominal(t *testing.T) {
 	}
 	if balance.Cmp(shares18(10)) != 0 {
 		t.Fatalf("balance = %s, want %s", balance, shares18(10))
+	}
+}
+
+func (s deliveryScene) assetStatus(t *testing.T, assetID int) int {
+	t.Helper()
+
+	var status int
+	if err := s.env.DB.QueryRow(`SELECT status_id FROM ass.real_estate WHERE id = $1`, assetID).Scan(&status); err != nil {
+		t.Fatalf("read asset %d: %v", assetID, err)
+	}
+	return status
+}
+
+// The asset is funded by the very delivery that issues its last share, and by
+// no earlier one. The token is deployed with the decimals the platform keeps
+// in blk.token, so the comparison is made in the unit the chain really uses:
+// 100 × 10¹⁸ for an 18-decimal token, 100 for a token without decimals.
+func TestDeliveryE2EFundsTheAssetOnTheLastShare(t *testing.T) {
+	for _, decimals := range []int{18, 0} {
+		t.Run(fmt.Sprintf("%d decimals", decimals), func(t *testing.T) {
+			ctx := context.Background()
+			env := newChainDBEnv(ctx, t)
+			delivery := deliveryServices.NewService(NewService())
+
+			salt := fmt.Sprintf("Funded%d", decimals)
+			suite := env.Fixture.DeploySuiteDecimals(t, salt, "Tooken "+salt, "TKF", decimals)
+			env.SetSharedIRSRow(t, suite.IRSAddr)
+			env.InsertTokenRow(t, suite.TokenAddr, "Tooken "+salt, "TKF", decimals)
+
+			asset := seedAssetOffering(t, env, suite, 100)
+			first := seedDeliveryOrder(ctx, t, env, suite, asset, 90, true)
+			last := seedDeliveryOrder(ctx, t, env, suite, asset, 10, true)
+
+			delivery.Deliver(ctx, first.orderRef)
+			if status, _ := first.status(t); status != int(server.IssuanceOrderStatusIdClosed) {
+				t.Fatalf("first order is %d, want CLOSED. Last reason: %s", status, first.lastReason(t))
+			}
+			if got := first.assetStatus(t, asset); got != 4 {
+				t.Fatalf("asset is %d after 90 of 100 shares, want 4 (fundraising)", got)
+			}
+
+			delivery.Deliver(ctx, last.orderRef)
+			if status, _ := last.status(t); status != int(server.IssuanceOrderStatusIdClosed) {
+				t.Fatalf("last order is %d, want CLOSED. Last reason: %s", status, last.lastReason(t))
+			}
+			if got := last.assetStatus(t, asset); got != 5 {
+				t.Fatalf("asset is %d after 100 of 100 shares, want 5 (funded)", got)
+			}
+		})
+	}
+}
+
+// Two last deliveries finishing together: both orders close, the asset becomes
+// funded once, and nobody sees an error.
+func TestDeliveryE2ETwoLastDeliveriesFundTheAssetOnce(t *testing.T) {
+	ctx := context.Background()
+	env := newChainDBEnv(ctx, t)
+	delivery := deliveryServices.NewService(NewService())
+
+	suite := env.Fixture.DeploySuite(t, "FundedTwice", "Tooken FundedTwice", "TKFT", common.Address{})
+	env.SetSharedIRSRow(t, suite.IRSAddr)
+	env.InsertTokenRow(t, suite.TokenAddr, "Tooken FundedTwice", "TKFT", 18)
+
+	asset := seedAssetOffering(t, env, suite, 100)
+	early := seedDeliveryOrder(ctx, t, env, suite, asset, 90, true)
+	delivery.Deliver(ctx, early.orderRef)
+
+	a := seedDeliveryOrder(ctx, t, env, suite, asset, 5, true)
+	b := seedDeliveryOrder(ctx, t, env, suite, asset, 5, true)
+
+	var wg sync.WaitGroup
+	for _, scene := range []deliveryScene{a, b} {
+		wg.Add(1)
+		go func(ref string) {
+			defer wg.Done()
+			delivery.Deliver(ctx, ref)
+		}(scene.orderRef)
+	}
+	wg.Wait()
+
+	for _, scene := range []deliveryScene{a, b} {
+		if status, _ := scene.status(t); status != int(server.IssuanceOrderStatusIdClosed) {
+			t.Fatalf("order %s is %d, want CLOSED. Last reason: %s", scene.orderRef, status, scene.lastReason(t))
+		}
+	}
+	if got := a.assetStatus(t, asset); got != 5 {
+		t.Fatalf("asset is %d, want 5 (funded)", got)
 	}
 }
 

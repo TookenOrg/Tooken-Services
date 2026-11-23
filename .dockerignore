@@ -1,0 +1,28 @@
+# Version control and editors
+.git
+.github
+.vscode
+.idea
+.claude
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+
+# Dependencies and build output
+**/node_modules
+tools/hardhat/artifacts
+tools/hardhat/cache
+tooken
+*.test
+*.out
+
+# Documentation and local notes: the build reads none of them
+/docs
+**/*.md
+
+# The image files themselves
+Dockerfile
+docker-compose.yml
+.dockerignore

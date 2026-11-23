@@ -147,7 +147,7 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 	// The test lives in package handlers, so no seam has to be opened in the
 	// production code to do this.
 	deployer := &fakeTokenDeployer{db: db}
-	h := NewHandler().(*Handler)
+	h := NewHandler()
 	h.realEstateSvc = assetsService.NewService(deployer)
 	server.RegisterHandlers(g, h)
 
@@ -999,6 +999,13 @@ func TestRealEstateWriteEndpoints(t *testing.T) {
 			code, body := do("POST", "/assets/real-estates/"+itoa(draftID)+"/publish", mgr, "")
 			if code != http.StatusConflict {
 				t.Fatalf("want 409 got %d: %s", code, body)
+			}
+			var response server.APIResponse
+			if err := json.Unmarshal([]byte(body), &response); err != nil {
+				t.Fatal(err)
+			}
+			if response.MissingFields == nil || len(*response.MissingFields) != 9 {
+				t.Fatalf("want nine structured missing fields, got %s", body)
 			}
 			// issuer_id is absent from this list on purpose: since migration
 			// 000016 an asset cannot be created without one, so it can no
