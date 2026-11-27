@@ -154,6 +154,7 @@ state — this is verified (see below).
 | 000028 | Order pricing: the frozen amounts on `iss.issuance_orders`, `iss.issuance_order_fees`, `iss.issuance_order_payments`, `iss.issuance_allocations` dropped |
 | 000029 | `ass.real_estate_shares_config.max_shares_per_investor` — the per-investor cap |
 | 000030 | `iss.issuance_orders.expires_at` renamed `reservation_expires_at`: it is the end of a reservation, and `expires_at` stays free for an order validity (M4) |
+| 000031 | `iss.issuance_order_payments`: `MANUAL` and `ONCHAIN` payment modes, nullable `recorded_by_user_id`, and unique `tx_hash` |
 
 ## Migrations that refuse rather than guess
 
