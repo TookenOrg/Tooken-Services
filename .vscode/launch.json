@@ -2,10 +2,23 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "buildFlags": [
-                "-tags='dev'"
-            ],
+            // Local stack of docker-compose.yml: PostgreSQL on 5433, Anvil on 8555.
             "name": "Launch dev",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "${workspaceFolder}/main.go",
+            "preLaunchTask": "compose: postgres + evm",
+            "envFile": "${workspaceFolder}/.env.example",
+            "env": {
+                // Signs the sessions of this local setup only.
+                "JWT_SECRET": "local-vscode-launch-only-never-use-in-production"
+            },
+            "args": []
+        },
+        {
+            // Reads .env: whatever database and node it points to (Aiven, Sepolia).
+            "name": "Launch dev (Aiven + Sepolia)",
             "type": "go",
             "request": "launch",
             "mode": "auto",

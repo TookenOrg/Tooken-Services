@@ -12,9 +12,11 @@
 package handlers
 
 import (
+	"context"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -23,12 +25,14 @@ import (
 	"time"
 
 	"github.com/TookenOrg/tooken-services/internal/api/server"
+	authDb "github.com/TookenOrg/tooken-services/internal/auth/database"
 	authUtils "github.com/TookenOrg/tooken-services/internal/auth/utils"
 	"github.com/TookenOrg/tooken-services/internal/globals"
 	"github.com/TookenOrg/tooken-services/internal/middleware"
 	"github.com/TookenOrg/tooken-services/pkg/logger"
 	"github.com/gin-gonic/gin"
 	_ "github.com/lib/pq"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // authRouter serves the whole API behind the real middleware, on the database
@@ -414,6 +418,153 @@ func TestSignInCarriesTheRole(t *testing.T) {
 
 		if code, body := signIn(email, "Sup3r-secret!"); code != http.StatusInternalServerError {
 			t.Errorf("got %d %s, want 500", code, body)
+		}
+	})
+}
+
+func TestSignInUpgradesPasswordCost(t *testing.T) {
+	r, db := authRouter(t)
+
+	const (
+		email    = "rehash-probe@tooken.test"
+		password = "Sup3r-secret!"
+	)
+	t.Cleanup(func() {
+		_, _ = db.Exec(`DELETE FROM usr.users WHERE email = $1`, email)
+	})
+
+	signUpFresh(t, r, db, email)
+
+	signIn := func(pw string) (int, string) {
+		return send(r, http.MethodPost, "/auth/sign-in", "",
+			`{"email":"`+email+`","password":"`+pw+`"}`)
+	}
+
+	readStored := func(t *testing.T) (string, time.Time) {
+		t.Helper()
+		var hash string
+		var updatedAt time.Time
+		if err := db.QueryRow(
+			`SELECT password, updated_at FROM usr.users WHERE email = $1`, email,
+		).Scan(&hash, &updatedAt); err != nil {
+			t.Fatalf("read stored user: %v", err)
+		}
+		return hash, updatedAt
+	}
+
+	cost14Bytes, err := bcrypt.GenerateFromPassword([]byte(password), 14)
+	if err != nil {
+		t.Fatalf("GenerateFromPassword cost 14: %v", err)
+	}
+	cost14Hash := string(cost14Bytes)
+
+	var staleUpdatedAt time.Time
+	if err := db.QueryRow(`
+		UPDATE usr.users
+		SET password = $1,
+		    updated_at = now() - interval '1 day'
+		WHERE email = $2
+		RETURNING updated_at
+	`, cost14Hash, email).Scan(&staleUpdatedAt); err != nil {
+		t.Fatalf("seed cost-14 hash: %v", err)
+	}
+
+	t.Run("wrong password leaves the cost-14 hash untouched", func(t *testing.T) {
+		code, body := signIn("wrong-password")
+		if code != http.StatusUnauthorized {
+			t.Fatalf("got %d %s, want 401", code, body)
+		}
+		expectMessage(t, body)
+
+		gotHash, gotUpdatedAt := readStored(t)
+		if gotHash != cost14Hash {
+			t.Errorf("hash mutated on failed sign-in: got %q, want %q", gotHash, cost14Hash)
+		}
+		if !strings.HasPrefix(gotHash, "$2a$14$") {
+			t.Errorf("hash prefix: got %q, want $2a$14$", gotHash)
+		}
+		if !gotUpdatedAt.Equal(staleUpdatedAt) {
+			t.Errorf("updated_at moved on failed sign-in: got %s, want %s", gotUpdatedAt, staleUpdatedAt)
+		}
+	})
+
+	var upgradedHash string
+	t.Run("valid sign-in upgrades a cost-14 hash to PasswordCost", func(t *testing.T) {
+		code, body := signIn(password)
+		if code != http.StatusOK {
+			t.Fatalf("got %d %s, want 200", code, body)
+		}
+		decodeSession(t, body)
+
+		var gotUpdatedAt time.Time
+		upgradedHash, gotUpdatedAt = readStored(t)
+		cost, err := bcrypt.Cost([]byte(upgradedHash))
+		if err != nil {
+			t.Fatalf("bcrypt.Cost: %v", err)
+		}
+		if cost != authUtils.PasswordCost {
+			t.Errorf("stored cost = %d, want %d", cost, authUtils.PasswordCost)
+		}
+		if !authUtils.CheckPasswordHash(password, upgradedHash) {
+			t.Error("upgraded hash does not match password")
+		}
+		if !gotUpdatedAt.After(staleUpdatedAt) {
+			t.Errorf("updated_at = %s, want after %s", gotUpdatedAt, staleUpdatedAt)
+		}
+	})
+
+	t.Run("subsequent sign-in keeps the upgraded hash unchanged", func(t *testing.T) {
+		code, body := signIn(password)
+		if code != http.StatusOK {
+			t.Fatalf("got %d %s, want 200", code, body)
+		}
+		decodeSession(t, body)
+
+		gotHash, _ := readStored(t)
+		if gotHash != upgradedHash {
+			t.Errorf("hash rewritten when already at PasswordCost: got %q, want %q", gotHash, upgradedHash)
+		}
+	})
+
+	t.Run("valid sign-in upgrades a lower-cost hash to PasswordCost", func(t *testing.T) {
+		cost10Bytes, err := bcrypt.GenerateFromPassword([]byte(password), 10)
+		if err != nil {
+			t.Fatalf("GenerateFromPassword cost 10: %v", err)
+		}
+		var before time.Time
+		if err := db.QueryRow(`
+			UPDATE usr.users
+			SET password = $1,
+			    updated_at = now() - interval '1 day'
+			WHERE email = $2
+			RETURNING updated_at
+		`, string(cost10Bytes), email).Scan(&before); err != nil {
+			t.Fatalf("seed cost-10 hash: %v", err)
+		}
+
+		code, body := signIn(password)
+		if code != http.StatusOK {
+			t.Fatalf("got %d %s, want 200", code, body)
+		}
+		decodeSession(t, body)
+
+		gotHash, gotUpdatedAt := readStored(t)
+		cost, err := bcrypt.Cost([]byte(gotHash))
+		if err != nil {
+			t.Fatalf("bcrypt.Cost: %v", err)
+		}
+		if cost != authUtils.PasswordCost {
+			t.Errorf("stored cost = %d, want %d", cost, authUtils.PasswordCost)
+		}
+		if !gotUpdatedAt.After(before) {
+			t.Errorf("updated_at = %s, want after %s", gotUpdatedAt, before)
+		}
+	})
+
+	t.Run("UpdateUserPassword wraps sql.ErrNoRows when no row matches", func(t *testing.T) {
+		err := authDb.UpdateUserPassword(context.Background(), -1, upgradedHash)
+		if !errors.Is(err, sql.ErrNoRows) {
+			t.Errorf("UpdateUserPassword(-1) = %v, want wrapped sql.ErrNoRows", err)
 		}
 	})
 }
