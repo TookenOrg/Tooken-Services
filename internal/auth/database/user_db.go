@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"time"
 
@@ -50,4 +51,29 @@ func GetUserByEmail(ctx context.Context, email string) (user UserDTO, err error)
 	}
 
 	return
+}
+
+// UpdateUserPassword replaces the stored hash and bumps updated_at.
+// Returns an error wrapping sql.ErrNoRows when no row has this id.
+func UpdateUserPassword(ctx context.Context, userID int, hashedPassword string) error {
+	query := `
+        UPDATE usr.users
+        SET password = $1, updated_at = now()
+        WHERE id = $2
+    `
+
+	res, err := globals.DB.ExecContext(ctx, query, hashedPassword, userID)
+	if err != nil {
+		return fmt.Errorf("failed to update user password: %w", err)
+	}
+
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to check updated user rows: %w", err)
+	}
+	if rowsAffected == 0 {
+		return fmt.Errorf("failed to update user password: %w", sql.ErrNoRows)
+	}
+
+	return nil
 }
